@@ -19,6 +19,12 @@ html, body {
   display: none;
 }
 
+@theme {
+  --color-solidOne: #ac2c28;
+  --color-solidTwo: #fd872f;
+}
+
+
 @layer components {
   .max-padd-container{
     @apply mx-auto max-w-[1440px] px-4 lg:px-12;

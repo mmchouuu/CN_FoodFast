@@ -1,7 +1,8 @@
 /** @type {import('tailwindcss').Config} */
 export default {
   content: [
-    "./App.jsx",
+    // "./App.jsx",
+    "./index.html",
     "./src/**/*.{js,ts,jsx,tsx}",
   ],
   theme: {
@@ -9,7 +10,7 @@ export default {
       colors: {
         primary: "#fff4f1",
         solid: "#dc583e",      
-        solidOne: "#ac2c28",
+        solidOne: "#ac2c28",  
         solidTwo: "#fd872f",
         tertiary: "#d95942",
         textColor: "#404040",
@@ -19,3 +20,4 @@ export default {
   },
   plugins: [],
 }
+

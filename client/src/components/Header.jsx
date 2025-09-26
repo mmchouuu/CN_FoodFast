@@ -30,7 +30,7 @@ const Header = () => {
               className="hidden sm:block font-extrabold text-xs relative left-1.5 tracking-[10px] uppercase"
               style={{ color: "#dc583e" }}
             >
-              KING
+              Queen
             </span>
           </div>
         </Link>
