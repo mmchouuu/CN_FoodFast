@@ -1,7 +1,7 @@
 import { dummyProducts } from '../assets/data';
 import { useNavigate } from 'react-router-dom';
 import React, { createContext, useState, useEffect, useContext } from 'react'
-
+import { useUser } from "@clerk/clerk-react";
 
 
 const AppContext = createContext()
@@ -12,6 +12,8 @@ export const AppContextProvider = ({ children }) => {
     const currency = import.meta.env.VITE_CURRENCY
     const delivery_charges = 10 // 10 dollors
     const navigate = useNavigate()
+    // Clerk
+    const {user} = useUser()
 
     const fetchProducts = () => {
         setProducts(dummyProducts);
@@ -22,6 +24,7 @@ export const AppContextProvider = ({ children }) => {
     }, [])
 
     const value = {
+        user,
         products,
         fetchProducts,
         currency,

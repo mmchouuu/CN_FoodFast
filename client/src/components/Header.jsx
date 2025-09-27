@@ -4,13 +4,17 @@ import { assets } from '../assets/data';
 import { useAppContext } from '../context/AppContext';
 import Navbar from './navbar';
 import {useClerk, UserButton} from "@clerk/clerk-react"
+import { useClerk, UserButton } from "@clerk/clerk-react";
+import { useAppContext } from '../context/AppContext';
+import { AiOutlineFileText } from "react-icons/ai";
 
 const Header = () => {
   const [menuOpened, setMenuOpened] = useState(false);
   const location = useLocation(); // Lấy path hiện tại
-  const { navigate, user } = useAppContext();
-
+  const { navigate, user } = useAppContext() || {};
+  const { openSignIn } = useClerk();
   const toggleMenu = () => setMenuOpened(prev => !prev);
+  const OrdersIcon = () => <AiOutlineFileText className="w-4 h-4" />;
 
   // Kiểm tra menu đang active
   const isActive = (path) => location.pathname === path;
@@ -23,16 +27,18 @@ const Header = () => {
   ];
 
   return (
-    <header className="absolute top-0 left-0 right-0 z-50 py-3">
+    <header className="absolute top-0 left-0 right-0 z-50 py-3 bg-white shadow-sm">
       <div className="max-padd-container flex items-center justify-between">
         {/* LOGO */}
+        
         <Link to="/" className="flex items-center gap-2">
           <img src={assets.logoImg} alt="logo" className="h-12 w-12" />
           <div className="flex flex-col">
-            <span className="hidden sm:block font-extrabold text-3xl relative top-1 left-1">Tasty</span>
+            <span className="hidden sm:block font-extrabold text-3xl relative top-1 left-1">
+              Tasty
+            </span>
             <span
-              className="hidden sm:block font-extrabold text-xs relative left-1.5 tracking-[10px] uppercase"
-              style={{ color: "#dc583e" }}
+              className="hidden sm:block font-extrabold text-xs relative left-1.5 tracking-[10px] uppercase text-orange-500"
             >
               Queen
             </span>
@@ -65,7 +71,7 @@ const Header = () => {
 
           {/* MENU TOGGLE */}
           {menuOpened && (
-            <div className="absolute top-16 right-6 w-40 shadow-md rounded-lg flex flex-col gap-4 p-4 z-50">
+            <div className="absolute top-16 right-6 w-40 bg-white shadow-md rounded-lg flex flex-col gap-4 p-4 z-50">
               {menuItems.map(item => (
                 <Link
                   key={item.path}
@@ -79,23 +85,50 @@ const Header = () => {
             </div>
           )}
 
-          {/* CART  */} 
-          <div onClick={()=> navigate('/cart')} className="relative cursor-pointer"> 
+          {/* CART */}
+          <div className="relative cursor-pointer">
             <img src={assets.cartAdded} alt="cart" className="p-2 rounded-full" />
             <span
-              className="absolute -top-2 -right-2 w-5 h-5 text-xs font-bold flex items-center justify-center rounded-full text-white"
-              style={{ backgroundColor: "#dc583e" }}
+              className="absolute -top-2 -right-2 w-5 h-5 text-xs font-bold flex items-center justify-center rounded-full text-white bg-orange-500"
             >
               0
             </span> 
           </div>
           
 
-          {/* LOGIN */}
-          <button className="btn-solid flex items-center gap-2">
-            Login
-            <img src={assets.user} alt="user" className="w-5 invert" />
-          </button>
+          {/* USER PROFILE */}
+          <div>
+            {user ? (
+              <UserButton
+                appearance={{
+                  elements: {
+                    userButtonAvatarBox: {
+                      width: "42px",
+                      height: "42px",
+                    },
+                  },
+                }}
+              >
+                <UserButton.MenuItems>
+                  <UserButton.Action
+                    label="My Orders"
+                    labelIcon={<OrdersIcon />}
+                    onClick={() => navigate("/my-orders")}
+                  />
+                </UserButton.MenuItems>
+              </UserButton>
+
+
+            ) : (
+              <button
+                className="btn-solid flex items-center gap-2"
+                onClick={() => openSignIn()}
+              >
+                Login
+                <img src={assets.user} alt="user" className="w-5 invert" />
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </header>
