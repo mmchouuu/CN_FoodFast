@@ -22,6 +22,12 @@ html, body {
 @theme {
   --color-solidOne: #ac2c28;
   --color-solidTwo: #fd872f;
+  --color-primary: #fff4f1; 
+  --color-solid: #dc583e; 
+  --color-tertiary: #d95942; 
+  --color-textColor: #404040; 
+  --color-gray-50: #7b7b7b;
+
 }
 
 

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import Title from './Title'
-import { dummyProducts } from '../assets/data';
+// import { dummyProducts } from '../assets/data';
 import Item from './Item';
 // Import Swiper React components
 import { Swiper, SwiperSlide } from 'swiper/react';
@@ -8,14 +8,16 @@ import { Swiper, SwiperSlide } from 'swiper/react';
 import 'swiper/css';
 // import required modules
 import { Autoplay } from 'swiper/modules';
+import { useAppContext } from '../context/AppContext';
 
 const NewArrivals = () => {
   const [newArrivals, setNewArrivals] = useState([])
+  const {products} = useAppContext()
 
   useEffect(()=>{
-    const data = dummyProducts.filter((item)=> item.inStock).slice(0, 10)
+    const data = products.filter((item)=> item.inStock).slice(0, 5)
     setNewArrivals(data)
-  }, [dummyProducts])
+  }, [products])
 
   return (
     <section className='max-padd-container py-22 xl:py-28 bg-white'>
