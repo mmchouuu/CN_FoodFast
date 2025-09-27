@@ -15,7 +15,7 @@ const NewArrivals = () => {
   const {products} = useAppContext()
 
   useEffect(()=>{
-    const data = products.filter((item)=> item.inStock).slice(0, 5)
+    const data = products.filter((item)=> item.inStock).slice(0, 7)
     setNewArrivals(data)
   }, [products])
 

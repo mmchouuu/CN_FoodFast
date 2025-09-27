@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { assets } from '../assets/data';
+import { useAppContext } from '../context/AppContext';
 
 const Header = () => {
   const [menuOpened, setMenuOpened] = useState(false);
   const location = useLocation(); // Lấy path hiện tại
+  const { navigate, user } = useAppContext();
 
   const toggleMenu = () => setMenuOpened(prev => !prev);
 
@@ -75,16 +77,17 @@ const Header = () => {
             </div>
           )}
 
-          {/* CART  */}
-          <div className="relative">
+          {/* CART  */} 
+          <div onClick={()=> navigate('/cart')} className="relative cursor-pointer"> 
             <img src={assets.cartAdded} alt="cart" className="p-2 rounded-full" />
             <span
               className="absolute -top-2 -right-2 w-5 h-5 text-xs font-bold flex items-center justify-center rounded-full text-white"
               style={{ backgroundColor: "#dc583e" }}
             >
               0
-            </span>
+            </span> 
           </div>
+          
 
           {/* LOGIN */}
           <button className="btn-solid flex items-center gap-2">
