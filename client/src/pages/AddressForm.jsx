@@ -1,6 +1,6 @@
 import { useAppContext } from '../context/AppContext'
 import React, { useState, useEffect } from 'react';
-// import CartTotal from '../pages/CartTotal';
+import CartTotal from '../components/CartTotal';
 import Title from '../components/Title'
 
 const AddressForm = () => {
@@ -25,9 +25,9 @@ const AddressForm = () => {
   }
 
   useEffect(() => {
-    // if (!user) {
-    //   navigate('/cart')
-    // }
+    if (!user) {
+      navigate('/cart')
+    }
   }, [user, navigate])
 
   return (
@@ -84,7 +84,7 @@ const AddressForm = () => {
         {/* Right Side */}
         <div className='flex flex-1 flex-col'>
           <div className='max-w-[379px] w-full bg-white p-5 py-10 max-md:mt-16 rounded-xl'>
-            {/* <CartTotal /> */}
+            <CartTotal />
           </div>
         </div>
       </div>

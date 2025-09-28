@@ -104,7 +104,7 @@ const CartTotal = () => {
           : getCartAmount() + delivery_charges + (getCartAmount() * 2)/100}</p>
         </div>
       </div>
-      <button className="btn-solid w-full mt-8 !rounded-md my-2">Process to Order</button>
+      <button onClick="" className="btn-solid w-full mt-8 !rounded-md my-2">Process to Order</button>
     </div>
   )
 };
