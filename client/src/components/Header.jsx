@@ -87,54 +87,54 @@ const Header = () => {
             </div>
           )}
 
-        {/* CART */}
-        <div onClick={() => navigate('/cart')} className="relative cursor-pointer">
-          <img src={assets.cartAdded} alt="cart" className="p-2 rounded-full" />
-          <span
-            className="absolute -top-2 -right-2 w-5 h-5 text-xs font-bold flex items-center justify-center rounded-full text-white"
-            style={{ backgroundColor: "#dc583e" }}
-          >
-            {getCartCount()}
-          </span>
-        </div>
+          {/* CART */}
+          <div onClick={() => navigate('/cart')} className="relative cursor-pointer">
+            <img src={assets.cartAdded} alt="cart" className="p-2 rounded-full" />
+            <span
+              className="absolute -top-2 -right-2 w-5 h-5 text-xs font-bold flex items-center justify-center rounded-full text-white"
+              style={{ backgroundColor: "#dc583e" }}
+            >
+              {getCartCount()}
+            </span>
+          </div>
 
 
-        {/* USER PROFILE */}
-        <div>
-          {user ? (
-            <UserButton
-              appearance={{
-                elements: {
-                  userButtonAvatarBox: {
-                    width: "42px",
-                    height: "42px",
+          {/* USER PROFILE */}
+          <div>
+            {user ? (
+              <UserButton
+                appearance={{
+                  elements: {
+                    userButtonAvatarBox: {
+                      width: "42px",
+                      height: "42px",
+                    },
                   },
-                },
-              }}
-            >
-              <UserButton.MenuItems>
-                <UserButton.Action
-                  label="My Orders"
-                  labelIcon={<OrdersIcon />}
-                  onClick={() => navigate("/my-orders")}
-                />
-              </UserButton.MenuItems>
-            </UserButton>
+                }}
+              >
+                <UserButton.MenuItems>
+                  <UserButton.Action
+                    label="My Orders"
+                    labelIcon={<OrdersIcon />}
+                    onClick={() => navigate("/my-orders")}
+                  />
+                </UserButton.MenuItems>
+              </UserButton>
 
 
-          ) : (
-            <button
-              className="btn-solid flex items-center gap-2"
-              onClick={() => openSignIn()}
-            >
-              Login
-              <img src={assets.user} alt="user" className="w-5 invert" />
-            </button>
-          )}
+            ) : (
+              <button
+                className="btn-solid flex items-center gap-2"
+                onClick={() => openSignIn()}
+              >
+                Login
+                <img src={assets.user} alt="user" className="w-5 invert" />
+              </button>
+            )}
+          </div>
         </div>
       </div>
-    </div>
-    </header >
+    </header>
   );
 };
 
