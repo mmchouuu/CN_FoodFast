@@ -3,9 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { assets } from '../assets/data';
 import { useAppContext } from '../context/AppContext';
 import Navbar from './navbar';
-import {useClerk, UserButton} from "@clerk/clerk-react"
-import { useClerk, UserButton } from "@clerk/clerk-react";
-import { useAppContext } from '../context/AppContext';
+import {useClerk, UserButton} from "@clerk/clerk-react";
 import { AiOutlineFileText } from "react-icons/ai";
 
 const Header = () => {
