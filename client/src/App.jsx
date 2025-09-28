@@ -1,27 +1,20 @@
-import React from 'react';
-import { Route, Routes, useLocation } from "react-router-dom";
-
-import Home from './pages/Home';
-import Menu from './pages/Menu';
-import Blog from './pages/Blog';
-import Contact from './pages/Contact';
-import Cart from './pages/Cart';
-import AddressForm from './pages/AddressForm';
-import MyOrders from './pages/MyOrders';
-import AccountPage from "./pages/AuthForm";
-import PaymentSettings from "./pages/PaymentSettings";
-
-import Dashboard from './pages/owner/Dashboard';
-import AddProduct from './pages/owner/AddProduct';
-import ListProduct from './pages/owner/ListProduct';
-import Sidebar from './components/owner/Sidebar';
-
-import Header from './components/Header';
-import Footer from './components/Footer';
-
-import { Toaster } from "react-hot-toast";
-import { useAppContext } from './context/AppContext';
-
+import React from 'react'
+import { Route, Routes, useLocation } from "react-router-dom"
+import Home from './pages/Home'
+import Menu from './pages/Menu'
+import Blog from './pages/Blog'
+import Contact from './pages/Contact'
+import Cart from './pages/Cart'
+import AddressForm from './pages/AddressForm'
+import MyOrders from './pages/MyOrders'
+import Header from './components/Header'
+import Footer from './components/Footer'
+import { Toaster } from "react-hot-toast"
+import Dashboard from './pages/owner/Dashboard'
+import AddProduct from './pages/owner/AddProduct'
+import ListProduct from './pages/owner/ListProduct'
+import Sidebar from './components/owner/Sidebar'
+import { useAppContext } from './context/AppContext'
 
 const App = () => {
   const isOwnerPath = useLocation().pathname.includes('owner')
