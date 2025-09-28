@@ -6,7 +6,7 @@ import { useAppContext } from '../context/AppContext';
 const Header = () => {
   const [menuOpened, setMenuOpened] = useState(false);
   const location = useLocation(); // Lấy path hiện tại
-  const { navigate, user } = useAppContext();
+  const { navigate, user, getCartCount } = useAppContext();
 
   const toggleMenu = () => setMenuOpened(prev => !prev);
 
@@ -84,7 +84,7 @@ const Header = () => {
               className="absolute -top-2 -right-2 w-5 h-5 text-xs font-bold flex items-center justify-center rounded-full text-white"
               style={{ backgroundColor: "#dc583e" }}
             >
-              0
+              {getCartCount()}
             </span> 
           </div>
           

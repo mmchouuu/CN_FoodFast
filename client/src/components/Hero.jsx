@@ -18,7 +18,7 @@ const Hero = () => {
                         {/* <span style={{ color: "#ac2c28" }}>Get More</span>
                         <span style={{ color: "#fd872f" }}>for Less - 25% Off!</span> */}
                        <span className="text-solidOne">Get More</span><span
-                       className="text-solidTwo">for Less - 25% Off!</span>
+                       className="text-solidTwo"> for Less - 25% Off!</span>
                     </h2>
                     <h1 className='font-[800] leading-none'>
                         on Burger & Tacos

@@ -9,11 +9,13 @@ import AddressForm from './pages/AddressForm'
 import MyOrders from './pages/MyOrders'
 import Header from './components/Header'
 import Footer from './components/Footer'
+import {Toaster} from "react-hot-toast"
 
 const App = () => {
   return (
     <main className='overflow-x-hidden text-textColor'>
       <Header/>
+      <Toaster position='bottom-right' />
       <Routes>
         <Route path='/' element={<Home />}/>
         <Route path='/menu' element={<Menu />}/>

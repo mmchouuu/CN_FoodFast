@@ -6,7 +6,7 @@ import SearchInput from '../components/SearchInput'
 import { useSearchParams } from 'react-router-dom'
 
 const Menu = () => {
- const {products, searchQuery } = useAppContext()
+ const {products, searchQuery} = useAppContext()
  const [category, setCategory ] = useState([])
  const [type, setType ] = useState([])
  const [selectedSort, setSelectedSort] = useState("relevant")
@@ -67,7 +67,7 @@ const totalPages = 7
             <h5 className='mb-4'>Types</h5>
             <div className='flex flex-col gap-2 text-sm font-light'>
               {availableTypes.map((typ)=> (
-                <label key={type} className='flex gap-2 text-sm font-medium text-gray-30'>
+                <label key={typ} className='flex gap-2 text-sm font-medium text-gray-30'>
                   <input onChange={(e)=> toggleFilter(e.target.value, setType)} type="checkbox" value={typ} checked={type.includes(typ)} className='w-3'/>
                   {typ}
                 </label>

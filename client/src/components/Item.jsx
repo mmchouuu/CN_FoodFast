@@ -4,8 +4,8 @@ import { useAppContext } from '../context/AppContext';
 
 
 const Item = ({ product }) => {
+    const {currency, addToCart} = useAppContext()
     const [size, setSize] = useState(product.sizes[0]) // Default size (first in the array)
-    const {curency} = useAppContext()
 
     return (
         <div className='relative mt-24 graoup'>
@@ -65,7 +65,7 @@ const Item = ({ product }) => {
                             </button>
                         ))}
                     </div>
-                    <h4 className="text-solidOne">{curency}{product.price[size]}</h4>
+                    <h4 className="text-solidOne">{currency}{product.price[size]}</h4>
                 </div>
                 {/* Order info & Button */}
                 <div className="flexBetween pl-1 text-[13px] font-semibold pt-3">
@@ -81,7 +81,7 @@ const Item = ({ product }) => {
                         </div>
                     </div>
                     <div className="flex flex-col gap-1">
-                        <button className="btn-solid rounded p-3">
+                        <button onClick={()=> addToCart(product._id, size)} className="btn-solid rounded p-3">
                             <img src={assets.cartAdd} alt="" width={20} />
                         </button>
                     </div>
