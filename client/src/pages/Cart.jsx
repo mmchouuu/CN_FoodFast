@@ -59,10 +59,10 @@ const Cart = () => {
             const product = products.find((product)=> product._id === item._id)
             const quantity = cartItems[item._id][item.size]
             return(
-              <div key={i} className="grid grid-cols-[6fr_2fr_1ft] font-center bg-white p-2 rounded-xl">
+              <div key={i} className="grid grid-cols-[6fr_2fr_1fr] font-center bg-white p-2 rounded-xl">
                 <div className="flex items-center md:gap-6 gap-3">
                   <div className="flex bg-primary rounded-xl">
-                    <img src={product.images[0]} alt="" />
+                    <img src={product.images[0]} alt="" className="w-29 h-29 object-cover rounded-lg" />
                   </div>
                   <div>
                     <h5 className="hidden sm:block line-clamp-1">{product.title}</h5>
@@ -85,9 +85,9 @@ const Cart = () => {
                     </div>
                   </div>
                 </div>
-                <div className="text-center text-[17px] font-semibold">{currency}{product.price[item.size] * quantity}.000</div>
+                <div className="flex items-center justify-center text-[17px] font-semibold">{currency}{product.price[item.size] * quantity}.000</div>
                 <button onClick={()=>updateQuantity(item._id, item.size, 0)}
-                className="cursor-pointer mx-auto">'
+                className="cursor-pointer mx-auto">
                   <img src={assets.cartRemove} alt="" width={22} />
                 </button>
               </div>
