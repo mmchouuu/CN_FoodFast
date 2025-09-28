@@ -6,11 +6,14 @@ import Navbar from './navbar';
 import { useClerk, UserButton } from "@clerk/clerk-react";
 import { AiOutlineFileText } from "react-icons/ai";
 
+
 const Header = () => {
   const [menuOpened, setMenuOpened] = useState(false);
   const location = useLocation(); // Lấy path hiện tại
   const { navigate, user, getCartCount } = useAppContext() || {};
   const { openSignIn } = useClerk();
+
+  const isHomePage = useLocation().pathname.endsWith('/')
 
   const toggleMenu = () => setMenuOpened(prev => !prev);
   const OrdersIcon = () => <AiOutlineFileText className="w-4 h-4" />;
@@ -26,7 +29,7 @@ const Header = () => {
   ];
 
   return (
-    <header className="absolute top-0 left-0 right-0 z-50 py-3 bg-white shadow-sm">
+    <header className={`absolute top-0 left-0 right-0 z-50 py-3 ${!isHomePage && "bg-white"}`}>
       <div className="max-padd-container flex items-center justify-between">
         {/* LOGO */}
 
