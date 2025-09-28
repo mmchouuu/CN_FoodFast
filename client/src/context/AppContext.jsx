@@ -10,6 +10,7 @@ const AppContext = createContext()
 export const AppContextProvider = ({ children }) => {
     const [products, setProducts] = useState([]);
     const [method, setMethod] = useState("COD")
+    const [isOwner, setIsOwner] = useState(true) // Temporary
     const [searchQuery, setSearchQuery] = useState("")
     const [cartItems, setCartItems] = useState({})
     const currency = import.meta.env.VITE_CURRENCY
@@ -84,7 +85,9 @@ export const AppContextProvider = ({ children }) => {
         updateQuantity,
         getCartAmount,
         method,
-        setMethod
+        setMethod,
+        isOwner,
+        setIsOwner,
     };
 
     return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
