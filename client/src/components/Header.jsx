@@ -225,11 +225,13 @@ const Header = () => {
           {/* CART */}
           <div onClick={() => navigate('/cart')} className="relative cursor-pointer">
             <img src={assets.cartAdded} alt="cart" className="p-2 rounded-full" />
-            <span className="absolute -top-2 -right-2 w-5 h-5 text-xs font-bold flex items-center justify-center rounded-full text-white" style={{ backgroundColor: "#dc583e" }}>
+            <span
+              className="absolute -top-2 -right-2 w-5 h-5 text-xs font-bold flex items-center justify-center rounded-full text-white"
+              style={{ backgroundColor: "#dc583e" }}
+            >
               {getCartCount()}
             </span>
           </div>
-
           {/* USER PROFILE */}
           <div className="relative">
             {isAuthenticated && user ? (
@@ -276,7 +278,6 @@ const Header = () => {
               </>
             )}
           </div>
-
         </div>
       </div>
     </header>

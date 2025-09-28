@@ -34,8 +34,8 @@ const CartTotal = () => {
           <h4 className="mb-5">Where to ship your order?</h4>
           <div className="relative flex justify-between items-start mt-2">
             <p>
-              {selectedAddress ? `${selectedAddress.street}, ${selectedAddress.city},
-              ${selectedAddress.state}, ${selectedAddress.country}`
+              {selectedAddress ? `{selectedAddress.street}, {selectedAddress.city},
+              {selectedAddress.state}, {selectedAddress.country}`
               : "No address found"}
             </p>
             <button onClick={()=> setShowAddress(!showAddress)} 
