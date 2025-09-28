@@ -3,14 +3,16 @@ import { Link, useLocation } from 'react-router-dom';
 import { assets } from '../assets/data';
 import { useAppContext } from '../context/AppContext';
 import Navbar from './navbar';
-import {useClerk, UserButton} from "@clerk/clerk-react";
+import { useClerk, UserButton } from "@clerk/clerk-react";
 import { AiOutlineFileText } from "react-icons/ai";
+
 
 const Header = () => {
   const [menuOpened, setMenuOpened] = useState(false);
   const location = useLocation(); // Lấy path hiện tại
-  const { navigate, user } = useAppContext() || {};
+  const { navigate, user, getCartCount } = useAppContext() || {};
   const { openSignIn } = useClerk();
+
   const toggleMenu = () => setMenuOpened(prev => !prev);
   const OrdersIcon = () => <AiOutlineFileText className="w-4 h-4" />;
 
@@ -28,7 +30,7 @@ const Header = () => {
     <header className="absolute top-0 left-0 right-0 z-50 py-3 bg-white shadow-sm">
       <div className="max-padd-container flex items-center justify-between">
         {/* LOGO */}
-        
+
         <Link to="/" className="flex items-center gap-2">
           <img src={assets.logoImg} alt="logo" className="h-12 w-12" />
           <div className="flex flex-col">
@@ -83,53 +85,54 @@ const Header = () => {
             </div>
           )}
 
-          {/* CART */}
-          <div className="relative cursor-pointer">
-            <img src={assets.cartAdded} alt="cart" className="p-2 rounded-full" />
-            <span
-              className="absolute -top-2 -right-2 w-5 h-5 text-xs font-bold flex items-center justify-center rounded-full text-white bg-orange-500"
-            >
-              0
-            </span> 
-          </div>
-          
+        {/* CART */}
+        <div onClick={() => navigate('/cart')} className="relative cursor-pointer">
+          <img src={assets.cartAdded} alt="cart" className="p-2 rounded-full" />
+          <span
+            className="absolute -top-2 -right-2 w-5 h-5 text-xs font-bold flex items-center justify-center rounded-full text-white"
+            style={{ backgroundColor: "#dc583e" }}
+          >
+            {getCartCount()}
+          </span>
+        </div>
 
-          {/* USER PROFILE */}
-          <div>
-            {user ? (
-              <UserButton
-                appearance={{
-                  elements: {
-                    userButtonAvatarBox: {
-                      width: "42px",
-                      height: "42px",
-                    },
+
+        {/* USER PROFILE */}
+        <div>
+          {user ? (
+            <UserButton
+              appearance={{
+                elements: {
+                  userButtonAvatarBox: {
+                    width: "42px",
+                    height: "42px",
                   },
-                }}
-              >
-                <UserButton.MenuItems>
-                  <UserButton.Action
-                    label="My Orders"
-                    labelIcon={<OrdersIcon />}
-                    onClick={() => navigate("/my-orders")}
-                  />
-                </UserButton.MenuItems>
-              </UserButton>
+                },
+              }}
+            >
+              <UserButton.MenuItems>
+                <UserButton.Action
+                  label="My Orders"
+                  labelIcon={<OrdersIcon />}
+                  onClick={() => navigate("/my-orders")}
+                />
+              </UserButton.MenuItems>
+            </UserButton>
 
 
-            ) : (
-              <button
-                className="btn-solid flex items-center gap-2"
-                onClick={() => openSignIn()}
-              >
-                Login
-                <img src={assets.user} alt="user" className="w-5 invert" />
-              </button>
-            )}
-          </div>
+          ) : (
+            <button
+              className="btn-solid flex items-center gap-2"
+              onClick={() => openSignIn()}
+            >
+              Login
+              <img src={assets.user} alt="user" className="w-5 invert" />
+            </button>
+          )}
         </div>
       </div>
-    </header>
+    </div>
+    </header >
   );
 };
 
