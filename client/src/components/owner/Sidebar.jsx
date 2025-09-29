@@ -10,7 +10,12 @@ const Sidebar = () => {
     const navItems = [
         {
             path: "/owner",
-            label: "Dashboard",
+            label: "Statistics",
+            icon: assets.graph,
+        },
+        {
+            path: "/owner/orders",
+            label: "Order",
             icon: assets.dashboard,
         },
         {
@@ -22,6 +27,17 @@ const Sidebar = () => {
             path: "/owner/list-product",
             label: "List product",
             icon: assets.list,
+        },
+
+        {
+            path: "/owner/users",
+            label: "User Accounts",
+            icon: assets.user,
+        },
+        {
+            path: "/owner/admins",
+            label: "Admin Accounts",
+            icon: assets.shield || assets.sliders,
         },
     ]
 
