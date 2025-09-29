@@ -123,7 +123,7 @@ const Dashboard = () => {
                 <select value={order.status} className="text-sm font-semibold p-1 ring-1
                 ring-slate-900/5 rounded max-w-36 bg-primary">
                   <option value="Order Placed">Order Placed</option>
-                  <option value="Paking">Paking</option>
+                  <option value="Packing">Packing</option>
                   <option value="Shipping">Shipping</option>
                   <option value="Out for delivery">Out for delivery </option>
                   <option value="Delivered">Delivered</option>

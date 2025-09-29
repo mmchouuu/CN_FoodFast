@@ -10,11 +10,14 @@ import MyOrders from './pages/MyOrders'
 import Header from './components/Header'
 import Footer from './components/Footer'
 import { Toaster } from "react-hot-toast"
-import Dashboard from './pages/owner/Dashboard'
+import Orders from './pages/owner/orders'
 import AddProduct from './pages/owner/AddProduct'
 import ListProduct from './pages/owner/ListProduct'
 import Sidebar from './components/owner/Sidebar'
 import { useAppContext } from './context/AppContext'
+import Statistics from './pages/owner/Statistics'
+import UserAccounts from './pages/owner/UserAccounts'
+import AdminAccounts from './pages/owner/AdminAccounts'
 
 const App = () => {
   const isOwnerPath = useLocation().pathname.includes('owner')
@@ -35,10 +38,12 @@ const App = () => {
         <Route path='/my-orders' element={<MyOrders />} />
         Owner routes
         <Route path='/owner' element={<Sidebar />}>
-          <Route index element={<Dashboard />} />
+          <Route index element={<Statistics />} />
           <Route path='/owner/add-product' element={<AddProduct />} />
           <Route path='/owner/list-product' element={<ListProduct />} />
-
+          <Route path='/owner/orders' element={<Orders />} />
+          <Route path='/owner/users' element={<UserAccounts />} />
+          <Route path='/owner/admins' element={<AdminAccounts />} />
         </Route>
       </Routes>
       {!isOwnerPath && <Footer />}
