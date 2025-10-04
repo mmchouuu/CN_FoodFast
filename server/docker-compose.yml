@@ -1,0 +1,165 @@
+services:
+  # API Gateway
+  api-gateway:
+    build: ./api-gateway
+    env_file: ./api-gateway/.env
+    ports:
+      - "8080:8080"
+    depends_on:
+      - user-service
+      - product-service
+      - order-service
+      - payment-service
+    networks:
+      - backend_net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # User Service
+  user-service:
+    build: ./user-service
+    env_file: ./user-service/.env
+    ports:
+      - "3001:3001"
+    depends_on:
+      userdb:
+        condition: service_healthy
+    networks:
+      - backend_net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3001/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Product Service
+  product-service:
+    build: ./product-service
+    env_file: ./product-service/.env
+    ports:
+      - "3002:3002"
+    depends_on:
+      productdb:
+        condition: service_healthy
+    networks:
+      - backend_net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3002/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Order Service
+  order-service:
+    build: ./order-service
+    env_file: ./order-service/.env
+    ports:
+      - "3003:3003"
+    depends_on:
+      orderdb:
+        condition: service_healthy
+    networks:
+      - backend_net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3003/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Payment Service
+  payment-service:
+    build: ./payment-service
+    env_file: ./payment-service/.env
+    ports:
+      - "3004:3004"
+    depends_on:
+      paymentdb:
+        condition: service_healthy
+    networks:
+      - backend_net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3004/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # PostgreSQL Databases
+  userdb:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 123
+      POSTGRES_DB: userdb
+    volumes:
+      - ./db/userdb/users_init.sql:/docker-entrypoint-initdb.d/1_users.sql:ro
+    ports:
+      - "5433:5432"
+    networks:
+      - backend_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d userdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  productdb:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 123
+      POSTGRES_DB: productdb
+    volumes:
+      - ./db/productdb/products_init.sql:/docker-entrypoint-initdb.d/1_products.sql:ro
+    ports:
+      - "5434:5432"
+    networks:
+      - backend_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d productdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  orderdb:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 123
+      POSTGRES_DB: orderdb
+    volumes:
+      - ./db/orderdb/orders_init.sql:/docker-entrypoint-initdb.d/1_orders.sql:ro
+    ports:
+      - "5435:5432"
+    networks:
+      - backend_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d orderdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  paymentdb:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 123
+      POSTGRES_DB: paymentdb
+    volumes:
+      - ./db/paymentdb/payments_init.sql:/docker-entrypoint-initdb.d/1_payments.sql:ro
+    ports:
+      - "5436:5432"
+    networks:
+      - backend_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d paymentdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+# Docker network
+networks:
+  backend_net:
+    driver: bridge
