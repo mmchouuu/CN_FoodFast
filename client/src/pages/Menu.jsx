@@ -63,7 +63,7 @@ const totalPages = 7
               ))}
             </div>
           </div>
-          <div className='pl-5 py-3 mt-4 bg-primary rounded-xl'>
+          {/* <div className='pl-5 py-3 mt-4 bg-primary rounded-xl'>
             <h5 className='mb-4'>Types</h5>
             <div className='flex flex-col gap-2 text-sm font-light'>
               {availableTypes.map((typ)=> (
@@ -73,7 +73,7 @@ const totalPages = 7
                 </label>
               ))}
             </div>
-          </div>
+          </div> */}
         </div>
         {/*Filtered Products - Right Side */}
         <div className='max-sm:px-10 sm:pr-10 bg-white px-4 rounded-1-xl my-4'>

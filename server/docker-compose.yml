@@ -1,0 +1,400 @@
+# version: "3.9"
+
+# services:
+#   # ===================== DATABASES =====================
+#   user-db:
+#     image: postgres:16
+#     container_name: user-db
+#     environment:
+#       POSTGRES_USER: user
+#       POSTGRES_PASSWORD: user123
+#       POSTGRES_DB: users_db
+#     ports:
+#       - "5433:5432"
+#     volumes:
+#       - user_data:/var/lib/postgresql/data 
+#       - ./services/user/init:/docker-entrypoint-initdb.d
+#       # - ./services/user/init/users_init.sql:/docker-entrypoint-initdb.d/1_users_init.sql
+#       # - ./services/user/init/seed_users.sql:/docker-entrypoint-initdb.d/2_seed_users.sql
+
+#   product-db:
+#     image: postgres:16
+#     container_name: product-db
+#     environment:
+#       POSTGRES_USER: product
+#       POSTGRES_PASSWORD: product123
+#       POSTGRES_DB: products_db
+#     ports:
+#       - "5434:5432"
+#     volumes:
+#       - product_data:/var/lib/postgresql/data
+#       - ./services/product/init:/docker-entrypoint-initdb.d
+#       # - ./services/product/init/products_init.sql:/docker-entrypoint-initdb.d/1_products_init.sql
+#       # - ./services/product/init/seed_products.sql:/docker-entrypoint-initdb.d/2_seed_products.sql
+
+#   order-db:
+#     image: postgres:16
+#     container_name: order-db
+#     environment:
+#       POSTGRES_USER: order
+#       POSTGRES_PASSWORD: order123
+#       POSTGRES_DB: orders_db
+#     ports:
+#       - "5435:5432"
+#     volumes:
+#       - order_data:/var/lib/postgresql/data
+#       - ./services/order/init:/docker-entrypoint-initdb.d
+#       # - ./services/order/init/orders_init.sql:/docker-entrypoint-initdb.d/1_orders_init.sql
+#       # - ./services/order/init/seed_orders.sql:/docker-entrypoint-initdb.d/2_seed_orders.sql
+
+#   payment-db:
+#     image: postgres:16
+#     container_name: payment-db
+#     environment:
+#       POSTGRES_USER: payment
+#       POSTGRES_PASSWORD: payment123
+#       POSTGRES_DB: payments_db
+#     ports:
+#       - "5436:5432"
+#     volumes:
+#       - payment_data:/var/lib/postgresql/data
+#       - ./services/payment/init:/docker-entrypoint-initdb.d
+#       # - ./services/payment/init/payments_init.sql:/docker-entrypoint-initdb.d/1_payments_init.sql
+#       # - ./services/payment/init/seed_payments.sql:/docker-entrypoint-initdb.d/2_seed_payments.sql
+
+#   # ===================== SERVICES =====================
+#   user-service:
+#     build: ./services/user
+#     container_name: user-service
+#     environment:
+#       DB_HOST: user-db
+#       DB_PORT: 5432
+#       DB_USER: user
+#       DB_PASS: user123
+#       DB_NAME: users_db
+#       PORT: 4001
+#     ports:
+#       - "4001:4001"
+#     # volumes:
+#     # - ./services/user/src:/app/src
+#     depends_on:
+#       - user-db
+
+#   product-service:
+#     build: ./services/product
+#     container_name: product-service
+#     environment:
+#       DB_HOST: product-db
+#       DB_PORT: 5432
+#       DB_USER: product
+#       DB_PASS: product123
+#       DB_NAME: products_db
+#       PORT: 4002
+#     ports:
+#       - "4002:4002"
+#     # volumes:
+#     # - ./services/product/src:/app/src
+#     depends_on:
+#       - product-db
+
+#   order-service:
+#     build: ./services/order
+#     container_name: order-service
+#     environment:
+#       DB_HOST: order-db
+#       DB_PORT: 5432
+#       DB_USER: order
+#       DB_PASS: order123
+#       DB_NAME: orders_db
+#       PORT: 4003
+#       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+#     ports:
+#       - "4003:4003"
+#     # volumes:
+#     # - ./services/order/src:/app/src
+#     depends_on:
+#       - order-db
+#       - rabbitmq
+
+#   payment-service:
+#     build: ./services/payment
+#     container_name: payment-service
+#     environment:
+#       DB_HOST: payment-db
+#       DB_PORT: 5432
+#       DB_USER: payment
+#       DB_PASS: payment123
+#       DB_NAME: payments_db
+#       PORT: 4004
+#       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+#     ports:
+#       - "4004:4004"
+#     # volumes:
+#     # - ./services/payment/src:/app/src
+#     depends_on:
+#       - payment-db
+#       - rabbitmq
+
+#   # ===================== INFRASTRUCTURE =====================
+#   rabbitmq:
+#     image: rabbitmq:3-management
+#     container_name: rabbitmq
+#     ports:
+#       - "5672:5672"
+#       - "15672:15672" # UI quản lý RabbitMQ
+#     environment:
+#       RABBITMQ_DEFAULT_USER: guest
+#       RABBITMQ_DEFAULT_PASS: guest
+
+#   api-gateway:
+#     build: ./api
+#     container_name: api-gateway
+#     environment:
+#       PORT: 5000
+#       USER_SERVICE_URL: http://user-service:4001
+#       PRODUCT_SERVICE_URL: http://product-service:4002
+#       ORDER_SERVICE_URL: http://order-service:4003
+#       PAYMENT_SERVICE_URL: http://payment-service:4004
+#     ports:
+#       - "5000:5000"
+#     depends_on:
+#       - user-service
+#       - product-service
+#       - order-service
+#       - payment-service
+
+#   pgadmin:
+#     image: dpage/pgadmin4
+#     container_name: pgadmin
+#     environment:
+#       PGADMIN_DEFAULT_EMAIL: admin@admin.com
+#       PGADMIN_DEFAULT_PASSWORD: admin
+#     ports:
+#       - "8080:80"
+#     depends_on:
+#       - user-db
+#       - product-db
+#       - order-db
+#       - payment-db
+
+# # ===================== VOLUMES =====================
+# volumes:
+#   user_data:
+#   product_data:
+#   order_data:
+#   payment_data:
+
+
+
+# version: "3.9"
+
+services:
+  # ===================== DATABASES =====================
+  user-db:
+    image: postgres:16
+    container_name: user-db
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: user123
+      POSTGRES_DB: users_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - user_data:/var/lib/postgresql/data 
+      - ./services/user/init:/docker-entrypoint-initdb.d
+    networks:
+      - server_network
+
+  product-db:
+    image: postgres:16
+    container_name: product-db
+    environment:
+      POSTGRES_USER: product
+      POSTGRES_PASSWORD: product123
+      POSTGRES_DB: products_db
+    ports:
+      - "5434:5432"
+    volumes:
+      - product_data:/var/lib/postgresql/data
+      - ./services/product/init:/docker-entrypoint-initdb.d
+    networks:
+      - server_network
+
+  order-db:
+    image: postgres:16
+    container_name: order-db
+    environment:
+      POSTGRES_USER: order
+      POSTGRES_PASSWORD: order123
+      POSTGRES_DB: orders_db
+    ports:
+      - "5435:5432"
+    volumes:
+      - order_data:/var/lib/postgresql/data
+      - ./services/order/init:/docker-entrypoint-initdb.d
+    networks:
+      - server_network
+
+  payment-db:
+    image: postgres:16
+    container_name: payment-db
+    environment:
+      POSTGRES_USER: payment
+      POSTGRES_PASSWORD: payment123
+      POSTGRES_DB: payments_db
+    ports:
+      - "5436:5432"
+    volumes:
+      - payment_data:/var/lib/postgresql/data
+      - ./services/payment/init:/docker-entrypoint-initdb.d
+    networks:
+      - server_network
+
+  # ===================== SERVICES =====================
+  user-service:
+    build: ./services/user
+    container_name: user-service
+    env_file:
+    - ./services/user/.env
+    environment:
+      PORT: 4001
+      DB_HOST: user-db
+      DB_PORT: 5432
+      DB_USER: user
+      DB_PASS: user123
+      DB_NAME: users_db
+    ports:
+      - "4001:4001"
+    depends_on:
+      - user-db
+    # command: ["sh", "-c", "./wait-for-it.sh user-db:5432 -- npm start"]
+    networks:
+      - server_network
+
+  product-service:
+    build: ./services/product
+    container_name: product-service
+    env_file:
+    - ./services/product/.env
+    environment:
+      PORT: 4002
+      DB_HOST: product-db
+      DB_PORT: 5432
+      DB_USER: product
+      DB_PASS: product123
+      DB_NAME: products_db
+    ports:
+      - "4002:4002"
+    depends_on:
+      - product-db
+    # command: ["sh", "-c", "./wait-for-it.sh user-db:5432 -- npm start"]
+    networks:
+      - server_network
+
+  order-service:
+    build: ./services/order
+    container_name: order-service
+    env_file:
+    - ./services/order/.env
+    environment:
+      PORT: 4003
+      DB_HOST: order-db
+      DB_PORT: 5432
+      DB_USER: order
+      DB_PASS: order123
+      DB_NAME: orders_db     
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+    ports:
+      - "4003:4003"
+    depends_on:
+      - order-db
+      - rabbitmq
+    # command: ["sh", "-c", "./wait-for-it.sh user-db:5432 -- npm start"]
+    networks:
+      - server_network
+
+  payment-service:
+    build: ./services/payment
+    container_name: payment-service
+    env_file:
+    - ./services/payment/.env
+    environment:
+      PORT: 4004
+      DB_HOST: payment-db
+      DB_PORT: 5432
+      DB_USER: payment
+      DB_PASS: payment123
+      DB_NAME: payments_db     
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+    ports:
+      - "4004:4004"
+    depends_on:
+      - payment-db
+      - rabbitmq
+    # command: ["sh", "-c", "./wait-for-it.sh user-db:5432 -- npm start"]
+    networks:
+      - server_network
+
+
+  # ===================== INFRASTRUCTURE =====================
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    networks:
+      - server_network
+
+
+  api-gateway:
+    build: ./api
+    container_name: api-gateway
+    environment:
+      PORT: 5000
+      USER_SERVICE_URL: http://user-service:4001
+      PRODUCT_SERVICE_URL: http://product-service:4002
+      ORDER_SERVICE_URL: http://order-service:4003
+      PAYMENT_SERVICE_URL: http://payment-service:4004
+    ports:
+      - "5000:5000"
+    depends_on:
+      - user-service
+      - product-service
+      - order-service
+      - payment-service
+    networks:
+      - server_network
+
+
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "8080:80"
+    depends_on:
+      - user-db
+      - product-db
+      - order-db
+      - payment-db
+    networks:
+      - server_network
+
+
+# ===================== VOLUMES =====================
+volumes:
+  user_data:
+  product_data:
+  order_data:
+  payment_data:
+
+# ===================== NETWORK =====================
+networks:
+  server_network:
+    driver: bridge

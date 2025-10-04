@@ -102,6 +102,8 @@ import blog6 from "./blogs/blog6.jpg";
 import blog7 from "./blogs/blog7.jpg";
 import blog8 from "./blogs/blog8.jpg";
 
+
+
 export const assets = {
   logoImg,
   search,
@@ -149,6 +151,7 @@ export const assets = {
   features3,
   uploadIcon,
 };
+
 
 
 export const dummyProducts = [
@@ -932,7 +935,7 @@ export const dummyProducts = [
     price: { H: 2, F: 3 },
     description: "Cool and fizzy cola flavor",
     category: "Drink",
-    type: "Pepsi",
+    // type: "Pepsi",
     sizes: ["H", "F"],
     date: 1716634345456,
     popular: false,
@@ -945,7 +948,7 @@ export const dummyProducts = [
     price: { H: 4, F: 6 },
     description: "Sweet milk tea with chewy pearls",
     category: "Drink",
-    type: "Bubble Milk Tea",
+    // type: "Bubble Milk Tea",
     sizes: ["H", "F"],
     date: 1716634345457,
     popular: true,
@@ -958,7 +961,7 @@ export const dummyProducts = [
     price: { H: 4, F: 7 },
     description: "Grilled sausage with mustard",
     category: "Hotdog",
-    type: "Classic Hotdog",
+    // type: "Classic Hotdog",
     sizes: ["H", "F"],
     date: 1716634345458,
     popular: false,
@@ -971,7 +974,7 @@ export const dummyProducts = [
     price: { H: 5, F: 8 },
     description: "BBQ sauce drizzled over sausage",
     category: "Hotdog",
-    type: "BBQ Hotdog",
+    // type: "BBQ Hotdog",
     sizes: ["H", "F"],
     date: 1716634345459,
     popular: true,
@@ -984,7 +987,7 @@ export const dummyProducts = [
     price: { H: 5, F: 8 },
     description: "Hotdog loaded with melted cheese",
     category: "Hotdog",
-    type: "Cheese Hotdog",
+    // type: "Cheese Hotdog",
     sizes: ["H", "F"],
     date: 1716634345460,
     popular: true,
@@ -997,7 +1000,7 @@ export const dummyProducts = [
     price: { H: 5, F: 9 },
     description: "Fresh tuna with crunchy veggies",
     category: "Sandwich",
-    type: "Tuna Sandwich",
+    // type: "Tuna Sandwich",
     sizes: ["H", "F"],
     date: 1716634345461,
     popular: false,
@@ -1010,7 +1013,7 @@ export const dummyProducts = [
     price: { H: 5, F: 9 },
     description: "Bacon, lettuce, and tomato combo",
     category: "Sandwich",
-    type: "BLT Sandwich",
+    // type: "BLT Sandwich",
     sizes: ["H", "F"],
     date: 1716634345462,
     popular: true,
@@ -1023,7 +1026,7 @@ export const dummyProducts = [
     price: { H: 5, F: 9 },
     description: "Grilled chicken with mayo",
     category: "Sandwich",
-    type: "Chicken Sandwich",
+    // type: "Chicken Sandwich",
     sizes: ["H", "F"],
     date: 1716634345463,
     popular: true,
@@ -1036,7 +1039,7 @@ export const dummyProducts = [
     price: { H: 4, F: 8 },
     description: "Healthy veggies with soft egg",
     category: "Sandwich",
-    type: "Veggie Egg Sandwich",
+    // type: "Veggie Egg Sandwich",
     sizes: ["H", "F"],
     date: 1716634345464,
     popular: false,
@@ -1049,7 +1052,7 @@ export const dummyProducts = [
     price: { H: 5, F: 9 },
     description: "Crispy tortilla with seasoned chicken",
     category: "Tacos",
-    type: "Chicken Tacos",
+    // type: "Chicken Tacos",
     sizes: ["H", "F"],
     date: 1716634345465,
     popular: true,
@@ -1062,7 +1065,7 @@ export const dummyProducts = [
     price: { H: 4, F: 8 },
     description: "Egg and veggies wrapped in tortilla",
     category: "Tacos",
-    type: "Veggie Egg Tacos",
+    // type: "Veggie Egg Tacos",
     sizes: ["H", "F"],
     date: 1716634345466,
     popular: false,
@@ -1075,7 +1078,7 @@ export const dummyProducts = [
     price: { H: 6, F: 10 },
     description: "Spiced meat filling with fresh toppings",
     category: "Tacos",
-    type: "Meat Tacos",
+    // type: "Meat Tacos",
     sizes: ["H", "F"],
     date: 1716634345467,
     popular: true,

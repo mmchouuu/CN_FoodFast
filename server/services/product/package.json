@@ -1,0 +1,23 @@
+{
+  "name": "product-service",
+  "version": "1.0.0",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
+    "migrate": "node ./scripts/migrate.js",
+    "seed": "node ./scripts/seed.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "sequelize": "^6.32.1",
+    "pg": "^8.11.0",
+    "uuid": "^9.0.0",
+    "dotenv": "^16.3.1",
+    "axios": "^1.12.2",
+    "body-parser": "^1.20.2"
+  },
+  "devDependencies": {
+    "nodemon": "^2.0.22"
+  }
+}

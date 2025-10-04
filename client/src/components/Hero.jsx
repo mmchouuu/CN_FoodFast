@@ -21,15 +21,12 @@ const Hero = () => {
                        className="text-solidTwo">for Less - 25% Off!</span>
                     </h2>
                     <h1 className='font-[800] leading-none'>
-                        on Burger & Tacos
+                        only on Tasty Queen
                     </h1>
                     <div className='flex item-center'>
-                        <h3>
-                            Starting from
-                        </h3>
                         <span className='bg-white p-1 inline-block
                         ml-2.5 text-5xl font-extrabold'>
-                            <span className='text-5xl'>45.000</span>
+                            <span className='text-5xl'>Order Now</span>
                         </span>
                     </div>
                     <button className='btn-solid !rounded-none p-5 w-52 text-lg

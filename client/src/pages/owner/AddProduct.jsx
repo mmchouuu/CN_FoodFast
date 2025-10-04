@@ -31,15 +31,6 @@ const allCategories = [
   "Drinks",
 ]
 
-const allTypes = [ // Fix Type...
-  "Coffee",
-  "Fresh Juices",
-  "Milkshakes",
-  "Smoothies",
-  "Soft Drinks"
-]
-
-
   return (
     <div className="md:px-8 py-6 xl:py-8 m-1.5 sm:m-3 h-[97vh] overflow-y-scroll w-full
     lg:w-11/12 bg-primary shadow rounded-xl">
