@@ -1,8 +1,10 @@
+version: "3.9"
+
 services:
-  # API Gateway
+  # 🧩 API Gateway
   api-gateway:
-    build: ./api-gateway
-    env_file: ./api-gateway/.env
+    build: ./apps/api-gateway
+    env_file: ./apps/api-gateway/.env
     ports:
       - "8080:8080"
     depends_on:
@@ -10,6 +12,7 @@ services:
       - product-service
       - order-service
       - payment-service
+      - rabbitmq
     networks:
       - backend_net
     healthcheck:
@@ -18,14 +21,16 @@ services:
       timeout: 5s
       retries: 5
 
-  # User Service
+  # 👤 User Service
   user-service:
-    build: ./user-service
-    env_file: ./user-service/.env
+    build: ./apps/user-service
+    env_file: ./apps/user-service/.env
     ports:
       - "3001:3001"
     depends_on:
       userdb:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
     networks:
       - backend_net
@@ -35,14 +40,16 @@ services:
       timeout: 5s
       retries: 5
 
-  # Product Service
+  # 📦 Product Service
   product-service:
-    build: ./product-service
-    env_file: ./product-service/.env
+    build: ./apps/product-service
+    env_file: ./apps/product-service/.env
     ports:
       - "3002:3002"
     depends_on:
       productdb:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
     networks:
       - backend_net
@@ -52,14 +59,16 @@ services:
       timeout: 5s
       retries: 5
 
-  # Order Service
+  # 🧾 Order Service
   order-service:
-    build: ./order-service
-    env_file: ./order-service/.env
+    build: ./apps/order-service
+    env_file: ./apps/order-service/.env
     ports:
       - "3003:3003"
     depends_on:
       orderdb:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
     networks:
       - backend_net
@@ -69,14 +78,16 @@ services:
       timeout: 5s
       retries: 5
 
-  # Payment Service
+  # 💳 Payment Service
   payment-service:
-    build: ./payment-service
-    env_file: ./payment-service/.env
+    build: ./apps/payment-service
+    env_file: ./apps/payment-service/.env
     ports:
       - "3004:3004"
     depends_on:
       paymentdb:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
     networks:
       - backend_net
@@ -85,8 +96,42 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+  
+    # 📧 Email Service
+  email-service:
+    build: ./apps/email-service
+    env_file: ./apps/email-service/.env
+    ports:
+      - "3005:3005"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - backend_net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3005/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+  
+    # ⚡ Socket Gateway (WebSocket Realtime)
+  socket-gateway:
+    build: ./apps/socket-gateway
+    env_file: ./apps/socket-gateway/.env
+    ports:
+      - "4000:4000"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - backend_net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:4000/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
-  # PostgreSQL Databases
+  # 🗄️ PostgreSQL Databases
   userdb:
     image: postgres:15
     environment:
@@ -159,7 +204,24 @@ services:
       timeout: 5s
       retries: 5
 
-# Docker network
+  # 🐇 RabbitMQ Message Broker
+  rabbitmq:
+    image: rabbitmq:3.11-management
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    ports:
+      - "5672:5672"    # amqp
+      - "15672:15672"  # management UI
+    networks:
+      - backend_net
+    healthcheck:
+      test: ["CMD-SHELL", "rabbitmqctl -q status"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+# 🌐 Docker Network
 networks:
   backend_net:
     driver: bridge

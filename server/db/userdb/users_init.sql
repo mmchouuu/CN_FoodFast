@@ -10,6 +10,8 @@ CREATE TABLE IF NOT EXISTS users (
   phone VARCHAR(30),
   role VARCHAR(30) NOT NULL DEFAULT 'customer',
   is_active BOOLEAN DEFAULT TRUE,
+  is_verified BOOLEAN DEFAULT FALSE,
+  otp_code VARCHAR(10),
   email_verified BOOLEAN DEFAULT FALSE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
