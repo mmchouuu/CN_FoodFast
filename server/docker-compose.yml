@@ -184,217 +184,445 @@
 #   order_data:
 #   payment_data:
 
-
+# -----------------------------------------------------------------------------------------------------
 
 # version: "3.9"
 
+# services:
+#   # ===================== DATABASES =====================
+#   user-db:
+#     image: postgres:16
+#     container_name: user-db
+#     environment:
+#       POSTGRES_USER: user
+#       POSTGRES_PASSWORD: user123
+#       POSTGRES_DB: users_db
+#     ports:
+#       - "5433:5432"
+#     volumes:
+#       - user_data:/var/lib/postgresql/data 
+#       - ./services/user/init:/docker-entrypoint-initdb.d
+#     networks:
+#       - server_network
+
+#   product-db:
+#     image: postgres:16
+#     container_name: product-db
+#     environment:
+#       POSTGRES_USER: product
+#       POSTGRES_PASSWORD: product123
+#       POSTGRES_DB: products_db
+#     ports:
+#       - "5434:5432"
+#     volumes:
+#       - product_data:/var/lib/postgresql/data
+#       - ./services/product/init:/docker-entrypoint-initdb.d
+#     networks:
+#       - server_network
+
+#   order-db:
+#     image: postgres:16
+#     container_name: order-db
+#     environment:
+#       POSTGRES_USER: order
+#       POSTGRES_PASSWORD: order123
+#       POSTGRES_DB: orders_db
+#     ports:
+#       - "5435:5432"
+#     volumes:
+#       - order_data:/var/lib/postgresql/data
+#       - ./services/order/init:/docker-entrypoint-initdb.d
+#     networks:
+#       - server_network
+
+#   payment-db:
+#     image: postgres:16
+#     container_name: payment-db
+#     environment:
+#       POSTGRES_USER: payment
+#       POSTGRES_PASSWORD: payment123
+#       POSTGRES_DB: payments_db
+#     ports:
+#       - "5436:5432"
+#     volumes:
+#       - payment_data:/var/lib/postgresql/data
+#       - ./services/payment/init:/docker-entrypoint-initdb.d
+#     networks:
+#       - server_network
+
+#   # ===================== SERVICES =====================
+#   user-service:
+#     build: ./services/user
+#     container_name: user-service
+#     env_file:
+#     - ./services/user/.env
+#     environment:
+#       PORT: 4001
+#       DB_HOST: user-db
+#       DB_PORT: 5432
+#       DB_USER: user
+#       DB_PASS: user123
+#       DB_NAME: users_db
+#     ports:
+#       - "4001:4001"
+#     depends_on:
+#       - user-db
+#     # command: ["sh", "-c", "./wait-for-it.sh user-db:5432 -- npm start"]
+#     networks:
+#       - server_network
+
+#   product-service:
+#     build: ./services/product
+#     container_name: product-service
+#     env_file:
+#     - ./services/product/.env
+#     environment:
+#       PORT: 4002
+#       DB_HOST: product-db
+#       DB_PORT: 5432
+#       DB_USER: product
+#       DB_PASS: product123
+#       DB_NAME: products_db
+#     ports:
+#       - "4002:4002"
+#     depends_on:
+#       - product-db
+#     # command: ["sh", "-c", "./wait-for-it.sh user-db:5432 -- npm start"]
+#     networks:
+#       - server_network
+
+#   order-service:
+#     build: ./services/order
+#     container_name: order-service
+#     env_file:
+#     - ./services/order/.env
+#     environment:
+#       PORT: 4003
+#       DB_HOST: order-db
+#       DB_PORT: 5432
+#       DB_USER: order
+#       DB_PASS: order123
+#       DB_NAME: orders_db     
+#       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+#     ports:
+#       - "4003:4003"
+#     depends_on:
+#       - order-db
+#       - rabbitmq
+#     # command: ["sh", "-c", "./wait-for-it.sh user-db:5432 -- npm start"]
+#     networks:
+#       - server_network
+
+#   payment-service:
+#     build: ./services/payment
+#     container_name: payment-service
+#     env_file:
+#     - ./services/payment/.env
+#     environment:
+#       PORT: 4004
+#       DB_HOST: payment-db
+#       DB_PORT: 5432
+#       DB_USER: payment
+#       DB_PASS: payment123
+#       DB_NAME: payments_db     
+#       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+#     ports:
+#       - "4004:4004"
+#     depends_on:
+#       - payment-db
+#       - rabbitmq
+#     # command: ["sh", "-c", "./wait-for-it.sh user-db:5432 -- npm start"]
+#     networks:
+#       - server_network
+
+
+#   # ===================== INFRASTRUCTURE =====================
+#   rabbitmq:
+#     image: rabbitmq:3-management
+#     container_name: rabbitmq
+#     ports:
+#       - "5672:5672"
+#       - "15672:15672"
+#     environment:
+#       RABBITMQ_DEFAULT_USER: guest
+#       RABBITMQ_DEFAULT_PASS: guest
+#     networks:
+#       - server_network
+
+
+#   api-gateway:
+#     build: ./api
+#     container_name: api-gateway
+#     environment:
+#       PORT: 5000
+#       USER_SERVICE_URL: http://user-service:4001
+#       PRODUCT_SERVICE_URL: http://product-service:4002
+#       ORDER_SERVICE_URL: http://order-service:4003
+#       PAYMENT_SERVICE_URL: http://payment-service:4004
+#     ports:
+#       - "5000:5000"
+
+#     depends_on:
+#       - user-service
+#       - product-service
+#       - order-service
+#       - payment-service
+#     networks:
+#       - server_network
+
+#   pgadmin:
+#     image: dpage/pgadmin4
+#     container_name: pgadmin
+#     environment:
+#       PGADMIN_DEFAULT_EMAIL: admin@admin.com
+#       PGADMIN_DEFAULT_PASSWORD: admin
+#     ports:
+#       - "8080:80"
+#     depends_on:
+#       - user-db
+#       - product-db
+#       - order-db
+#       - payment-db
+#     networks:
+#       - server_network
+
+
+# # ===================== VOLUMES =====================
+# volumes:
+#   user_data:
+#   product_data:
+#   order_data:
+#   payment_data:
+
+# # ===================== NETWORK =====================
+# networks:
+#   server_network:
+#     driver: bridge
+
+version: "3.9"
+
 services:
-  # ===================== DATABASES =====================
-  user-db:
-    image: postgres:16
-    container_name: user-db
-    environment:
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: user123
-      POSTGRES_DB: users_db
-    ports:
-      - "5433:5432"
-    volumes:
-      - user_data:/var/lib/postgresql/data 
-      - ./services/user/init:/docker-entrypoint-initdb.d
-    networks:
-      - server_network
-
-  product-db:
-    image: postgres:16
-    container_name: product-db
-    environment:
-      POSTGRES_USER: product
-      POSTGRES_PASSWORD: product123
-      POSTGRES_DB: products_db
-    ports:
-      - "5434:5432"
-    volumes:
-      - product_data:/var/lib/postgresql/data
-      - ./services/product/init:/docker-entrypoint-initdb.d
-    networks:
-      - server_network
-
-  order-db:
-    image: postgres:16
-    container_name: order-db
-    environment:
-      POSTGRES_USER: order
-      POSTGRES_PASSWORD: order123
-      POSTGRES_DB: orders_db
-    ports:
-      - "5435:5432"
-    volumes:
-      - order_data:/var/lib/postgresql/data
-      - ./services/order/init:/docker-entrypoint-initdb.d
-    networks:
-      - server_network
-
-  payment-db:
-    image: postgres:16
-    container_name: payment-db
-    environment:
-      POSTGRES_USER: payment
-      POSTGRES_PASSWORD: payment123
-      POSTGRES_DB: payments_db
-    ports:
-      - "5436:5432"
-    volumes:
-      - payment_data:/var/lib/postgresql/data
-      - ./services/payment/init:/docker-entrypoint-initdb.d
-    networks:
-      - server_network
-
-  # ===================== SERVICES =====================
-  user-service:
-    build: ./services/user
-    container_name: user-service
-    env_file:
-    - ./services/user/.env
-    environment:
-      PORT: 4001
-      DB_HOST: user-db
-      DB_PORT: 5432
-      DB_USER: user
-      DB_PASS: user123
-      DB_NAME: users_db
-    ports:
-      - "4001:4001"
-    depends_on:
-      - user-db
-    # command: ["sh", "-c", "./wait-for-it.sh user-db:5432 -- npm start"]
-    networks:
-      - server_network
-
-  product-service:
-    build: ./services/product
-    container_name: product-service
-    env_file:
-    - ./services/product/.env
-    environment:
-      PORT: 4002
-      DB_HOST: product-db
-      DB_PORT: 5432
-      DB_USER: product
-      DB_PASS: product123
-      DB_NAME: products_db
-    ports:
-      - "4002:4002"
-    depends_on:
-      - product-db
-    # command: ["sh", "-c", "./wait-for-it.sh user-db:5432 -- npm start"]
-    networks:
-      - server_network
-
-  order-service:
-    build: ./services/order
-    container_name: order-service
-    env_file:
-    - ./services/order/.env
-    environment:
-      PORT: 4003
-      DB_HOST: order-db
-      DB_PORT: 5432
-      DB_USER: order
-      DB_PASS: order123
-      DB_NAME: orders_db     
-      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
-    ports:
-      - "4003:4003"
-    depends_on:
-      - order-db
-      - rabbitmq
-    # command: ["sh", "-c", "./wait-for-it.sh user-db:5432 -- npm start"]
-    networks:
-      - server_network
-
-  payment-service:
-    build: ./services/payment
-    container_name: payment-service
-    env_file:
-    - ./services/payment/.env
-    environment:
-      PORT: 4004
-      DB_HOST: payment-db
-      DB_PORT: 5432
-      DB_USER: payment
-      DB_PASS: payment123
-      DB_NAME: payments_db     
-      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
-    ports:
-      - "4004:4004"
-    depends_on:
-      - payment-db
-      - rabbitmq
-    # command: ["sh", "-c", "./wait-for-it.sh user-db:5432 -- npm start"]
-    networks:
-      - server_network
-
-
-  # ===================== INFRASTRUCTURE =====================
-  rabbitmq:
-    image: rabbitmq:3-management
-    container_name: rabbitmq
-    ports:
-      - "5672:5672"
-      - "15672:15672"
-    environment:
-      RABBITMQ_DEFAULT_USER: guest
-      RABBITMQ_DEFAULT_PASS: guest
-    networks:
-      - server_network
-
-
+  # 🧩 API Gateway
   api-gateway:
-    build: ./api
-    container_name: api-gateway
-    environment:
-      PORT: 5000
-      USER_SERVICE_URL: http://user-service:4001
-      PRODUCT_SERVICE_URL: http://product-service:4002
-      ORDER_SERVICE_URL: http://order-service:4003
-      PAYMENT_SERVICE_URL: http://payment-service:4004
+    build: ./apps/api-gateway
+    env_file: ./apps/api-gateway/.env
     ports:
-      - "5000:5000"
+      - "8080:8080"
     depends_on:
       - user-service
       - product-service
       - order-service
       - payment-service
+      - rabbitmq
     networks:
-      - server_network
+      - backend_net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
-
-  pgadmin:
-    image: dpage/pgadmin4
-    container_name: pgadmin
-    environment:
-      PGADMIN_DEFAULT_EMAIL: admin@admin.com
-      PGADMIN_DEFAULT_PASSWORD: admin
+  # 👤 User Service
+  user-service:
+    build: ./apps/user-service
+    env_file: ./apps/user-service/.env
     ports:
-      - "8080:80"
+      - "3001:3001"
     depends_on:
-      - user-db
-      - product-db
-      - order-db
-      - payment-db
+      userdb:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
     networks:
-      - server_network
+      - backend_net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3001/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
+  # 📦 Product Service
+  product-service:
+    build: ./apps/product-service
+    env_file: ./apps/product-service/.env
+    ports:
+      - "3002:3002"
+    depends_on:
+      productdb:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - backend_net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3002/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
-# ===================== VOLUMES =====================
-volumes:
-  user_data:
-  product_data:
-  order_data:
-  payment_data:
+  # 🧾 Order Service
+  order-service:
+    build: ./apps/order-service
+    env_file: ./apps/order-service/.env
+    ports:
+      - "3003:3003"
+    depends_on:
+      orderdb:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - backend_net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3003/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
-# ===================== NETWORK =====================
+  # 💳 Payment Service
+  payment-service:
+    build: ./apps/payment-service
+    env_file: ./apps/payment-service/.env
+    ports:
+      - "3004:3004"
+    depends_on:
+      paymentdb:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - backend_net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3004/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+  
+    # 📧 Email Service
+  email-service:
+    build: ./apps/email-service
+    env_file: ./apps/email-service/.env
+    ports:
+      - "3005:3005"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - backend_net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3005/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+  
+    # ⚡ Socket Gateway (WebSocket Realtime)
+  socket-gateway:
+    build: ./apps/socket-gateway
+    env_file: ./apps/socket-gateway/.env
+    ports:
+      - "4000:4000"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - backend_net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:4000/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 🗄️ PostgreSQL Databases
+  userdb:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 123
+      POSTGRES_DB: userdb
+    volumes:
+      - ./db/userdb/users_init.sql:/docker-entrypoint-initdb.d/1_users.sql:ro
+    ports:
+      - "5433:5432"
+    networks:
+      - backend_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d userdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  productdb:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 123
+      POSTGRES_DB: productdb
+    volumes:
+      - ./db/productdb/products_init.sql:/docker-entrypoint-initdb.d/1_products.sql:ro
+    ports:
+      - "5434:5432"
+    networks:
+      - backend_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d productdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  orderdb:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 123
+      POSTGRES_DB: orderdb
+    volumes:
+      - ./db/orderdb/orders_init.sql:/docker-entrypoint-initdb.d/1_orders.sql:ro
+    ports:
+      - "5435:5432"
+    networks:
+      - backend_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d orderdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  paymentdb:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 123
+      POSTGRES_DB: paymentdb
+    volumes:
+      - ./db/paymentdb/payments_init.sql:/docker-entrypoint-initdb.d/1_payments.sql:ro
+    ports:
+      - "5436:5432"
+    networks:
+      - backend_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d paymentdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 🐇 RabbitMQ Message Broker
+  rabbitmq:
+    image: rabbitmq:3.11-management
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    ports:
+      - "5672:5672"    # amqp
+      - "15672:15672"  # management UI
+    networks:
+      - backend_net
+    healthcheck:
+      test: ["CMD-SHELL", "rabbitmqctl -q status"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+# 🌐 Docker Network
 networks:
-  server_network:
+  backend_net:
     driver: bridge

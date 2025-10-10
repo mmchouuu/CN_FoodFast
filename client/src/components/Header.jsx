@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 // import React, { useState } from 'react';
 // import { Link, useLocation } from 'react-router-dom';
 // import { assets } from '../assets/data';
@@ -459,6 +460,8 @@
 // export default Header;
 
 
+
+// src/components/Header.js
 import React, { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { assets } from '../assets/data';
