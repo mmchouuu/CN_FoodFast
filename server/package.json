@@ -1,7 +1,1 @@
-{ "type": "module",
-
-  "dependencies": {
-    "amqplib": "^0.10.9",
-    "dotenv": "^17.2.3"
-  }
-}
+{"type":"module","dependencies":{"amqplib":"^0.10.9","bcryptjs":"^3.0.2","dotenv":"^17.2.3"}}

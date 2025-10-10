@@ -9,7 +9,8 @@
   },
   "dependencies": {
     "amqplib": "^0.10.9",
-    "bcrypt": "^5.x",
+    "bcrypt": "^6.0.0",
+    "bcryptjs": "^3.0.2",
     "dotenv": "^16.x",
     "express": "^4.x",
     "helmet": "^8.1.0",
