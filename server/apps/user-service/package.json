@@ -1,0 +1,24 @@
+{
+  "name": "user-service",
+  "version": "1.0.0",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
+    "test": "jest --runInBand"
+  },
+  "dependencies": {
+    "amqplib": "^0.10.9",
+    "bcrypt": "^5.x",
+    "dotenv": "^16.x",
+    "express": "^4.x",
+    "helmet": "^8.1.0",
+    "jsonwebtoken": "^9.x",
+    "morgan": "^1.10.1",
+    "pg": "^8.x"
+  },
+  "devDependencies": {
+    "jest": "^29.x",
+    "nodemon": "^2.x"
+  }
+}

@@ -1,0 +1,75 @@
+@startuml
+!theme blueprint
+
+entity "users" as users {
+  *id : UUID <<PK>>
+  --
+  email : varchar
+  password_hash : varchar
+  role : varchar
+}
+
+entity "user_addresses" as addr {
+  *id : UUID <<PK>>
+  user_id : UUID <<FK>>
+  street : varchar
+}
+
+entity "restaurants" as rest {
+  *id : UUID <<PK>>
+  owner_id : UUID <<FK>>
+  name : varchar
+}
+
+entity "restaurant_branches" as branch {
+  *id : UUID <<PK>>
+  restaurant_id : UUID <<FK>>
+  city : varchar
+}
+
+entity "products" as prod {
+  *id : UUID <<PK>>
+  restaurant_id : UUID <<FK>>
+  title : varchar
+}
+
+entity "inventory" as inv {
+  *id : UUID <<PK>>
+  branch_id : UUID <<FK>>
+  product_id : UUID <<FK>>
+  quantity : int
+}
+
+entity "orders" as ord {
+  *id : UUID <<PK>>
+  user_id : UUID <<FK>>
+  restaurant_id : UUID <<FK>>
+  branch_id : UUID <<FK>>
+  total_amount : numeric
+}
+
+entity "order_items" as items {
+  *id : UUID <<PK>>
+  order_id : UUID <<FK>>
+  product_id : UUID <<FK>>
+  quantity : int
+}
+
+entity "payments" as pay {
+  *id : UUID <<PK>>
+  order_id : UUID <<FK>>
+  user_id : UUID <<FK>>
+  amount : numeric
+}
+
+users ||--o{ addr : "has"
+users ||--o{ rest : "owns"
+rest ||--o{ branch : "has"
+rest ||--o{ prod : "offers"
+branch ||--o{ inv : "stocks"
+prod ||--o{ inv : "tracked in"
+users ||--o{ pay : "makes"
+users ||--o{ ord : "creates"
+ord ||--o{ items : "contains"
+ord ||--o{ pay : "paid by"
+@enduml
