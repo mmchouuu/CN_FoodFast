@@ -402,7 +402,7 @@
 version: "3.9"
 
 services:
-  # 🧩 API Gateway
+  # API Gateway
   api-gateway:
     build: ./apps/api-gateway
     env_file: ./apps/api-gateway/.env
@@ -422,7 +422,7 @@ services:
       timeout: 5s
       retries: 5
 
-  # 👤 User Service
+  # User Service
   user-service:
     build: ./apps/user-service
     env_file: ./apps/user-service/.env
@@ -441,7 +441,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # 📦 Product Service
   product-service:
     build: ./apps/product-service
     env_file: ./apps/product-service/.env
@@ -460,7 +459,8 @@ services:
       timeout: 5s
       retries: 5
 
-  # 🧾 Order Service
+
+  # Order Service
   order-service:
     build: ./apps/order-service
     env_file: ./apps/order-service/.env
@@ -473,13 +473,14 @@ services:
         condition: service_healthy
     networks:
       - backend_net
+    command: npm start   
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:3003/health || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 5
 
-  # 💳 Payment Service
+  # Payment Service
   payment-service:
     build: ./apps/payment-service
     env_file: ./apps/payment-service/.env
@@ -498,7 +499,7 @@ services:
       timeout: 5s
       retries: 5
   
-    # 📧 Email Service
+    # Email Service
   email-service:
     build: ./apps/email-service
     env_file: ./apps/email-service/.env
@@ -515,7 +516,7 @@ services:
       timeout: 5s
       retries: 5
   
-    # ⚡ Socket Gateway (WebSocket Realtime)
+    # Socket Gateway (WebSocket Realtime)
   socket-gateway:
     build: ./apps/socket-gateway
     env_file: ./apps/socket-gateway/.env
@@ -532,7 +533,7 @@ services:
       timeout: 5s
       retries: 5
 
-  # 🗄️ PostgreSQL Databases
+  # PostgreSQL Databases
   userdb:
     image: postgres:15
     environment:
@@ -605,7 +606,7 @@ services:
       timeout: 5s
       retries: 5
 
-  # 🐇 RabbitMQ Message Broker
+  # RabbitMQ Message Broker
   rabbitmq:
     image: rabbitmq:3.11-management
     environment:
@@ -622,7 +623,7 @@ services:
       timeout: 5s
       retries: 5
 
-# 🌐 Docker Network
+# ocker Network
 networks:
   backend_net:
     driver: bridge
