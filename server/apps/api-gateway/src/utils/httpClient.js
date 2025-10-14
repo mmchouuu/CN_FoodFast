@@ -1,3 +1,5 @@
+// api-gateway/src/utils/httpClient.js
+
 const axios = require('axios');
 
 function createAxiosInstance({ baseURL, timeout }) {

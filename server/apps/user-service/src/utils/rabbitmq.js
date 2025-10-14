@@ -1,4 +1,5 @@
 // user-service/src/utils/rabbitmq.js
+
 const amqp = require('amqplib');
 
 let channel = null;
@@ -9,6 +10,13 @@ async function connectRabbitMQ() {
     channel = await connection.createChannel();
     await channel.assertQueue(process.env.RABBITMQ_QUEUE, { durable: true });
     console.log('✅ [user-service] Connected to RabbitMQ and queue asserted');
+
+    // Tự động reconnect nếu connection bị đóng
+    connection.on('close', () => {
+      console.error('⚠️ [user-service] RabbitMQ connection closed, reconnecting...');
+      channel = null;
+      setTimeout(connectRabbitMQ, 5000);
+    });
   } catch (err) {
     console.error('❌ [user-service] Failed to connect to RabbitMQ:', err.message);
     setTimeout(connectRabbitMQ, 5000); // Thử lại sau 5s nếu lỗi
@@ -17,7 +25,7 @@ async function connectRabbitMQ() {
 
 function publishToEmailQueue(message) {
   if (!channel) {
-    console.error('❌ [user-service] Channel not initialized yet');
+    console.error('❌ [user-service] RabbitMQ channel not initialized yet');
     return;
   }
 
@@ -26,7 +34,7 @@ function publishToEmailQueue(message) {
     Buffer.from(JSON.stringify(message)),
     { persistent: true }
   );
-  console.log('📨 [user-service] Published message to queue:', message.to);
+  console.log('📨 [user-service] Published email job to queue:', message.to);
 }
 
 module.exports = { connectRabbitMQ, publishToEmailQueue };
