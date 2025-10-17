@@ -12,4 +12,6 @@ echo "Postgres is ready - running migrations (if any) and starting app"
 # nếu có migration: npm run migrate
 # npm run migrate || true
 
-exec node src/index.js
+exec "$@"
+
+
