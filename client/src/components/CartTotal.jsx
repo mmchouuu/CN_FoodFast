@@ -1,112 +1,142 @@
-import React, { useEffect, useState } from 'react'
-import toast from "react-hot-toast"
-import { useAppContext } from "../context/AppContext"
-import { dummyAddress } from '../assets/data';
+import React, { useState } from "react";
+import { useAppContext } from "../context/AppContext";
 
 const CartTotal = () => {
   const {
-    navigate,
     currency,
-    method,
-    setMethod,
     delivery_charges,
     getCartCount,
     getCartAmount,
-    user,
-    cartItems,
-    products,
+    method,
+    setMethod,
+    addresses,
+    selectedAddressId,
+    setSelectedAddressId,
   } = useAppContext();
 
-  const [addresses, setAddresses] = useState(dummyAddress)
-  const [showAddress, setShowAddress] = useState(false)
-  const [selectedAddress, setSelecttedAddress] = useState(null)
+  const [showAddresses, setShowAddresses] = useState(false);
+  const subtotal = getCartAmount();
+  const shippingFee = subtotal === 0 ? 0 : delivery_charges;
+  const tax = Math.round(subtotal * 0.02);
+  const total = subtotal + shippingFee + tax;
+
+  const selectedAddress = addresses.find(
+    (address) => address.id === selectedAddressId
+  );
 
   return (
-    <div>
-      <h3>
-        Order Details
-        <span className="text-lg font-bold text-solid">({getCartCount()}) Items</span>
-      </h3>
-      <hr className="border-gray-300 my-5" />
-      {/* Payment & Addresses */}
-      <div className="mb-5">
-        <div className="my-5">
-          <h4 className="mb-5">Where to ship your order?</h4>
-          <div className="relative flex justify-between items-start mt-2">
-            <p>
-              {selectedAddress ? `{selectedAddress.street}, {selectedAddress.city},
-              {selectedAddress.state}, {selectedAddress.country}`
-              : "No address found"}
-            </p>
-            <button onClick={()=> setShowAddress(!showAddress)} 
-            className="text-solid text-sm font-medium hover:underline cursor-pointer">
-              Change
-            </button>
-            {showAddress && (
-              <div className="absolute top-10 py-1 bg-white ring-1 ring-slate-900/10 text-sm w-full">
-                {addresses.map((address, index)=> (
-                  <p key={index} onClick={()=> {
-                    setSelecttedAddress(address)
-                    setShowAddress(false)
+    <div className="space-y-5 rounded-3xl bg-white p-6 shadow-sm">
+      <header className="flex items-center justify-between">
+        <h3 className="text-lg font-semibold text-gray-900">Order details</h3>
+        <span className="text-sm font-semibold text-orange-500">
+          {getCartCount()} items
+        </span>
+      </header>
+
+      <section className="space-y-2">
+        <h4 className="text-sm font-semibold text-gray-600">Deliver to</h4>
+        <div className="rounded-2xl border border-gray-200 p-4 text-sm text-gray-600">
+          {selectedAddress ? (
+            <>
+              <p className="font-semibold text-gray-900">
+                {selectedAddress.recipient}
+              </p>
+              <p>{selectedAddress.phone}</p>
+              <p>
+                {selectedAddress.street}, {selectedAddress.ward},{" "}
+                {selectedAddress.district}, {selectedAddress.city}
+              </p>
+            </>
+          ) : (
+            <p>No address selected.</p>
+          )}
+          <button
+            onClick={() => setShowAddresses((prev) => !prev)}
+            className="mt-3 text-xs font-semibold text-orange-500 hover:underline"
+          >
+            {showAddresses ? "Hide addresses" : "Change address"}
+          </button>
+          {showAddresses ? (
+            <div className="mt-3 space-y-2">
+              {addresses.map((address) => (
+                <button
+                  key={address.id}
+                  onClick={() => {
+                    setSelectedAddressId(address.id);
+                    setShowAddresses(false);
                   }}
-                  className="p-2 cursor-pointer hover:bg-gray-100 text-sm font-medium">
-                    {address.street}, {address.city}, {address.state}, {" "}
-                    {address.country}
-                  </p>
-                ))}
-                <p onClick={()=> {
-                  navigate("/address-form")
-                  scroll(0, 0)
-                }}
-                className="p-2 text-center cursor-pointer hover:bg-tertiary hover:text-white">
-                  Add Address
-                </p>
-              </div>
-            )}
-          </div>
-        </div>
-        <hr className="border-gray-300 mt-5" />
-        <div className="my-6">
-          <h4 className="mb-5">Payment Method</h4>
-          <div className="flex gap-3">
-            <div onClick={()=> setMethod("COD")} 
-            className={`${
-              method === "COD" ? "btn-solid" : "btn-light"
-            } !py-1 text-xs cursor-pointer`}>
-              Cash On Delivery
+                  className={`w-full rounded-2xl border p-3 text-left text-xs transition ${
+                    selectedAddressId === address.id
+                      ? "border-orange-500 bg-orange-50"
+                      : "border-gray-200 hover:border-orange-300"
+                  }`}
+                >
+                  <div className="font-semibold text-gray-900">
+                    {address.label}
+                  </div>
+                  <div className="text-gray-500">{address.street}</div>
+                </button>
+              ))}
             </div>
-            <div onClick={()=> setMethod("stripe")} 
-            className={`${
-              method === "stripe" ? "btn-solid" : "btn-light"
-            } !py-1 text-xs cursor-pointer`}>
-              Stripe
-            </div>
-          </div>
+          ) : null}
         </div>
-        <hr className="border-gray-300 mt-5" />
-      </div>
-      <div className="mt-4 space-y-2">
-        <div className="flex justify-between">
-          <h5>Price</h5>
-          <p className="font-bold">{currency}{getCartAmount()}</p>
+      </section>
+
+      <section className="space-y-2">
+        <h4 className="text-sm font-semibold text-gray-600">Payment method</h4>
+        <div className="flex gap-2">
+          {["COD", "wallet", "card"].map((option) => (
+            <button
+              key={option}
+              onClick={() => setMethod(option)}
+              className={`flex-1 rounded-2xl border px-4 py-2 text-xs font-semibold uppercase transition ${
+                method === option
+                  ? "border-orange-500 bg-orange-500 text-white"
+                  : "border-gray-200 bg-white text-gray-600 hover:border-orange-300"
+              }`}
+            >
+              {option}
+            </button>
+          ))}
         </div>
-        <div className="flex justify-between">
-          <h5>Shipping Fee</h5>
-          <p className="font-bold">{currency}{getCartAmount() === 0 ? "0.00" : `${delivery_charges}.000`}</p>
+      </section>
+
+      <section className="space-y-2 text-sm text-gray-600">
+        <div className="flex items-center justify-between">
+          <span>Subtotal</span>
+          <span className="font-semibold">
+            {currency}
+            {subtotal.toLocaleString()}
+          </span>
         </div>
-        <div className="flex justify-between">
-          <h5>Tax (2%)</h5>
-          <p className="font-bold">{currency}{(getCartAmount() * 2) /100}</p>
+        <div className="flex items-center justify-between">
+          <span>Shipping fee</span>
+          <span className="font-semibold">
+            {currency}
+            {shippingFee.toLocaleString()}
+          </span>
         </div>
-        <div className="flex justify-between text-lg font-medium mt-3">
-          <h4>Total Amount:</h4>
-          <p className="text-lg font-bold">{currency}{getCartAmount() === 0 ? "0.00"
-          : getCartAmount() + delivery_charges + (getCartAmount() * 2)/100}</p>
+        <div className="flex items-center justify-between">
+          <span>Tax (2%)</span>
+          <span className="font-semibold">
+            {currency}
+            {tax.toLocaleString()}
+          </span>
         </div>
-      </div>
-      <button onClick="" className="btn-solid w-full mt-8 !rounded-md my-2">Process to Order</button>
+        <div className="flex items-center justify-between text-lg font-bold text-gray-900">
+          <span>Total</span>
+          <span>
+            {currency}
+            {total.toLocaleString()}
+          </span>
+        </div>
+      </section>
+
+      <button className="w-full rounded-full bg-orange-500 px-4 py-3 text-sm font-semibold text-white transition hover:bg-orange-600">
+        Continue to checkout
+      </button>
     </div>
-  )
+  );
 };
 
-export default CartTotal
+export default CartTotal;

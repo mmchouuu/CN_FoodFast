@@ -4,7 +4,11 @@ const restaurantClient = require('../services/restaurant.client');
 async function register(req, res, next) {
   try {
     const payload = req.body;
-    if (!payload.email || !payload.password) return res.status(400).json({ message: 'email and password required' });
+    const required = ['restaurantName', 'companyAddress', 'taxCode', 'managerName', 'email'];
+    const missing = required.filter((field) => !payload[field]);
+    if (missing.length) {
+      return res.status(400).json({ message: `missing fields: ${missing.join(', ')}` });
+    }
     const result = await restaurantClient.register(payload, { headers: { 'x-request-id': req.id }});
     return res.status(201).json(result);
   } catch (err) { next(err); }
@@ -12,8 +16,11 @@ async function register(req, res, next) {
 
 async function verify(req, res, next) {
   try {
-    const { email, otp } = req.body;
-    const result = await restaurantClient.verify({ email, otp }, { headers: { 'x-request-id': req.id }});
+    const { email, otp, password } = req.body;
+    if (!email || !otp || !password) {
+      return res.status(400).json({ message: 'email, otp and password are required' });
+    }
+    const result = await restaurantClient.verify({ email, otp, password }, { headers: { 'x-request-id': req.id }});
     return res.json(result);
   } catch (err) { next(err); }
 }
