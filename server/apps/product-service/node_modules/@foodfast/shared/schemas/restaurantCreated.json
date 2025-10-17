@@ -1,0 +1,12 @@
+{
+  "$id": "restaurantCreated",
+  "type": "object",
+  "properties": {
+    "restaurantId": { "type": "string" },
+    "ownerId": { "type": "string" },
+    "name": { "type": "string" },
+    "city": { "type": "string" },
+    "district": { "type": "string" }
+  },
+  "required": ["restaurantId", "ownerId", "name"]
+}
