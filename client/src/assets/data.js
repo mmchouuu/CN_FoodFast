@@ -22,6 +22,7 @@ import twitter from "./twitter.svg";
 import linkedin from "./linkedin.svg";
 import rocket from "./rocket.svg";
 import mail from "./mail.svg";
+import gmail from "./gmail.svg";
 import phone from "./phone.svg";
 import house from "./house.svg";
 import graph from "./graph.svg";
@@ -127,8 +128,9 @@ export const assets = {
   instagram,
   twitter,
   linkedin,
-  rocket,
-  mail,
+    rocket,
+    mail,
+    gmail,
   phone,
   dollar,
   house,

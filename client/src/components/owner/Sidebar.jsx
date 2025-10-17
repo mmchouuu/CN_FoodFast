@@ -10,34 +10,58 @@ const Sidebar = () => {
     const navItems = [
         {
             path: "/owner",
-            label: "Statistics",
-            icon: assets.graph,
-        },
-        {
-            path: "/owner/orders",
-            label: "Order",
+            label: "Dashboard",
             icon: assets.dashboard,
         },
         {
-            path: "/owner/add-product",
-            label: "Add Product",
-            icon: assets.squarePlus,
-        },
-        {
-            path: "/owner/list-product",
-            label: "List product",
+            path: "/owner/menu",
+            label: "Dish Management",
             icon: assets.list,
         },
-
         {
-            path: "/owner/users",
-            label: "User Accounts",
-            icon: assets.user,
+            path: "/owner/orders",
+            label: "Order Management",
+            icon: assets.graph,
         },
         {
-            path: "/owner/admins",
-            label: "Admin Accounts",
-            icon: assets.shield || assets.sliders,
+            path: "/owner/shippers",
+            label: "Shipper Management",
+            icon: assets.delivery,
+        },
+        {
+            path: "/owner/assignments",
+            label: "Assign Orders",
+            icon: assets.forward,
+        },
+        {
+            path: "/owner/tracking",
+            label: "Delivery Tracking",
+            icon: assets.map,
+        },
+        {
+            path: "/owner/profile",
+            label: "Restaurant Info",
+            icon: assets.house,
+        },
+        {
+            path: "/owner/promotions",
+            label: "Promotions",
+            icon: assets.badge,
+        },
+        {
+            path: "/owner/feedback",
+            label: "Customer Feedback",
+            icon: assets.star,
+        },
+        {
+            path: "/owner/revenue",
+            label: "Revenue Statistics",
+            icon: assets.dollar,
+        },
+        {
+            path: "/owner/account",
+            label: "Account Management",
+            icon: assets.user,
         },
     ]
 
@@ -53,7 +77,7 @@ const Sidebar = () => {
             <div className="mx-auto max-w-[1440px] flex flex-col md:flex-row bg-white">
                 {/* SIDEBAR - Left Side*/}
                 <div className="max-md:flexCenter flex flex-col justify-between bg-primary sm:m-3
-                md:min-w-[20%] md:min-h-[97vh] rounded-xl shadow">
+                md:sticky md:top-3 md:self-start md:min-w-[20%] md:h-[97vh] md:overflow-y-auto rounded-xl shadow">
                     <div className="flex flex-col gap-y-6 max-md:items-center md:flex-col md:pt-5">
                         <div className="w-full flex justify-between md:flex-col">
                             {/* Logo */}

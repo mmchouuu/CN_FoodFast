@@ -1,116 +1,113 @@
-import React, { useEffect, useState } from 'react'
-import Title from '../components/Title'
-import { useAppContext } from '../context/AppContext'
-import { dummyOrdersData } from '../assets/data'
+import React, { useMemo } from "react";
+import { Link } from "react-router-dom";
+import { useAppContext } from "../context/AppContext";
 
-const MyOrders = () => {
-  const { currency, user } = useAppContext()
-  const [orders, setOrders] = useState([])
+const OrderHistory = () => {
+  const { pastOrders, getRestaurantById, getDishById, currency } =
+    useAppContext();
 
-  const loadOrderData = () => {
-    setOrders(dummyOrdersData)
-  }
-
-  useEffect(() => {
-    if (user) {
-      loadOrderData();
-    }
-  }, [user]);
+  const sortedOrders = useMemo(
+    () =>
+      [...pastOrders].sort(
+        (a, b) =>
+          new Date(b.placedAt).getTime() - new Date(a.placedAt).getTime()
+      ),
+    [pastOrders]
+  );
 
   return (
-    <div className='max-padd-container py-16 pt-28 bg-primary'>
-      <Title
-        title1={"My"}
-        title2={"Orders List"}
-        titleStyles={"items-start pb-5"}
-        paraStyles={"hidden"}
-      />
-      {orders.map((order) => (
-        <div key={order._id} className="bg-white p-2 mt-3 rounded-2xl">
-          <div className='flex flex-gap gap-8 gap-y-3 mb-3'>
-            {/* Order Item */}
-            {order.items.map((item, idx) => (
-              <div key={idx} className="text-gray-700 w-full lg:w-1/3">
-                <div className='flex flex-[2] gap-x-3'>
-                  <div className='flexCenter bg-primary rounded-xl'>
-                    <img src={item.product.images[0]} alt="" className='max-h max-w-20 object-contain' />
+    <div className="max-padd-container space-y-8 py-24">
+      <header>
+        <h1 className="text-3xl font-bold text-gray-900">Order history</h1>
+        <p className="mt-2 text-sm text-gray-500">
+          Track previous orders, view receipts, and share feedback with
+          restaurants and riders.
+        </p>
+      </header>
+
+      <div className="space-y-6">
+        {sortedOrders.map((order) => {
+          const restaurant = getRestaurantById(order.restaurantId);
+          return (
+            <div
+              key={order.id}
+              className="rounded-3xl bg-white p-6 shadow-sm transition hover:-translate-y-1 hover:shadow-lg"
+            >
+              <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <p className="text-sm uppercase text-gray-400">
+                    {new Date(order.placedAt).toLocaleDateString()} -{" "}
+                    {order.paymentMethod}
+                  </p>
+                  <h2 className="text-xl font-semibold text-gray-900">
+                    {restaurant?.name || "Restaurant"}
+                  </h2>
+                  <p className="text-sm text-gray-500">
+                    Order #{order.id} - {order.status}
+                  </p>
+                </div>
+                <div className="flex items-end gap-4">
+                  <div className="text-right">
+                    <p className="text-xs uppercase text-gray-400">Total</p>
+                    <p className="text-2xl font-bold text-gray-900">
+                      {currency}
+                      {order.totalAmount.toLocaleString()}
+                    </p>
                   </div>
-                  <div className='block ww-full'>
-                    <h5 className="uppercase line-clamp-1">{item.product.title}</h5>
-                    <div className="flex flex-wrap gap-3 max-sm:gap-y-1 mt-1">
-                      <div className="flex items-center gap-x-2">
-                        <h5 className="text-sm font-medium">Price:</h5>
-                        <p>
-                          {currency}
-                          {item.product.price[item.size]}
-                        </p>
-                      </div>
+                  <div className="flex flex-col gap-2">
+                    <Link
+                      to={`/restaurants/${order.restaurantId}`}
+                      className="rounded-full border border-gray-200 px-4 py-2 text-xs font-semibold text-gray-600 hover:border-orange-300 hover:text-orange-500"
+                    >
+                      Order again
+                    </Link>
+                    {order.canReview ? (
+                      <Link
+                        to={`/reviews?orderId=${order.id}`}
+                        className="rounded-full bg-orange-500 px-4 py-2 text-xs font-semibold text-white hover:bg-orange-600"
+                      >
+                        Leave review
+                      </Link>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
 
-                      <div className="flex items-center gap-x-2">
-                        <h5 className="text-sm font-medium">Quantity:</h5>
-                        <p>{item.quantity}</p>
-                      </div>
-
-                      <div className="flex items-center gap-x-2">
-                        <h5 className="text-sm font-medium">Size:</h5>
-                        <p>{item.size}</p>
-                      </div>
+              <div className="mt-6 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                {order.items.map((item, index) => {
+                  const dish = getDishById(item.dishId);
+                  return (
+                    <div
+                      key={`${item.dishId}-${index}`}
+                      className="rounded-2xl bg-gray-50 px-4 py-3 text-sm text-gray-600"
+                    >
+                      <p className="font-semibold text-gray-900">
+                        {item.quantity} x {dish?.title || item.dishId}
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        Size: {item.size}
+                      </p>
+                      <p className="text-sm font-semibold text-gray-900">
+                        {currency}
+                        {item.price.toLocaleString()}
+                      </p>
                     </div>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-          {/* Order Summary */}
-          <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 border-t border-gray-300 pt-3">
-            <div className="flex flex-col gap-2">
-              <div className="flex items-center gap-x-2">
-                <h5 className="text-sm font-medium">OrderId:</h5>
-                <p className="text-gray-400 text-sm break-all">{order._id}</p>
-              </div>
-              <div className="flex gap-4">
-                <div className="flex items-center gap-x-2">
-                  <h5 className="text-sm font-medium">Payment Status:</h5>
-                  <p className="text-gray-400 text-sm">
-                    {order.isPaid ? "Done" : "Pending"}
-                  </p>
-                  <div className="flex items-center gap-x-2">
-                    <h5 className="text-sm font-medium">Method:</h5>
-                    <p className="text-gray-400 text-sm">{order.paymentMethod}</p>
-                  </div>
-                </div>
-              </div>
-              <div className="flex gap-4">
-                <div className="flex items-center gap-x-2">
-                  <h5 className="text-sm font-medium">Date:</h5>
-                  <p className="text-gray-400 text-sm">
-                    {new Date(order.createdAt).toDateString()}
-                  </p>
-                </div>
-                <div className="flex items-center gap-x-2">
-                  <h5 className="text-sm font-medium">Amount:</h5>
-                  <p className="text-gray-400 text-sm">{order.amount}</p>
-                </div>
+                  );
+                })}
               </div>
             </div>
-            <div className='flex gap-3'>
-              <div className="flex items-center gap-x-2">
-                <h5 className="text-sm font-medium">Status:</h5>
-                <div className="flex items-center gap-1">
-                  <span className="min-w-2 h-2 rounded-full bg-green-500" />
-                  <p>{order.status}</p>
-                </div>
-              </div>
-              <button
-                onClick={loadOrderData} className="btn-solid py-1 !text-xs rounded-sm">
-                Track Order
-              </button>
-            </div>
-          </div>
+          );
+        })}
+      </div>
+
+      {!sortedOrders.length && (
+        <div className="rounded-3xl bg-white p-10 text-center text-gray-500 shadow">
+          You have not placed any orders yet. Explore restaurants to get
+          started.
         </div>
-      ))}
+      )}
     </div>
   );
 };
 
-export default MyOrders
+export default OrderHistory;

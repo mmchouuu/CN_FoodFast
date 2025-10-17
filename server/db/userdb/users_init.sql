@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS users (
   first_name VARCHAR(50),
   last_name VARCHAR(50),
   email VARCHAR(150) UNIQUE NOT NULL,
-  password_hash VARCHAR(255) NOT NULL,
+  password_hash VARCHAR(255),
   phone VARCHAR(30),
   role VARCHAR(30) NOT NULL DEFAULT 'customer',
   is_active BOOLEAN DEFAULT TRUE,
@@ -15,6 +15,11 @@ CREATE TABLE IF NOT EXISTS users (
   otp_code VARCHAR(10),
   otp_expires TIMESTAMP,
   email_verified BOOLEAN DEFAULT FALSE,
+  restaurant_name VARCHAR(150),
+  company_address VARCHAR(255),
+  tax_code VARCHAR(50),
+  manager_name VARCHAR(150),
+  restaurant_status VARCHAR(30) DEFAULT 'pending',
   created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
 );
@@ -31,6 +36,7 @@ CREATE TABLE IF NOT EXISTS user_addresses (
   district VARCHAR(100),
   city VARCHAR(100),
   is_primary BOOLEAN DEFAULT FALSE,
+  label VARCHAR(50),
   created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
 );

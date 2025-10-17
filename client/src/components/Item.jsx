@@ -1,94 +1,111 @@
-import React, { useState } from 'react';
-import { assets } from '../assets/data';
-import { useAppContext } from '../context/AppContext';
-
+import React, { useState } from "react";
+import { Link } from "react-router-dom";
+import { assets } from "../assets/data";
+import { useAppContext } from "../context/AppContext";
 
 const Item = ({ product }) => {
-    const {currency, addToCart} = useAppContext()
-    const [size, setSize] = useState(product.sizes[0]) // Default size (first in the array)
+  const { currency, addToCart } = useAppContext();
+  const [size, setSize] = useState(product.sizes?.[0] || "");
 
-    return (
-        <div className='relative mt-24 graoup'>
-            {/* Photo */}
-            <div className="group mx-auto rounded-full absolute left-0 right-0 -top-21 h-[177px] w-[177px]">
-            {/* <div className="group relative w-[177px] h-[177px] mx-auto rounded-full"> */}
-                <img 
-                src={product.images[0]} 
-                alt="productImg" 
-                height={177} 
-                width={177} 
-                className="absolute inset-0 h-full w-full object-cover opacity-100 group-hover:opacity-0 drop-shadow-md"
-                // className="absolute inset-0 h-full w-full object-cover opacity-100 group-hover:opacity-0 transition-opacity duration-300"
-               
-                />
-                <img 
-                src={product.images[1] ? product.images[1] : product.images[0]} 
-                alt="productImg" 
-                height={177} 
-                width={177} 
-                className="absolute inset-0 h-full w-full object-cover opacity-0 group-hover:opacity-100 drop-shadow-md"
-                // className="absolute inset-0 h-full w-full object-cover opacity-0 group-hover:opacity-100 transition-opacity duration-300"
+  if (!product) return null;
 
-                />
-            </div>
-            {/* Info */}
-            <div className="rounded-4xl bg-primary pt-23 px-1 overflow-hidden">
-                {/* Title & Description */}
-                <div classname="p-3">
-                    <h4 className="text-lg line-clamp-1 mb-1">{product.title}</h4>
-                    <div className="flex items-start justify-between pb-1">
-                        <h5 classname="mb-1">{product.category}</h5>
-                        <div className="flex items-center justify-start gap-x-1 bold-14">
-                            <img src={assets.star} alt="" width={16} />
-                            <img src={assets.star} alt="" width={16} />
-                            <img src={assets.star} alt="" width={16} />
-                            <img src={assets.star} alt="" width={16} />
-                            <img src={assets.star} alt="" width={16} />
-                            <h5>5.0</h5>
-                        </div>
-                    </div>
-                    <p className="line-clamp-1">{product.description}</p>
-                </div>
-                {/* Product Sizes */}
-                <div className="flexBetween pt-3">
-                {/* <div className="flex items-center justify-between pt-3"> */}
-                    <div className="flex gap-1">
-                        {product.sizes.map((item, i)=> (
-                            <button
-                            key={i}
-                            onClick={()=> setSize(item)}
-                            className={`${
-                              item == size ? "btn-light" : "btn-outline"
-                            } rounded h-6 w-6 p-2 text-xs flexCenter`}
-                            >
-                                {item}
-                            </button>
-                        ))}
-                    </div>
-                    <h4 className="text-solidOne">{currency}{product.price[size]}</h4>
-                </div>
-                {/* Order info & Button */}
-                <div className="flexBetween pl-1 text-[13px] font-semibold pt-3">
-                    <div className="flexStart gap-5">
-                        <div className="flex flex-col gap-1 relative bottom-1.5">
-                           <h5>Prep</h5> 
-                           <p className="text-xs">5m</p>
-                        </div>
-                        <hr className="h-8 w-[1px] bg-tertiary/10 border-none" />
-                        <div className="flex flex-col gap-1 relative bottom-1.5">
-                           <h5>Cook</h5> 
-                           <p className="text-xs">20m</p>
-                        </div>
-                    </div>
-                    <div className="flex flex-col gap-1">
-                        <button onClick={()=> addToCart(product._id, size)} className="btn-solid rounded p-3">
-                            <img src={assets.cartAdd} alt="" width={20} />
-                        </button>
-                    </div>
-                </div>
-            </div>
+  return (
+    <div className="relative flex flex-col overflow-hidden rounded-3xl bg-white shadow-sm transition hover:-translate-y-1 hover:shadow-lg">
+      <Link
+        to={`/restaurants/${product.restaurantId}/dishes/${product._id}`}
+        className="relative aspect-square overflow-hidden"
+      >
+        <img
+          src={product.images?.[0]}
+          alt={product.title}
+          className="h-full w-full object-cover transition duration-300 hover:scale-105"
+        />
+        {product.tags?.[0] ? (
+          <span className="absolute left-4 top-4 rounded-full bg-white/90 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-orange-500 shadow">
+            {product.tags[0]}
+          </span>
+        ) : null}
+      </Link>
+
+      <div className="flex flex-1 flex-col gap-3 px-5 py-5">
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900">
+              {product.title}
+            </h3>
+            <p className="text-xs uppercase text-gray-400">
+              {product.category}
+            </p>
+          </div>
+          <div className="flex items-center gap-1 text-xs font-semibold text-gray-500">
+            <img src={assets.star} alt="rating" className="h-3 w-3" />
+            <span>{(product.rating || 4.7).toFixed(1)}</span>
+          </div>
         </div>
-    );
-}
+        <p className="text-sm text-gray-500 line-clamp-2">
+          {product.description}
+        </p>
 
-export default Item
+        <div className="flex items-center justify-between">
+          <div className="flex gap-1">
+            {product.sizes?.map((option) => (
+              <button
+                key={option}
+                onClick={() => setSize(option)}
+                className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                  size === option
+                    ? "border-orange-500 bg-orange-500 text-white"
+                    : "border-orange-100 bg-white text-gray-600 hover:border-orange-300"
+                }`}
+              >
+                {option}
+              </button>
+            ))}
+          </div>
+          <p className="text-lg font-semibold text-orange-500">
+            {currency}
+            {size && product.price?.[size]
+              ? product.price[size].toLocaleString()
+              : 0}
+          </p>
+        </div>
+
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-4 text-xs text-gray-500">
+            <div>
+              <p className="font-semibold text-gray-700">Prep</p>
+              <p>
+                {product.preparation?.prepMinutes || 5}
+                {" "}
+                minutes
+              </p>
+            </div>
+            <div>
+              <p className="font-semibold text-gray-700">Cook</p>
+              <p>
+                {product.preparation?.cookMinutes || 15}
+                {" "}
+                minutes
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => addToCart(product._id, size)}
+            className="rounded-full bg-orange-500 px-4 py-2 text-xs font-semibold text-white transition hover:bg-orange-600"
+          >
+            Add to cart
+          </button>
+        </div>
+
+        <Link
+          to={`/restaurants/${product.restaurantId}/dishes/${product._id}`}
+          className="text-xs font-semibold text-orange-500 hover:underline"
+        >
+          View details
+        </Link>
+      </div>
+    </div>
+  );
+};
+
+export default Item;

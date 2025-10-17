@@ -11,8 +11,8 @@ async function register(req, res, next) {
 
 async function verify(req, res, next) {
   try {
-    const { email, otp } = req.body;
-    const result = await restaurantService.verifyRestaurant(email, otp);
+    const { email, otp, password } = req.body;
+    const result = await restaurantService.verifyRestaurant(email, otp, password);
     res.json(result);
   } catch (err) { next(err); }
 }

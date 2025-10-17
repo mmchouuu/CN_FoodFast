@@ -1,310 +1,296 @@
-import React, { useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
-import { assets } from '../assets/data';
-import { useAppContext } from '../context/AppContext';
-import Navbar from './navbar';
-import { useClerk, UserButton } from "@clerk/clerk-react";
-import { AiOutlineFileText } from "react-icons/ai";
+import React, { useEffect, useMemo, useState } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import CustomerProfilePanel from "./CustomerProfilePanel";
+import { assets } from "../assets/data";
+import { useAppContext } from "../context/AppContext";
 
+const navigationItems = [
+  { label: "Home", href: "/" },
+  { label: "Restaurants", href: "/restaurants" },
+  { label: "My Orders", href: "/orders/current" },
+];
+
+const BellIcon = ({ className }) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    className={className}
+  >
+    <path
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={1.5}
+      d="M14.857 17.657a2 2 0 11-3.714 0M6.5 9a5.5 5.5 0 1111 0c0 3.11.964 4.652 1.295 5.152a.75.75 0 01-.633 1.165H5.838a.75.75 0 01-.633-1.165C5.536 13.652 6.5 12.11 6.5 9z"
+    />
+  </svg>
+);
 
 const Header = () => {
-  const [menuOpened, setMenuOpened] = useState(false);
-  const location = useLocation(); // Lấy path hiện tại
-  const { navigate, user, getCartCount } = useAppContext() || {};
-  const { openSignIn } = useClerk();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const {
+    getCartCount,
+    isAuthenticated,
+    logoutAuth0,
+    logoutLocal,
+    searchQuery,
+    setSearchQuery,
+    notifications,
+    user,
+  } = useAppContext();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
 
-  const isHomePage = useLocation().pathname.endsWith('/')
+  const unreadNotifications = useMemo(
+    () => notifications.filter((notification) => !notification.read).length,
+    [notifications]
+  );
 
-  const toggleMenu = () => setMenuOpened(prev => !prev);
-  const OrdersIcon = () => <AiOutlineFileText className="w-4 h-4" />;
+  useEffect(() => {
+    setMenuOpen(false);
+    setProfileOpen(false);
+  }, [location.pathname]);
 
-  // Kiểm tra menu đang active
-  const isActive = (path) => location.pathname === path;
+  const isActive = (href) =>
+    href === "/"
+      ? location.pathname === "/"
+      : location.pathname.startsWith(href);
 
-  const menuItems = [
-    { name: "Home", path: "/" },
-    { name: "Featured Restaurants", path: "/#featured" },
-    { name: "Menu", path: "/menu" },
-    { name: "Blog", path: "/blog" },
-    { name: "Contact", path: "/contact" },
-  ];
+  const cartCount = getCartCount();
+
+  const initials = useMemo(() => {
+    const fullName =
+      user?.fullName ||
+      [user?.first_name, user?.last_name].filter(Boolean).join(" ") ||
+      user?.name ||
+      "";
+    if (!fullName) return "F";
+    const parts = fullName.trim().split(" ");
+    if (parts.length === 1) return parts[0].charAt(0).toUpperCase();
+    return (
+      parts[0].charAt(0).toUpperCase() +
+      parts[parts.length - 1].charAt(0).toUpperCase()
+    );
+  }, [user]);
 
   return (
-    <header className={`absolute top-0 left-0 right-0 z-50 py-3 ${!isHomePage && "bg-white"}`}>
-      <div className="max-padd-container flex items-center justify-between">
-        {/* LOGO */}
-
-        <Link to="/" className="flex items-center gap-2">
-          <img src={assets.logoImg} alt="logo" className="h-12 w-12" />
-          <div className="flex flex-col">
-            <span className="hidden sm:block font-extrabold text-3xl relative top-1 left-1">
-              Tasty
-            </span>
-            <span
-              className="hidden sm:block font-extrabold text-xs relative left-1.5 tracking-[10px] uppercase text-orange-500"
-            >
-              Queen
-            </span>
-          </div>
-        </Link>
-
-        {/* NAVBAR */}
-        <nav className="hidden lg:flex flex-1 justify-center gap-x-8 text-lg font-medium">
-          {menuItems.map(item => (
-            <Link
-              key={item.path}
-              to={item.path}
-              className={isActive(item.path) ? "text-orange-500" : ""}
-            >
-              {item.name}
-            </Link>
-          ))}
-        </nav>
-
-        {/* BUTTONS & MENU TOGGLE */}
-        <div className="flex items-center gap-4 lg:gap-8">
-          {/* MENU TOGGLE mobile */}
-          <div className="relative lg:hidden w-7 h-6" onClick={toggleMenu}>
+    <>
+      <header className="sticky top-0 z-50 bg-white/90 shadow-sm backdrop-blur">
+        <div className="max-padd-container flex items-center gap-4 py-4">
+          <Link to="/" className="flex items-center gap-3">
             <img
-              src={menuOpened ? assets.menuClose : assets.menu}
-              alt="menu toggle"
-              className="cursor-pointer w-full h-full"
+              src={assets.logoImg}
+              alt="FoodFast logo"
+              className="h-12 w-12"
             />
-          </div>
-
-          {/* MENU TOGGLE */}
-          {menuOpened && (
-            <div className="absolute top-16 right-6 w-40 bg-white shadow-md rounded-lg flex flex-col gap-4 p-4 z-50">
-              {menuItems.map(item => (
-                <Link
-                  key={item.path}
-                  to={item.path}
-                  className={isActive(item.path) ? "text-orange-500" : ""}
-                  onClick={() => setMenuOpened(false)}
-                >
-                  {item.name}
-                </Link>
-              ))}
+            <div>
+              <p className="text-sm uppercase tracking-[0.4em] text-orange-500">
+                Tasty
+              </p>
+              <p className="text-xl font-bold text-gray-900">
+                Queen
+              </p>
             </div>
-          )}
+          </Link>
 
-          {/* CART */}
-          <div onClick={() => navigate('/cart')} className="relative cursor-pointer">
-            <img src={assets.cartAdded} alt="cart" className="p-2 rounded-full" />
-            <span
-              className="absolute -top-2 -right-2 w-5 h-5 text-xs font-bold flex items-center justify-center rounded-full text-white"
-              style={{ backgroundColor: "#dc583e" }}
-            >
-              {getCartCount()}
-            </span>
-          </div>
-
-
-          {/* USER PROFILE */}
-          <div>
-            {user ? (
-              <UserButton
-                appearance={{
-                  elements: {
-                    userButtonAvatarBox: {
-                      width: "42px",
-                      height: "42px",
-                    },
-                  },
-                }}
+          <nav className="hidden items-center gap-2 text-sm font-semibold text-gray-700 lg:flex">
+            {navigationItems.map((item) => (
+              <Link
+                key={item.href}
+                to={item.href}
+                className={`rounded-full px-4 py-2 transition ${
+                  isActive(item.href)
+                    ? "bg-orange-500 text-white shadow"
+                    : "hover:bg-orange-50 hover:text-orange-500"
+                }`}
               >
-                <UserButton.MenuItems>
-                  <UserButton.Action
-                    label="My Orders"
-                    labelIcon={<OrdersIcon />}
-                    onClick={() => navigate("/my-orders")}
-                  />
-                </UserButton.MenuItems>
-              </UserButton>
+                {item.label}
+              </Link>
+            ))}
+          </nav>
 
+          <div className="flex flex-1 items-center justify-end gap-3">
+            <div className="hidden flex-1 items-center justify-end gap-3 md:flex">
+              <div className="relative flex w-full max-w-md items-center rounded-full border border-orange-100 bg-white px-4 py-2 text-sm shadow">
+                <img
+                  src={assets.search}
+                  alt="Search"
+                  className="mr-2 h-4 w-4"
+                />
+                <input
+                  type="search"
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  placeholder="Search restaurants, dishes or addresses..."
+                  className="w-full border-none bg-transparent text-sm text-gray-700 outline-none"
+                />
+              </div>
+            </div>
 
+            <button
+              onClick={() => navigate("/notifications")}
+              className="relative hidden rounded-full border border-gray-200 p-2 text-gray-600 transition hover:border-orange-300 hover:text-orange-500 md:flex"
+              aria-label="Notifications"
+            >
+              <BellIcon className="h-5 w-5" />
+              {unreadNotifications ? (
+                <span className="absolute -right-1 -top-1 inline-flex h-4 min-w-[18px] items-center justify-center rounded-full bg-orange-500 px-1 text-[10px] font-semibold text-white">
+                  {unreadNotifications}
+                </span>
+              ) : null}
+            </button>
+
+            <button
+              onClick={() => navigate("/cart")}
+              className="relative rounded-full border border-orange-100 p-2 text-gray-600 transition hover:border-orange-300 hover:text-orange-500"
+              aria-label="View cart"
+            >
+              <img
+                src={assets.cartAdd}
+                alt="Cart"
+                className="h-5 w-5 invert"
+              />
+              {cartCount ? (
+                <span className="absolute -right-1 -top-1 inline-flex h-4 min-w-[18px] items-center justify-center rounded-full bg-orange-500 px-1 text-[10px] font-semibold text-white">
+                  {cartCount}
+                </span>
+              ) : null}
+            </button>
+
+            {isAuthenticated ? (
+              <div className="hidden items-center gap-2 md:flex">
+                <button
+                  onClick={() => setProfileOpen(true)}
+                  className="flex h-10 w-10 items-center justify-center rounded-full bg-orange-500 text-sm font-semibold text-white transition hover:bg-orange-600"
+                  aria-label="Open profile"
+                >
+                  {initials}
+                </button>
+              </div>
             ) : (
               <button
-                className="btn-solid flex items-center gap-2"
-                onClick={() => openSignIn()}
+                onClick={() => navigate("/auth/login")}
+                className="hidden rounded-full bg-orange-500 px-5 py-2 text-sm font-semibold text-white transition hover:bg-orange-600 md:block"
               >
-                Login
-                <img src={assets.user} alt="user" className="w-5 invert" />
+                Log in
               </button>
             )}
+
+            <button
+              onClick={() => navigate("/restaurant/auth/register")}
+              className="hidden rounded-full border border-orange-200 px-5 py-2 text-sm font-semibold text-orange-500 transition hover:border-orange-300 hover:bg-orange-50 md:block"
+            >
+              For Restaurants
+            </button>
+
+            <button
+              onClick={() => setMenuOpen((prev) => !prev)}
+              className="rounded-full border border-gray-200 p-2 hover:border-orange-300 md:hidden"
+              aria-label="Toggle navigation"
+            >
+              <img
+                src={menuOpen ? assets.menuClose : assets.menu}
+                alt="Toggle menu"
+                className="h-5 w-5"
+              />
+            </button>
           </div>
         </div>
-      </div>
-    </header>
+
+        {menuOpen ? (
+          <div className="border-t border-gray-100 bg-white px-4 py-4 md:hidden">
+            <div className="flex flex-col gap-3 text-sm font-semibold text-gray-700">
+              <div className="relative flex items-center rounded-full border border-orange-100 bg-white px-4 py-2 text-sm shadow">
+                <img
+                  src={assets.search}
+                  alt="Search"
+                  className="mr-2 h-4 w-4"
+                />
+                <input
+                  type="search"
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  placeholder="Search restaurants, dishes or addresses..."
+                  className="w-full border-none bg-transparent text-sm text-gray-700 outline-none"
+                />
+              </div>
+              {navigationItems.map((item) => (
+                <Link
+                  key={item.href}
+                  to={item.href}
+                  onClick={() => setMenuOpen(false)}
+                  className={`rounded-2xl px-4 py-3 transition ${
+                    isActive(item.href)
+                      ? "bg-orange-500 text-white"
+                      : "hover:bg-orange-50 hover:text-orange-500"
+                  }`}
+                >
+                  {item.label}
+                </Link>
+              ))}
+              <Link
+                to="/notifications"
+                onClick={() => setMenuOpen(false)}
+                className="rounded-2xl px-4 py-3 text-left text-gray-700 transition hover:bg-orange-50 hover:text-orange-500"
+              >
+                Notifications
+                {unreadNotifications ? (
+                  <span className="ml-2 inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-orange-500 px-1 text-xs font-semibold text-white">
+                    {unreadNotifications}
+                  </span>
+                ) : null}
+              </Link>
+              <button
+                onClick={() => {
+                  navigate("/restaurant/auth/register");
+                  setMenuOpen(false);
+                }}
+                className="rounded-2xl border border-orange-200 px-4 py-3 text-left text-orange-500 transition hover:border-orange-300 hover:bg-orange-50"
+              >
+                For Restaurants
+              </button>
+              {isAuthenticated ? (
+                <>
+                  <button
+                    onClick={() => {
+                      setProfileOpen(true);
+                      setMenuOpen(false);
+                    }}
+                    className="rounded-2xl border border-orange-100 px-4 py-3 text-left text-gray-700 transition hover:border-orange-300 hover:text-orange-500"
+                  >
+                    Customer profile
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={() => {
+                    navigate("/auth/login");
+                    setMenuOpen(false);
+                  }}
+                  className="rounded-2xl bg-orange-500 px-4 py-3 text-left text-white"
+                >
+                  Log in
+                </button>
+              )}
+            </div>
+          </div>
+        ) : null}
+      </header>
+
+      {isAuthenticated ? (
+        <CustomerProfilePanel
+          open={profileOpen}
+          onClose={() => setProfileOpen(false)}
+          onLogout={() => {
+            logoutLocal?.();
+            logoutAuth0?.({ returnTo: window.location.origin });
+          }}
+        />
+      ) : null}
+    </>
   );
 };
 
 export default Header;
-
-// --------------------------------------------------------------------------------------------------
-
-
-
-// // src/components/Header.js
-// import React, { useState } from 'react';
-// import { Link, useLocation, useNavigate } from 'react-router-dom';
-// import { assets } from '../assets/data';
-// import { useAppContext } from '../context/AppContext';
-// import AuthForm from '../pages/AuthForm';
-// import { useAuth0 } from '@auth0/auth0-react';
-// import { useClerk } from "@clerk/clerk-react";
-
-// const Header = () => {
-//   const location = useLocation();
-//   const navigate = useNavigate();
-//   const { getCartCount } = useAppContext() || {};
-//   const { user: auth0User, loginWithRedirect, logout } = useAuth0();
-//   const { openSignIn } = useClerk();
-
-//   const [menuOpened, setMenuOpened] = useState(false);
-//   const [showDropdown, setShowDropdown] = useState(false);
-//   const [showAuthForm, setShowAuthForm] = useState(false);
-
-//   const isHomePage = location.pathname === '/';
-//   const toggleMenu = () => setMenuOpened(prev => !prev);
-
-//   const menuItems = [
-//     { name: "Home", path: "/" },
-//     { name: "Featured Restaurants", path: "/#featured" },
-//     { name: "Menu", path: "/menu" },
-//     { name: "Blog", path: "/blog" },
-//     { name: "Contact", path: "/contact" },
-//   ];
-
-//   const isActive = (path) => location.pathname === path;
-
-//   // Cuộn xuống dải Featured Restaurants
-//   const handleScrollToFeatured = (path) => {
-//     if (path === "/#featured") {
-//       if (isHomePage) {
-//         const section = document.getElementById("featured-section");
-//         if (section) section.scrollIntoView({ behavior: "smooth" });
-//       } else {
-//         navigate("/");
-//         setTimeout(() => {
-//           const section = document.getElementById("featured-section");
-//           if (section) section.scrollIntoView({ behavior: "smooth" });
-//         }, 600);
-//       }
-//     } else {
-//       navigate(path);
-//     }
-//   };
-
-//   return (
-//     <header className={`absolute top-0 left-0 right-0 z-50 py-3 ${!isHomePage ? "bg-white shadow-sm" : ""}`}>
-//       <div className="max-padd-container flex items-center justify-between">
-//         {/* Logo */}
-//         <Link to="/" className="flex items-center gap-2">
-//           <img src={assets.logoImg} alt="logo" className="h-12 w-12" />
-//           <div className="flex flex-col">
-//             <span className="hidden sm:block font-extrabold text-3xl relative top-1 left-1">Tasty</span>
-//             <span className="hidden sm:block font-extrabold text-xs relative left-1.5 tracking-[10px] uppercase text-orange-500">Queen</span>
-//           </div>
-//         </Link>
-
-//         {/* Navbar */}
-//         <nav className="hidden lg:flex flex-1 justify-center gap-x-8 text-lg font-medium">
-//           {menuItems.map(item => (
-//             <button
-//               key={item.path}
-//               onClick={() => handleScrollToFeatured(item.path)}
-//               className={`${isActive(item.path) ? "text-orange-500" : "text-gray-700 hover:text-orange-500"} transition`}
-//             >
-//               {item.name}
-//             </button>
-//           ))}
-//         </nav>
-
-//         {/* Buttons & Cart */}
-//         <div className="flex items-center gap-4 lg:gap-8">
-//           {/* Toggle mobile menu */}
-//           <div className="relative lg:hidden w-7 h-6" onClick={toggleMenu}>
-//             <img src={menuOpened ? assets.menuClose : assets.menu} alt="menu toggle" className="cursor-pointer w-full h-full" />
-//           </div>
-
-//           {menuOpened && (
-//             <div className="absolute top-16 right-6 w-48 bg-white shadow-md rounded-lg flex flex-col gap-4 p-4 z-50">
-//               {menuItems.map(item => (
-//                 <button
-//                   key={item.path}
-//                   onClick={() => { handleScrollToFeatured(item.path); setMenuOpened(false); }}
-//                   className={`${isActive(item.path) ? "text-orange-500" : ""}`}
-//                 >
-//                   {item.name}
-//                 </button>
-//               ))}
-//             </div>
-//           )}
-
-//           {/* Cart */}
-//           <div onClick={() => navigate('/cart')} className="relative cursor-pointer">
-//             <img src={assets.cartAdded} alt="cart" className="p-2 rounded-full hover:bg-gray-100 transition" />
-//             <span
-//               className="absolute -top-2 -right-2 w-5 h-5 text-xs font-bold flex items-center justify-center rounded-full text-white"
-//               style={{ backgroundColor: "#dc583e" }}
-//             >
-//               {getCartCount()}
-//             </span>
-//           </div>
-
-//           {/* User Profile */}
-//           <div className="relative">
-//             {auth0User ? (
-//               <div>
-//                 <img
-//                   src={auth0User.picture || assets.user}
-//                   alt="avatar"
-//                   className="w-10 h-10 rounded-full cursor-pointer"
-//                   onClick={() => setShowDropdown(prev => !prev)}
-//                 />
-//                 {showDropdown && (
-//                   <div className="absolute right-0 mt-2 w-44 bg-white shadow-md rounded-lg flex flex-col p-2 z-50">
-//                     <button
-//                       className="text-left px-2 py-1 hover:bg-gray-100"
-//                       onClick={() => { navigate("/profile"); setShowDropdown(false); }}
-//                     >
-//                       Manage Profile
-//                     </button>
-//                     <button
-//                       className="text-left px-2 py-1 hover:bg-red-100 text-red-500"
-//                       onClick={() => logout({ returnTo: window.location.origin })}
-//                     >
-//                       Log Out
-//                     </button>
-//                   </div>
-//                 )}
-//               </div>
-//             ) : (
-//               <>
-//                 <button
-//                   className="btn-solid flex items-center gap-2"
-//                   onClick={() => setShowAuthForm(true)}
-//                 >
-//                   Login
-//                   <img src={assets.user} alt="user" className="w-5 invert" />
-//                 </button>
-//                 {showAuthForm && (
-//                   <AuthForm
-//                     onClose={() => setShowAuthForm(false)}
-//                     onLogin={() => loginWithRedirect()}
-//                     onSignup={() => loginWithRedirect()}
-//                     onAuth0Login={() => loginWithRedirect()}
-//                     onClerkLogin={() => openSignIn()}
-//                   />
-//                 )}
-//               </>
-//             )}
-//           </div>
-//         </div>
-//       </div>
-//     </header>
-//   );
-// };
-
-// export default Header;

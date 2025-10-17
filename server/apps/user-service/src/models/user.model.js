@@ -13,12 +13,60 @@ async function findById(id) {
   return r.rows[0];
 }
 
-async function createUser({first_name, last_name, email, password_hash, phone, role='customer', otp_code=null, otp_expires=null, is_verified=false, is_approved=false}) {
+async function createUser({
+  first_name,
+  last_name,
+  email,
+  password_hash = null,
+  phone,
+  role = 'customer',
+  otp_code = null,
+  otp_expires = null,
+  is_verified = false,
+  is_approved = false,
+  restaurant_name = null,
+  company_address = null,
+  tax_code = null,
+  manager_name = null,
+  restaurant_status = role === 'restaurant' ? 'pending' : null,
+}) {
   const res = await pool.query(
-    `INSERT INTO users (first_name, last_name, email, password_hash, phone, role, otp_code, otp_expires, is_verified, is_approved)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+    `INSERT INTO users (
+        first_name,
+        last_name,
+        email,
+        password_hash,
+        phone,
+        role,
+        otp_code,
+        otp_expires,
+        is_verified,
+        is_approved,
+        restaurant_name,
+        company_address,
+        tax_code,
+        manager_name,
+        restaurant_status
+     )
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
      RETURNING *`,
-    [first_name, last_name, email, password_hash, phone, role, otp_code, otp_expires, is_verified, is_approved]
+    [
+      first_name,
+      last_name,
+      email,
+      password_hash,
+      phone,
+      role,
+      otp_code,
+      otp_expires,
+      is_verified,
+      is_approved,
+      restaurant_name,
+      company_address,
+      tax_code,
+      manager_name,
+      restaurant_status,
+    ]
   );
   return res.rows[0];
 }
