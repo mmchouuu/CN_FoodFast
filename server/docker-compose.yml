@@ -139,6 +139,7 @@ services:
       POSTGRES_PASSWORD: 123
       POSTGRES_DB: userdb
     volumes:
+      - userdb_data:/var/lib/postgresql/data
       - ./db/userdb/users_init.sql:/docker-entrypoint-initdb.d/1_users.sql:ro
     ports:
       - "5433:5432"
@@ -157,6 +158,7 @@ services:
       POSTGRES_PASSWORD: 123
       POSTGRES_DB: productdb
     volumes:
+      - productdb_data:/var/lib/postgresql/data
       - ./db/productdb/products_init.sql:/docker-entrypoint-initdb.d/1_products.sql:ro
     ports:
       - "5434:5432"
@@ -175,6 +177,7 @@ services:
       POSTGRES_PASSWORD: 123
       POSTGRES_DB: orderdb
     volumes:
+      - orderdb_data:/var/lib/postgresql/data
       - ./db/orderdb/orders_init.sql:/docker-entrypoint-initdb.d/1_orders.sql:ro
     ports:
       - "5435:5432"
@@ -193,6 +196,7 @@ services:
       POSTGRES_PASSWORD: 123
       POSTGRES_DB: paymentdb
     volumes:
+      - paymentdb_data:/var/lib/postgresql/data
       - ./db/paymentdb/payments_init.sql:/docker-entrypoint-initdb.d/1_payments.sql:ro
     ports:
       - "5436:5432"
@@ -225,3 +229,9 @@ services:
 networks:
   backend_net:
     driver: bridge
+
+volumes:
+  userdb_data:
+  productdb_data:
+  orderdb_data:
+  paymentdb_data:

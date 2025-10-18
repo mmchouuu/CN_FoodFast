@@ -1,19 +1,93 @@
-import restaurantA from "../assets/product_1.png";
-import restaurantB from "../assets/product_2.png";
-import restaurantC from "../assets/product_3.png";
-import dishA from "../assets/product_4.png";
-import dishB from "../assets/product_5.png";
-import dishC from "../assets/product_6.png";
-import dishD from "../assets/product_7.png";
-import dishE from "../assets/product_8.png";
-import dishF from "../assets/product_9.png";
-import dishG from "../assets/product_10.png";
-import dishH from "../assets/product_11.png";
-import dishI from "../assets/product_12.png";
 import userAvatar1 from "../assets/user1.png";
 import userAvatar2 from "../assets/user2.png";
 import userAvatar3 from "../assets/user3.png";
 import userAvatar4 from "../assets/user4.png";
+import food3 from "../assets/frontend_assets/food_3.png";
+import food4 from "../assets/frontend_assets/food_4.png";
+import food5 from "../assets/frontend_assets/food_5.png";
+import food6 from "../assets/frontend_assets/food_6.png";
+import food7 from "../assets/frontend_assets/food_7.png";
+import food8 from "../assets/frontend_assets/food_8.png";
+import food9 from "../assets/frontend_assets/food_9.png";
+import food10 from "../assets/frontend_assets/food_10.png";
+import food11 from "../assets/frontend_assets/food_11.png";
+import food12 from "../assets/frontend_assets/food_12.png";
+import food13 from "../assets/frontend_assets/food_13.png";
+import food14 from "../assets/frontend_assets/food_14.png";
+import food15 from "../assets/frontend_assets/food_15.png";
+import food16 from "../assets/frontend_assets/food_16.png";
+import food17 from "../assets/frontend_assets/food_17.png";
+import food18 from "../assets/frontend_assets/food_18.png";
+import food19 from "../assets/frontend_assets/food_19.png";
+import food20 from "../assets/frontend_assets/food_20.png";
+import food21 from "../assets/frontend_assets/food_21.png";
+import food22 from "../assets/frontend_assets/food_22.png";
+import food23 from "../assets/frontend_assets/food_23.png";
+import food24 from "../assets/frontend_assets/food_24.png";
+import food25 from "../assets/frontend_assets/food_25.png";
+import food26 from "../assets/frontend_assets/food_26.png";
+import food27 from "../assets/frontend_assets/food_27.png";
+import food28 from "../assets/frontend_assets/food_28.png";
+import food29 from "../assets/frontend_assets/food_29.png";
+import food30 from "../assets/frontend_assets/food_30.png";
+import food31 from "../assets/frontend_assets/food_31.png";
+
+const restaurantImages = {
+  saigon: {
+    hero: food22,
+    cover: food23,
+    gallery: [food24, food5],
+  },
+  hue: {
+    hero: food4,
+    cover: food7,
+    gallery: [food13, food6],
+  },
+  chay: {
+    hero: food19,
+    cover: food21,
+    gallery: [food18, food17],
+  },
+};
+
+const dishImages = {
+  pho: {
+    primary: food14,
+    secondary: food15,
+  },
+  brokenRice: {
+    primary: food20,
+    secondary: food31,
+  },
+  coffee: {
+    primary: food9,
+    secondary: food10,
+  },
+  bunBo: {
+    primary: food13,
+    secondary: food11,
+  },
+  steamedRiceCake: {
+    primary: food12,
+    secondary: food16,
+  },
+  pandanPudding: {
+    primary: food8,
+    secondary: food3,
+  },
+  tofuSkewers: {
+    primary: food25,
+    secondary: food26,
+  },
+  veganHotpot: {
+    primary: food27,
+    secondary: food29,
+  },
+  chiaPudding: {
+    primary: food30,
+    secondary: food28,
+  },
+};
 
 export const restaurants = [
   {
@@ -24,8 +98,9 @@ export const restaurants = [
     rating: 4.8,
     reviewCount: 324,
     shortHours: "08:00 - 22:00",
-    heroImage: restaurantA,
-    coverImage: restaurantA,
+    heroImage: restaurantImages.saigon.hero,
+    coverImage: restaurantImages.saigon.cover,
+    images: restaurantImages.saigon.gallery,
     tags: ["Noodles", "Street Food", "Delivery under 30m"],
     promotions: [
       {
@@ -52,8 +127,9 @@ export const restaurants = [
     rating: 4.6,
     reviewCount: 198,
     shortHours: "09:00 - 21:00",
-    heroImage: restaurantB,
-    coverImage: restaurantB,
+    heroImage: restaurantImages.hue.hero,
+    coverImage: restaurantImages.hue.cover,
+    images: restaurantImages.hue.gallery,
     tags: ["Central Vietnam", "Family meals", "Vegetarian options"],
     promotions: [
       {
@@ -75,8 +151,9 @@ export const restaurants = [
     rating: 4.9,
     reviewCount: 412,
     shortHours: "10:00 - 22:30",
-    heroImage: restaurantC,
-    coverImage: restaurantC,
+    heroImage: restaurantImages.chay.hero,
+    coverImage: restaurantImages.chay.cover,
+    images: restaurantImages.chay.gallery,
     tags: ["Plant based", "Healthy", "Gluten friendly"],
     promotions: [
       {
@@ -106,7 +183,7 @@ export const dishes = [
       Regular: 65000,
       Large: 78000,
     },
-    images: [dishA, dishB],
+    images: [dishImages.pho.primary, dishImages.pho.secondary],
     tags: ["Best seller", "Low fat"],
     rating: 4.9,
     reviewCount: 180,
@@ -141,7 +218,7 @@ export const dishes = [
       Regular: 59000,
       XL: 72000,
     },
-    images: [dishC, dishD],
+    images: [dishImages.brokenRice.primary, dishImages.brokenRice.secondary],
     tags: ["Combo ready"],
     rating: 4.7,
     reviewCount: 142,
@@ -175,7 +252,7 @@ export const dishes = [
       Regular: 32000,
       Large: 38000,
     },
-    images: [dishE, dishF],
+    images: [dishImages.coffee.primary, dishImages.coffee.secondary],
     tags: ["Popular", "Caffeine boost"],
     rating: 4.5,
     reviewCount: 96,
@@ -209,7 +286,7 @@ export const dishes = [
       Regular: 72000,
       Large: 84000,
     },
-    images: [dishG, dishH],
+    images: [dishImages.bunBo.primary, dishImages.bunBo.secondary],
     tags: ["Signature", "Spicy"],
     rating: 4.8,
     reviewCount: 210,
@@ -243,7 +320,10 @@ export const dishes = [
       "Six pieces": 45000,
       "Twelve pieces": 78000,
     },
-    images: [dishI, dishA],
+    images: [
+      dishImages.steamedRiceCake.primary,
+      dishImages.steamedRiceCake.secondary,
+    ],
     tags: ["Light snack"],
     rating: 4.4,
     reviewCount: 87,
@@ -274,7 +354,10 @@ export const dishes = [
     price: {
       Cup: 38000,
     },
-    images: [dishB, dishC],
+    images: [
+      dishImages.pandanPudding.primary,
+      dishImages.pandanPudding.secondary,
+    ],
     tags: ["Vegan friendly"],
     rating: 4.3,
     reviewCount: 65,
@@ -308,7 +391,10 @@ export const dishes = [
       "Two skewers": 52000,
       "Four skewers": 89000,
     },
-    images: [dishD, dishE],
+    images: [
+      dishImages.tofuSkewers.primary,
+      dishImages.tofuSkewers.secondary,
+    ],
     tags: ["Plant based", "High protein"],
     rating: 4.7,
     reviewCount: 155,
@@ -341,7 +427,10 @@ export const dishes = [
       "For 2": 220000,
       "For 4": 390000,
     },
-    images: [dishF, dishG],
+    images: [
+      dishImages.veganHotpot.primary,
+      dishImages.veganHotpot.secondary,
+    ],
     tags: ["Sharing", "Restaurant special"],
     rating: 4.9,
     reviewCount: 266,
@@ -374,7 +463,10 @@ export const dishes = [
     price: {
       Cup: 42000,
     },
-    images: [dishH, dishI],
+    images: [
+      dishImages.chiaPudding.primary,
+      dishImages.chiaPudding.secondary,
+    ],
     tags: ["Gluten friendly", "No added sugar"],
     rating: 4.6,
     reviewCount: 112,
@@ -503,15 +595,23 @@ export const restaurantReviews = [
     restaurantId: "res-01",
     orderId: "order-33790",
     customerName: "Tran Minh Anh",
-    customerPhone: "+84 909 111 222",
-    avatar: userAvatar1,
-    rating: 4.8,
-    comment:
-      "The broth is rich and true to Saigon pho. Delivery was fast and the food arrived hot.",
-    photos: [dishA],
-    dishes: [
-      { dishId: "dish-01", title: "Pho Bo Slow Simmered", image: dishA },
-      { dishId: "dish-02", title: "Grilled Pork Banh Mi", image: dishB },
+  customerPhone: "+84 909 111 222",
+  avatar: userAvatar1,
+  rating: 4.8,
+  comment:
+    "The broth is rich and true to Saigon pho. Delivery was fast and the food arrived hot.",
+  photos: [dishImages.pho.primary],
+  dishes: [
+      {
+        dishId: "dish-01",
+        title: "Pho Bo Slow Simmered",
+        image: dishImages.pho.primary,
+      },
+      {
+        dishId: "dish-02",
+        title: "Charcoal Pork Rice",
+        image: dishImages.brokenRice.primary,
+      },
     ],
     createdAt: "2025-10-11T21:15:00+07:00",
   },
@@ -520,15 +620,23 @@ export const restaurantReviews = [
     restaurantId: "res-02",
     orderId: "order-33888",
     customerName: "Nguyen Quoc Huy",
-    customerPhone: "+84 938 555 123",
-    avatar: userAvatar2,
-    rating: 4.6,
-    comment:
-      "Hue beef noodle soup tastes authentic with fragrant lemongrass broth. A bit pricey but worth it.",
-    photos: [dishC],
-    dishes: [
-      { dishId: "dish-04", title: "Hue Spicy Beef Noodle", image: dishC },
-      { dishId: "dish-05", title: "Lemongrass Chicken", image: dishD },
+  customerPhone: "+84 938 555 123",
+  avatar: userAvatar2,
+  rating: 4.6,
+  comment:
+    "Hue beef noodle soup tastes authentic with fragrant lemongrass broth. A bit pricey but worth it.",
+  photos: [dishImages.bunBo.primary],
+  dishes: [
+      {
+        dishId: "dish-04",
+        title: "Bun Bo Hue Premium",
+        image: dishImages.bunBo.primary,
+      },
+      {
+        dishId: "dish-05",
+        title: "Hue Steamed Rice Cake Set",
+        image: dishImages.steamedRiceCake.primary,
+      },
     ],
     createdAt: "2025-10-12T12:45:00+07:00",
   },
@@ -538,14 +646,22 @@ export const restaurantReviews = [
     orderId: "order-33711",
     customerName: "Pham Bao Tran",
     customerPhone: "+84 902 777 456",
-    avatar: userAvatar3,
-    rating: 5,
-    comment:
-      "The plant-based dishes are refined; I especially love the mushroom hotpot and flavorful dipping sauce.",
-    photos: [dishE],
-    dishes: [
-      { dishId: "dish-07", title: "Crispy Mushroom Rolls", image: dishE },
-      { dishId: "dish-08", title: "Vegan Hotpot", image: dishF },
+  avatar: userAvatar3,
+  rating: 5,
+  comment:
+    "The plant-based dishes are refined; I especially love the mushroom hotpot and flavorful dipping sauce.",
+  photos: [dishImages.veganHotpot.primary],
+  dishes: [
+      {
+        dishId: "dish-07",
+        title: "Tofu Lemongrass Skewers",
+        image: dishImages.tofuSkewers.primary,
+      },
+      {
+        dishId: "dish-08",
+        title: "Vegan Hotpot Set",
+        image: dishImages.veganHotpot.primary,
+      },
     ],
     createdAt: "2025-10-06T08:30:00+07:00",
   },
@@ -555,14 +671,22 @@ export const restaurantReviews = [
     orderId: "order-33670",
     customerName: "Doan Hai Nam",
     customerPhone: "+84 903 112 999",
-    avatar: userAvatar4,
-    rating: 4.7,
-    comment:
-      "Beautiful presentation, light flavors, and healthy options. I'll keep ordering here.",
-    photos: [dishG],
-    dishes: [
-      { dishId: "dish-09", title: "Lotus Stem Salad", image: dishG },
-      { dishId: "dish-10", title: "Green Curry Tofu", image: dishH },
+  avatar: userAvatar4,
+  rating: 4.7,
+  comment:
+    "Beautiful presentation, light flavors, and healthy options. I'll keep ordering here.",
+  photos: [dishImages.chiaPudding.primary],
+  dishes: [
+      {
+        dishId: "dish-09",
+        title: "Coconut Chia Pudding",
+        image: dishImages.chiaPudding.primary,
+      },
+      {
+        dishId: "dish-08",
+        title: "Vegan Hotpot Set",
+        image: dishImages.veganHotpot.secondary,
+      },
     ],
     createdAt: "2025-10-03T19:40:00+07:00",
   },

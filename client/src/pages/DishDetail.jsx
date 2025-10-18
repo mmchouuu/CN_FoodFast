@@ -1,6 +1,10 @@
 import React, { useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useAppContext } from "../context/AppContext";
+import {
+  dishPlaceholderImage,
+  pickFirstImageUrl,
+} from "../utils/imageHelpers";
 
 const DishDetail = () => {
   const { restaurantId, dishId } = useParams();
@@ -98,6 +102,13 @@ const DishDetail = () => {
     addToCart(dish._id, selectedSize || null, quantity);
   };
 
+  const dishImage = pickFirstImageUrl(
+    dishPlaceholderImage,
+    dish.images,
+    dish.image,
+    dish.heroImage,
+  );
+
   return (
     <div className="max-padd-container space-y-12 py-24">
       <nav className="text-sm text-gray-500">
@@ -119,9 +130,9 @@ const DishDetail = () => {
           <div className="rounded-3xl bg-white p-4 shadow-sm">
             <div className="aspect-[3/4] overflow-hidden rounded-2xl bg-orange-50/60">
               <img
-                src={dish.images?.[0]}
+                src={dishImage}
                 alt={dish.title}
-                className="h-full w-full object-cover"
+                className="h-full w-full object-cover object-center"
               />
             </div>
           </div>
@@ -295,6 +306,12 @@ const DishDetail = () => {
             const base =
               (fallbackSize && item.price?.[fallbackSize]) ||
               Object.values(item.price ?? {})[0];
+            const cardImage = pickFirstImageUrl(
+              dishPlaceholderImage,
+              item.images,
+              item.image,
+              item.heroImage,
+            );
             return (
               <Link
                 key={item._id}
@@ -303,9 +320,9 @@ const DishDetail = () => {
               >
                 <div className="relative h-40 overflow-hidden">
                   <img
-                    src={item.images?.[0]}
+                    src={cardImage}
                     alt={item.title}
-                    className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
+                    className="h-full w-full object-cover object-center transition duration-300 group-hover:scale-105"
                   />
                   {item.tags?.[0] ? (
                     <span className="absolute left-4 top-4 rounded-full bg-white/80 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-orange-500 shadow">

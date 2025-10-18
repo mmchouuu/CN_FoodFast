@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const ctrl = require('../controllers/product.controller');
+const ctrl = require('../controllers/restaurant.controller');
 
 router.get('/', ctrl.list);
 router.post('/', ctrl.create);

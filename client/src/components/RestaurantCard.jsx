@@ -1,9 +1,20 @@
 import React from "react";
 import { Link } from "react-router-dom";
 import RatingStars from "./RatingStars";
+import {
+  pickFirstImageUrl,
+  restaurantPlaceholderImage,
+} from "../utils/imageHelpers";
 
 const RestaurantCard = ({ restaurant, variant = "default" }) => {
   if (!restaurant) return null;
+
+  const coverImage = pickFirstImageUrl(
+    restaurantPlaceholderImage,
+    restaurant.coverImage,
+    restaurant.heroImage,
+    restaurant.images,
+  );
 
   return (
     <Link
@@ -18,9 +29,10 @@ const RestaurantCard = ({ restaurant, variant = "default" }) => {
         } aspect-[4/3] overflow-hidden`}
       >
         <img
-          src={restaurant.coverImage}
+          src={coverImage}
           alt={restaurant.name}
-          className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
+          className="h-full w-full object-cover object-center transition duration-300 group-hover:scale-105"
+          onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = restaurantPlaceholderImage; }}
         />
         <div className="absolute left-4 top-4 rounded-full bg-white/90 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-orange-500 shadow">
           {restaurant.tags?.[0] || "Nổi bật"}
