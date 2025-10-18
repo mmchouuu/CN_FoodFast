@@ -19,7 +19,7 @@ const Checkout = () => {
     setSelectedAddressId,
     selectedAddress,
     currency,
-    clearCart,
+    placeOrder,
     addNewAddress,
   } = useAppContext();
 
@@ -27,6 +27,7 @@ const Checkout = () => {
     appliedDiscountCode?.code || ""
   );
   const [showAddressForm, setShowAddressForm] = useState(false);
+  const [isPlacingOrder, setIsPlacingOrder] = useState(false);
   const [newAddress, setNewAddress] = useState({
     label: "home",
     customLabel: "",
@@ -58,7 +59,7 @@ const Checkout = () => {
     applyDiscountCode(discountCode);
   };
 
-  const handlePlaceOrder = () => {
+  const handlePlaceOrder = async () => {
     if (isCartEmpty) {
       toast.error("Your cart is currently empty.");
       return;
@@ -67,9 +68,18 @@ const Checkout = () => {
       toast.error("Please choose a delivery address first.");
       return;
     }
-    toast.success("Order confirmed! We're preparing your meal.");
-    clearCart();
-    navigate("/orders/current");
+    setIsPlacingOrder(true);
+    try {
+      await placeOrder({ paymentMethod: method, address: selectedAddress });
+      toast.success("Order confirmed! We're preparing your meal.");
+      navigate("/orders/current");
+    } catch (error) {
+      const message =
+        error?.message || "We could not place your order. Please try again.";
+      toast.error(message);
+    } finally {
+      setIsPlacingOrder(false);
+    }
   };
 
   const handleAddAddress = (event) => {
@@ -435,14 +445,14 @@ const Checkout = () => {
 
         <button
           onClick={handlePlaceOrder}
-          disabled={isCartEmpty}
+          disabled={isCartEmpty || isPlacingOrder}
           className={`mt-8 w-full rounded-full px-6 py-3 text-sm font-semibold text-white transition ${
-            isCartEmpty
+            isCartEmpty || isPlacingOrder
               ? "cursor-not-allowed bg-gray-300"
               : "bg-orange-500 hover:bg-orange-600"
           }`}
         >
-          Place order
+          {isPlacingOrder ? "Processing..." : "Place order"}
         </button>
         <p className="mt-3 text-center text-xs text-gray-400">
           By placing an order you agree to FoodFast's terms of use.
