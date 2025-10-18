@@ -14,6 +14,7 @@ import * as OrderController from "../controllers/order.controller.js";
 const router = express.Router();
 
 router.get("/", OrderController.getAllOrders);
+router.get("/user/:userId", OrderController.getOrdersByUser);
 router.get("/:id", OrderController.getOrderById);
 router.post("/", OrderController.createOrder);
 router.put("/:id/status", OrderController.updateOrderStatus);

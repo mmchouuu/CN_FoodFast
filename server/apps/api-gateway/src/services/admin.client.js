@@ -17,4 +17,31 @@ async function listUsers(opts = {}) {
   return res.data;
 }
 
-module.exports = { approveRestaurant, listUsers };
+async function listCustomers(opts = {}) {
+  const res = await client.get('/customers', { headers: opts.headers });
+  return res.data;
+}
+
+async function listRestaurants(opts = {}) {
+  const res = await client.get('/restaurants', { headers: opts.headers });
+  return res.data;
+}
+
+async function getUserDetails(id, opts = {}) {
+  const res = await client.get(`/users/${id}`, { headers: opts.headers });
+  return res.data;
+}
+
+async function updateUserActiveStatus(id, payload, opts = {}) {
+  const res = await client.patch(`/users/${id}/active`, payload, { headers: opts.headers });
+  return res.data;
+}
+
+module.exports = {
+  approveRestaurant,
+  listUsers,
+  listCustomers,
+  listRestaurants,
+  getUserDetails,
+  updateUserActiveStatus,
+};

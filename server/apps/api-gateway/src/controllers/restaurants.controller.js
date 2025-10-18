@@ -16,11 +16,14 @@ async function register(req, res, next) {
 
 async function verify(req, res, next) {
   try {
-    const { email, otp, password } = req.body;
-    if (!email || !otp || !password) {
-      return res.status(400).json({ message: 'email, otp and password are required' });
+    const { email, otp, activationPassword, newPassword } = req.body;
+    if (!email || !otp || !activationPassword || !newPassword) {
+      return res.status(400).json({ message: 'email, otp, activationPassword and newPassword are required' });
     }
-    const result = await restaurantClient.verify({ email, otp, password }, { headers: { 'x-request-id': req.id }});
+    const result = await restaurantClient.verify(
+      { email, otp, activationPassword, newPassword },
+      { headers: { 'x-request-id': req.id }},
+    );
     return res.json(result);
   } catch (err) { next(err); }
 }
@@ -32,4 +35,23 @@ async function login(req, res, next) {
   } catch (err) { next(err); }
 }
 
-module.exports = { register, verify, login };
+async function status(req, res, next) {
+  try {
+    const { email } = req.query;
+    if (!email) {
+      return res.status(400).json({ message: 'email is required' });
+    }
+    const result = await restaurantClient.status(email, { headers: { 'x-request-id': req.id }});
+    return res.json(result);
+  } catch (err) { next(err); }
+}
+
+async function ownerAccount(req, res, next) {
+  try {
+    const { id } = req.params;
+    const result = await restaurantClient.ownerAccount(id, { headers: { 'x-request-id': req.id }});
+    return res.json(result);
+  } catch (err) { next(err); }
+}
+
+module.exports = { register, verify, login, status, ownerAccount };

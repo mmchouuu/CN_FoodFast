@@ -22,4 +22,14 @@ async function login(payload, opts = {}) {
   return res.data;
 }
 
-module.exports = { register, verify, login };
+async function status(email, opts = {}) {
+  const res = await client.get('/status', { params: { email }, headers: opts.headers });
+  return res.data;
+}
+
+async function ownerAccount(id, opts = {}) {
+  const res = await client.get(`/owners/${id}`, { headers: opts.headers });
+  return res.data;
+}
+
+module.exports = { register, verify, login, status, ownerAccount };

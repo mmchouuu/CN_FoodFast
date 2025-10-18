@@ -10,26 +10,36 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: "*", // bạn có thể chỉ định cụ thể URL FE ở đây
+    origin: "*",
   },
 });
 
 const PORT = process.env.PORT || 4000;
 
-// Khi client kết nối
 io.on("connection", (socket) => {
-  console.log(`🟢 Client connected: ${socket.id}`);
+  console.log(`[socket-gateway] client connected: ${socket.id}`);
+
+  socket.on("join-channel", (channel) => {
+    if (!channel) return;
+    const channels = Array.isArray(channel) ? channel : [channel];
+    channels.forEach((room) => socket.join(room));
+  });
+
+  socket.on("leave-channel", (channel) => {
+    if (!channel) return;
+    const channels = Array.isArray(channel) ? channel : [channel];
+    channels.forEach((room) => socket.leave(room));
+  });
 
   socket.on("disconnect", () => {
-    console.log(`🔴 Client disconnected: ${socket.id}`);
+    console.log(`[socket-gateway] client disconnected: ${socket.id}`);
   });
 });
 
-// Cho RabbitMQ gửi message qua socket
 connectRabbitMQ(io);
 
 app.get("/health", (_, res) => res.send("OK"));
 
 server.listen(PORT, () => {
-  console.log(`🚀 ${process.env.APP_NAME} is running on port ${PORT}`);
+  console.log(`${process.env.APP_NAME || "SocketGateway"} is running on port ${PORT}`);
 });

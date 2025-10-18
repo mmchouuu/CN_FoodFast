@@ -1,9 +1,14 @@
 import {
-  getAllRestaurants,
-  getRestaurantById,
   createRestaurant,
+  createRestaurantBranch,
+  deleteRestaurant,
+  getAllRestaurants,
+  getBranchesForRestaurant,
+  getRestaurantById,
+  getRestaurantByOwner,
+  getRestaurantsByOwner,
   updateRestaurant,
-  deleteRestaurant
+  updateRestaurantBranch,
 } from '../services/restaurant.service.js';
 
 export async function getRestaurants(req, res) {
@@ -26,8 +31,35 @@ export async function getRestaurant(req, res) {
   }
 }
 
+export async function getOwnerRestaurants(req, res) {
+  try {
+    const { ownerId } = req.params;
+    const data = await getRestaurantsByOwner(ownerId);
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+}
+
+export async function getOwnerRestaurantDetail(req, res) {
+  try {
+    const { ownerId } = req.params;
+    const restaurant = await getRestaurantByOwner(ownerId);
+    if (!restaurant) return res.status(404).json({ error: 'Restaurant not found' });
+    res.json(restaurant);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+}
+
 export async function addRestaurant(req, res) {
   try {
+    if (!req.body?.ownerId) {
+      return res.status(400).json({ error: 'ownerId is required' });
+    }
+    if (!req.body?.name) {
+      return res.status(400).json({ error: 'name is required' });
+    }
     const newRestaurant = await createRestaurant(req.body);
     res.status(201).json(newRestaurant);
   } catch (err) {
@@ -50,6 +82,42 @@ export async function removeRestaurant(req, res) {
     const { id } = req.params;
     const result = await deleteRestaurant(id);
     res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+}
+
+export async function listBranches(req, res) {
+  try {
+    const { id } = req.params;
+    const branches = await getBranchesForRestaurant(id);
+    res.json(branches);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+}
+
+export async function addBranch(req, res) {
+  try {
+    const { id } = req.params;
+    if (!req.body?.name) {
+      return res.status(400).json({ error: 'Branch name is required' });
+    }
+    const branch = await createRestaurantBranch(id, req.body);
+    res.status(201).json(branch);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+}
+
+export async function editBranch(req, res) {
+  try {
+    const { id, branchId } = req.params;
+    const branch = await updateRestaurantBranch(id, branchId, req.body);
+    if (!branch) {
+      return res.status(404).json({ error: 'Branch not found' });
+    }
+    res.json(branch);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

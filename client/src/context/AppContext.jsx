@@ -1,6 +1,6 @@
 // src/context/AppContext.jsx
 import { useNavigate } from 'react-router-dom';
-import React, { createContext, useState, useContext, useEffect } from 'react'
+import React, { createContext, useState, useContext, useEffect } from 'react';
 import toast from 'react-hot-toast';
 
 // --- Auth Systems ---
@@ -18,7 +18,35 @@ import {
   restaurantReviews as initialRestaurantReviews,
 } from '../data/customerData';
 
-const AppContext = createContext()
+const AppContext = createContext();
+
+const sanitizeUser = (rawUser) => {
+  if (!rawUser) return null;
+  const firstName = rawUser.first_name || rawUser.firstName || '';
+  const lastName = rawUser.last_name || rawUser.lastName || '';
+  const fullNameSource =
+    rawUser.fullName ||
+    rawUser.full_name ||
+    [firstName, lastName].filter(Boolean).join(' ').trim();
+  const resolvedFullName = fullNameSource || rawUser.email || 'FoodFast Customer';
+  const phoneSource =
+    rawUser.phone != null
+      ? String(rawUser.phone).trim()
+      : rawUser.phone_number != null
+      ? String(rawUser.phone_number).trim()
+      : '';
+
+  return {
+    id: rawUser.id,
+    first_name: firstName || null,
+    last_name: lastName || null,
+    fullName: resolvedFullName,
+    email: rawUser.email || rawUser.email_address || null,
+    phone: phoneSource,
+    role: rawUser.role,
+    avatar: rawUser.avatar_url || rawUser.avatar || null,
+  };
+};
 
 export const AppContextProvider = ({ children }) => {
     const navigate = useNavigate();
@@ -57,7 +85,15 @@ export const AppContextProvider = ({ children }) => {
     // --- Local auth (via API Gateway) ---
     const [authToken, setAuthToken] = useState(() => localStorage.getItem('auth_token'));
     const [authProfile, setAuthProfile] = useState(() => {
-        try { return JSON.parse(localStorage.getItem('auth_profile') || 'null'); } catch { return null; }
+        try {
+            const raw = JSON.parse(localStorage.getItem('auth_profile') || 'null');
+            return sanitizeUser(raw);
+        } catch {
+            return null;
+        }
+    });
+    const [restaurantProfile, setRestaurantProfile] = useState(() => {
+        try { return JSON.parse(localStorage.getItem('restaurant_profile') || 'null'); } catch { return null; }
     });
 
     // --- Unified user object ---
@@ -130,6 +166,18 @@ export const AppContextProvider = ({ children }) => {
         }
     }, [isOwner]);
 
+    useEffect(() => {
+        try {
+            if (restaurantProfile) {
+                localStorage.setItem('restaurant_profile', JSON.stringify(restaurantProfile));
+            } else {
+                localStorage.removeItem('restaurant_profile');
+            }
+        } catch (e) {
+            // ignore persistence errors
+        }
+    }, [restaurantProfile]);
+
     // Persist local auth
     useEffect(() => {
         if (authToken) localStorage.setItem('auth_token', authToken); else localStorage.removeItem('auth_token');
@@ -140,17 +188,6 @@ export const AppContextProvider = ({ children }) => {
             else localStorage.removeItem('auth_profile');
         } catch {}
     }, [authProfile]);
-
-    const sanitizeUser = (rawUser) => {
-        if (!rawUser) return null;
-        return {
-            id: rawUser.id,
-            first_name: rawUser.first_name,
-            last_name: rawUser.last_name,
-            email: rawUser.email,
-            role: rawUser.role,
-        };
-    };
 
     // --- Local auth actions ---
     const loginWithCredentials = async (email, password) => {
@@ -287,6 +324,19 @@ export const AppContextProvider = ({ children }) => {
         setAuthProfile(prev => {
             if (!prev) return prev;
             const updated = { ...prev, ...updates };
+            if (!updates?.fullName) {
+                const mergedFirst = updates?.first_name ?? updated.first_name;
+                const mergedLast = updates?.last_name ?? updated.last_name;
+                const combined = [mergedFirst, mergedLast].filter(Boolean).join(' ').trim();
+                if (combined) {
+                    updated.fullName = combined;
+                }
+            } else if (!updated.fullName) {
+                const combined = [updated.first_name, updated.last_name].filter(Boolean).join(' ').trim();
+                if (combined) {
+                    updated.fullName = combined;
+                }
+            }
             toast.success('Profile updated');
             return updated;
         });
@@ -360,6 +410,8 @@ export const AppContextProvider = ({ children }) => {
         getReviewsForRestaurant,
         getRestaurantRatingSummary,
         updateLocalProfile,
+        restaurantProfile,
+        setRestaurantProfile,
 
         // Auth Actions
         isAuthenticated: Boolean(user),
