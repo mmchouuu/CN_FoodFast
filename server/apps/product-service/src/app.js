@@ -7,6 +7,6 @@ app.use(express.json());
 
 app.get('/health', (_, res) => res.send('OK'));
 app.use('/api/products', productRoutes);
-app.use('/restaurants', restaurantRoutes);
+app.use('/api/catalog/restaurants', restaurantRoutes);
 
 export default app;

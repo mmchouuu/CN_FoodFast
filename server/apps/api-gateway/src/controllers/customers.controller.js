@@ -39,4 +39,32 @@ async function login(req, res, next) {
   }
 }
 
-module.exports = { register, verify, login };
+async function requestPasswordReset(req, res, next) {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ message: 'email is required' });
+    const result = await customerClient.requestPasswordReset({ email }, {
+      headers: { 'x-request-id': req.id }
+    });
+    return res.json(result);
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function resetPassword(req, res, next) {
+  try {
+    const { email, otp, new_password } = req.body;
+    if (!email || !otp || !new_password) {
+      return res.status(400).json({ message: 'email, otp and new_password are required' });
+    }
+    const result = await customerClient.resetPassword({ email, otp, new_password }, {
+      headers: { 'x-request-id': req.id }
+    });
+    return res.json(result);
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = { register, verify, login, requestPasswordReset, resetPassword };

@@ -65,3 +65,12 @@ export const deleteOrder = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+
+export const getOrdersByUser = async (req, res) => {
+  try {
+    const orders = await OrderService.getOrdersByUserId(req.params.userId);
+    res.json(orders);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};

@@ -14,6 +14,11 @@ const Sidebar = () => {
             icon: assets.dashboard,
         },
         {
+            path: "/owner/profile",
+            label: "Restaurant Info",
+            icon: assets.house,
+        },
+        {
             path: "/owner/menu",
             label: "Dish Management",
             icon: assets.list,
@@ -37,11 +42,6 @@ const Sidebar = () => {
             path: "/owner/tracking",
             label: "Delivery Tracking",
             icon: assets.map,
-        },
-        {
-            path: "/owner/profile",
-            label: "Restaurant Info",
-            icon: assets.house,
         },
         {
             path: "/owner/promotions",

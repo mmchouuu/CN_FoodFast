@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash VARCHAR(255),
   phone VARCHAR(30),
   role VARCHAR(30) NOT NULL DEFAULT 'customer',
+  tier VARCHAR(30) DEFAULT 'Bronze',
   is_active BOOLEAN DEFAULT TRUE,
   is_verified BOOLEAN DEFAULT FALSE,
   is_approved BOOLEAN DEFAULT FALSE,

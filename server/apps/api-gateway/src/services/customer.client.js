@@ -22,4 +22,14 @@ async function login(payload, opts = {}) {
   return res.data;
 }
 
-module.exports = { register, verify, login };
+async function requestPasswordReset(payload, opts = {}) {
+  const res = await client.post('/forgot-password', payload, { headers: opts.headers });
+  return res.data;
+}
+
+async function resetPassword(payload, opts = {}) {
+  const res = await client.post('/reset-password', payload, { headers: opts.headers });
+  return res.data;
+}
+
+module.exports = { register, verify, login, requestPasswordReset, resetPassword };

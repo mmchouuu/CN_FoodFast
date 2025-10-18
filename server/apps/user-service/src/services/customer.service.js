@@ -49,13 +49,29 @@ async function verifyCustomer(email, otp_code) {
 
 // Customer login (email + password)
 async function loginCustomer({ email, password }) {
-  const user = await userModel.findByEmail(email);
-  if (!user) throw new Error('Invalid credentials');
-  if (user.role !== 'customer') throw new Error('Not a customer account');
-  if (!user.is_verified) throw new Error('Customer account not verified');
+  const normalizedEmail =
+    typeof email === 'string' ? email.trim().toLowerCase() : '';
+  const plainPassword = typeof password === 'string' ? password : '';
 
-  const ok = await bcrypt.compare(password, user.password_hash);
-  if (!ok) throw new Error('Invalid credentials');
+  if (!normalizedEmail || !plainPassword) {
+    throw Object.assign(new Error('Invalid credentials'), { statusCode: 401 });
+  }
+
+  const user = await userModel.findByEmail(normalizedEmail);
+  if (!user) {
+    throw Object.assign(new Error('Invalid credentials'), { statusCode: 401 });
+  }
+  if (user.role !== 'customer') {
+    throw Object.assign(new Error('Not a customer account'), { statusCode: 403 });
+  }
+  if (!user.is_verified) {
+    throw Object.assign(new Error('Customer account not verified'), { statusCode: 403 });
+  }
+
+  const ok = await bcrypt.compare(plainPassword, user.password_hash || '');
+  if (!ok) {
+    throw Object.assign(new Error('Invalid credentials'), { statusCode: 401 });
+  }
 
   const token = jwt.sign({ userId: user.id, role: user.role }, { expiresIn: '15m' });
   return { message: 'Login successful', user, token };

@@ -128,3 +128,11 @@ export const deleteOrder = async (id) => {
   await pool.query("DELETE FROM orders WHERE id = $1", [id]);
   return { message: "Order deleted successfully" };
 };
+
+export const getOrdersByUserId = async (userId) => {
+  const result = await pool.query(
+    "SELECT * FROM orders WHERE user_id = $1 ORDER BY created_at DESC",
+    [userId]
+  );
+  return result.rows;
+};

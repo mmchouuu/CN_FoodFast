@@ -3,8 +3,19 @@ import api from './api';
 const basePath = '/api/restaurants';
 
 const restaurantAuth = {
-  async register({ restaurantName, companyAddress, taxCode, managerName, phone, email }) {
+  async register({
+    firstName,
+    lastName,
+    restaurantName,
+    companyAddress,
+    taxCode,
+    managerName,
+    phone,
+    email,
+  }) {
     const payload = {
+      firstName,
+      lastName,
       restaurantName,
       companyAddress,
       taxCode,
@@ -16,14 +27,19 @@ const restaurantAuth = {
     return data;
   },
 
-  async verify({ email, otp, password }) {
-    const payload = { email, otp, password };
+  async verify({ email, otp, activationPassword, newPassword }) {
+    const payload = { email, otp, activationPassword, newPassword };
     const { data } = await api.post(`${basePath}/verify`, payload);
     return data;
   },
 
   async login({ email, password }) {
     const { data } = await api.post(`${basePath}/login`, { email, password });
+    return data;
+  },
+
+  async status(email) {
+    const { data } = await api.get(`${basePath}/status`, { params: { email } });
     return data;
   },
 };
