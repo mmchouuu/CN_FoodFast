@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS restaurants (
   updated_at           TIMESTAMP WITH TIME ZONE DEFAULT now()
 );
 
+<<<<<<< HEAD
 CREATE INDEX IF NOT EXISTS idx_restaurants_name     ON restaurants(name);
 CREATE INDEX IF NOT EXISTS idx_restaurants_cuisine  ON restaurants(cuisine);
 CREATE INDEX IF NOT EXISTS idx_restaurants_owner    ON restaurants(owner_id);
@@ -136,36 +137,38 @@ CREATE TABLE IF NOT EXISTS branch_rating_avg (
   last_updated TIMESTAMP WITH TIME ZONE DEFAULT now()
 );
 
--- ============================================================
--- 7) SẢN PHẨM (MÓN ĂN / ĐỒ UỐNG)
--- ============================================================
+-- =========================================
+-- 7) SẢN PHẨM
+-- =========================================
 CREATE TABLE IF NOT EXISTS products (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   restaurant_id UUID NOT NULL REFERENCES restaurants(id) ON DELETE CASCADE,
-  title VARCHAR(200) NOT NULL,
-  description TEXT,
-  images TEXT[],
-  category VARCHAR(100),
-  type VARCHAR(50),
-  base_price NUMERIC(12,2) NOT NULL DEFAULT 0,
-  popular BOOLEAN DEFAULT FALSE,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+  title         VARCHAR(200) NOT NULL,
+  description   TEXT,
+  images        TEXT[],
+  category      VARCHAR(100),
+  type          VARCHAR(50),
+  base_price    NUMERIC(12,2) NOT NULL DEFAULT 0,
+  popular       BOOLEAN DEFAULT FALSE,
+  created_at    TIMESTAMP WITH TIME ZONE DEFAULT now(),
+  updated_at    TIMESTAMP WITH TIME ZONE DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS idx_products_restaurant ON products(restaurant_id);
 CREATE INDEX IF NOT EXISTS idx_products_category   ON products(category);
 
--- ============================================================
--- 😎 TỒN KHO TẠI TỪNG CHI NHÁNH
--- ============================================================
+-- =========================================
+-- 8) TỒN KHO
+-- =========================================
+
 CREATE TABLE IF NOT EXISTS inventory (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  branch_id UUID NOT NULL REFERENCES restaurant_branches(id) ON DELETE CASCADE,
-  product_id UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
-  quantity INT DEFAULT 0,
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  branch_id     UUID NOT NULL REFERENCES restaurant_branches(id) ON DELETE CASCADE,
+  product_id    UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  quantity      INT DEFAULT 0,
   sold_quantity INT DEFAULT 0,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+  updated_at    TIMESTAMP WITH TIME ZONE DEFAULT now(),
   CONSTRAINT uq_inventory_branch_product UNIQUE (branch_id, product_id)
 );
 

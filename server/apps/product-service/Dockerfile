@@ -24,10 +24,9 @@ RUN apk add --no-cache postgresql-client
 # Copy package files
 COPY package*.json ./
 
-COPY shared-1.0.0.tgz ./
-RUN npm install ./shared-1.0.0.tgz
+# Use npm install to avoid lock mismatch errors when package.json changes
+RUN npm install --only=production --no-audit --no-fund
 
-# Copy source code
 COPY . .
 COPY ./src ./src
 

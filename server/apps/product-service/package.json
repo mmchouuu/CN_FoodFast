@@ -9,6 +9,7 @@
   "dependencies": {
     "@foodfast/shared": "file:./shared-1.0.0.tgz",
     "amqplib": "^0.10.9",
+    "cors": "^2.8.5",
     "dotenv": "^16.x",
     "express": "^4.18.2",
     "morgan": "^1.10.0",

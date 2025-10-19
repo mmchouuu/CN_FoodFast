@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import RestaurantCard from "../components/RestaurantCard";
 import { useAppContext } from "../context/AppContext";
 
@@ -18,9 +18,22 @@ const sorters = {
 };
 
 const Restaurants = () => {
-  const { restaurants, searchQuery, setSearchQuery } = useAppContext();
+  const {
+    restaurants,
+    searchQuery,
+    setSearchQuery,
+    catalogLoading,
+    catalogError,
+    refreshCatalog,
+  } = useAppContext();
   const [selectedCategory, setSelectedCategory] = useState("all");
   const [sortBy, setSortBy] = useState("rating-desc");
+
+  useEffect(() => {
+    const controller = new AbortController();
+    refreshCatalog({ signal: controller.signal });
+    return () => controller.abort();
+  }, [refreshCatalog]);
 
   const categories = useMemo(() => {
     const all = new Set(["all"]);
@@ -96,11 +109,22 @@ const Restaurants = () => {
         ))}
       </div>
 
+      {catalogError ? (
+        <div className="rounded-3xl bg-red-50 p-6 text-center text-red-600 shadow">
+          {catalogError}
+        </div>
+      ) : null}
+
       <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+        {catalogLoading && !filteredRestaurants.length ? (
+          <p className="col-span-full rounded-3xl bg-white p-6 text-center text-gray-500 shadow">
+            Loading restaurants...
+          </p>
+        ) : null}
         {filteredRestaurants.map((restaurant) => (
           <RestaurantCard key={restaurant.id} restaurant={restaurant} />
         ))}
-        {!filteredRestaurants.length && (
+        {!catalogLoading && !filteredRestaurants.length && !catalogError && (
           <p className="rounded-3xl bg-white p-6 text-center text-gray-500 shadow">
             We could not find restaurants that match your filters yet.
           </p>

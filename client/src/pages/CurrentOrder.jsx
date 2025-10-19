@@ -34,6 +34,17 @@ const CurrentOrder = () => {
   }
 
   const restaurant = getRestaurantById(order.restaurantId);
+  const courier = order.courier || {};
+  const deliveryAddress = order.deliveryAddress || {};
+  const hasTimeline = Array.isArray(order.timeline) && order.timeline.length > 0;
+  const deliveryAddressLine = [
+    deliveryAddress.street,
+    deliveryAddress.ward,
+    deliveryAddress.district,
+    deliveryAddress.city,
+  ]
+    .filter(Boolean)
+    .join(", ");
 
   return (
     <div className="max-padd-container grid gap-6 py-24 lg:grid-cols-[2fr,1.2fr]">
@@ -64,23 +75,29 @@ const CurrentOrder = () => {
             Live order tracking
           </h2>
           <div className="mt-6 space-y-4">
-            {order.timeline.map((step) => (
-              <div key={step.id} className="flex items-start gap-4">
-                <StatusDot completed={step.completed} />
-                <div>
-                  <p
-                    className={`text-sm font-semibold ${
-                      step.completed ? "text-gray-900" : "text-gray-500"
-                    }`}
-                  >
-                    {step.label}
-                  </p>
-                  <p className="text-xs text-gray-400">
-                    {step.timestamp || "Pending"}
-                  </p>
+            {hasTimeline ? (
+              order.timeline.map((step) => (
+                <div key={step.id} className="flex items-start gap-4">
+                  <StatusDot completed={step.completed} />
+                  <div>
+                    <p
+                      className={`text-sm font-semibold ${
+                        step.completed ? "text-gray-900" : "text-gray-500"
+                      }`}
+                    >
+                      {step.label}
+                    </p>
+                    <p className="text-xs text-gray-400">
+                      {step.timestamp || "Pending"}
+                    </p>
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))
+            ) : (
+              <p className="text-sm text-gray-500">
+                Tracking updates will appear here as soon as the restaurant progresses your order.
+              </p>
+            )}
           </div>
         </div>
 
@@ -131,6 +148,12 @@ const CurrentOrder = () => {
               </span>
             </div>
           </div>
+          <p className="mt-4 text-sm text-gray-500">
+            Payment status:{" "}
+            <span className="font-semibold text-gray-900">
+              {order.paymentStatus || "pending"}
+            </span>
+          </p>
         </div>
 
         <div className="grid gap-6 md:grid-cols-2">
@@ -139,11 +162,13 @@ const CurrentOrder = () => {
               Driver
             </h3>
             <p className="mt-2 text-lg font-semibold text-gray-900">
-              {order.courier.name}
+              {courier.name || "Assigning driver..."}
             </p>
-            <p className="text-sm text-gray-500">{order.courier.phone}</p>
+            <p className="text-sm text-gray-500">
+              {courier.phone || "We'll share contact details once available."}
+            </p>
             <p className="mt-2 text-xs text-gray-400">
-              {order.courier.vehicle}
+              {courier.vehicle || "Vehicle information pending."}
             </p>
             <div className="mt-4 flex gap-3">
               <button className="rounded-full border border-gray-200 px-4 py-2 text-xs font-semibold text-gray-600 hover:border-orange-300 hover:text-orange-500">
@@ -159,8 +184,15 @@ const CurrentOrder = () => {
               Delivery address
             </h3>
             <p className="mt-2 text-sm text-gray-600">
-              The driver is heading to your selected address.
+              {deliveryAddressLine
+                ? `We will deliver to ${deliveryAddressLine}.`
+                : "The driver is heading to your selected address."}
             </p>
+            {deliveryAddress.instructions ? (
+              <p className="mt-2 text-xs text-gray-400">
+                Note: {deliveryAddress.instructions}
+              </p>
+            ) : null}
             <p className="mt-4 text-xs uppercase text-orange-500">
               Real time map preview
             </p>

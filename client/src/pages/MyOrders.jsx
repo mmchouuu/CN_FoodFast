@@ -43,7 +43,12 @@ const OrderHistory = () => {
                     {restaurant?.name || "Restaurant"}
                   </h2>
                   <p className="text-sm text-gray-500">
-                    Order #{order.id} - {order.status}
+                    Order #{order.id} • {order.status}
+                    {order.paymentStatus ? (
+                      <span className="ml-2 inline-block rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-600">
+                        Payment: {order.paymentStatus}
+                      </span>
+                    ) : null}
                   </p>
                 </div>
                 <div className="flex items-end gap-4">
