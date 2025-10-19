@@ -23,7 +23,15 @@ const AuthPage = () => {
             </p>
             <p>{user?.emailAddresses?.[0]?.emailAddress || user?.email}</p>
             <button
-              onClick={() => logoutAuth0?.({ returnTo: window.location.origin })}
+              onClick={() => {
+                if (logoutAuth0) {
+                  try {
+                    logoutAuth0({ returnTo: window.location.origin });
+                  } catch (error) {
+                    console.warn("Auth0 logout skipped:", error);
+                  }
+                }
+              }}
               className="mt-6 rounded-full bg-gray-900 px-6 py-3 text-sm font-semibold text-white hover:bg-gray-700"
             >
               Logout

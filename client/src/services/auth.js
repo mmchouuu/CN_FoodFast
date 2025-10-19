@@ -25,11 +25,17 @@ export const authService = {
     return data;
   },
 
-  // async requestPasswordReset(email) {
-  //   // Endpoint not yet implemented server-side; mock response for UX consistency
-  //   // When available: return (await api.post(`${basePath}/forgot-password`, { email })).data;
-  //   return { message: 'If this email exists, a reset link will be sent.' };
-  // },
+  async requestPasswordReset(email) {
+    try {
+      const { data } = await api.post(`${basePath}/forgot-password`, { email });
+      return data;
+    } catch (error) {
+      if (error?.response?.status === 404 || error?.response?.status === 501) {
+        return { message: 'If this email exists, a reset link will be sent.' };
+      }
+      throw error;
+    }
+  },
 };
 
 export default authService;

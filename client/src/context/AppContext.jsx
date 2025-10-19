@@ -5,6 +5,7 @@ import toast from 'react-hot-toast';
 import catalogService from '../services/catalog';
 import ordersService from '../services/orders';
 import paymentsService from '../services/payments';
+import addressesService from '../services/addresses';
 import { restaurantPlaceholderImage, dishPlaceholderImage } from '../utils/imageHelpers';
 
 // --- Auth Systems ---
@@ -14,10 +15,7 @@ import authService from '../services/auth';
 import {
   dishes as menuDishes,
   restaurants as restaurantList,
-  currentOrders as liveOrders,
-  orderHistory as historyOrders,
   notificationFeed,
-  customerAddresses,
   paymentOptions as paymentOptionList,
   restaurantReviews as initialRestaurantReviews,
 } from '../data/customerData';
@@ -46,8 +44,6 @@ const useSafeAuth0 = () => {
 
 const FALLBACK_PRODUCTS = menuDishes;
 const FALLBACK_RESTAURANTS = restaurantList;
-const FALLBACK_ACTIVE_ORDERS = liveOrders;
-const FALLBACK_ORDER_HISTORY = historyOrders;
 
 const ORDER_HISTORY_STATUSES = new Set(['delivered', 'completed', 'cancelled']);
 const ORDER_REVIEWABLE_STATUSES = new Set(['delivered', 'completed']);
@@ -145,6 +141,24 @@ const adaptOrderFromApi = (order) => {
   const pricing = metadata.pricing && typeof metadata.pricing === 'object' ? metadata.pricing : {};
   const paymentMeta = metadata.payment && typeof metadata.payment === 'object' ? metadata.payment : {};
   const deliveryAddress = metadata.delivery_address || null;
+  const restaurantSnapshotsMap =
+    metadata.restaurant_snapshots && typeof metadata.restaurant_snapshots === 'object'
+      ? metadata.restaurant_snapshots
+      : null;
+  const restaurantNamesMap =
+    metadata.restaurant_names && typeof metadata.restaurant_names === 'object'
+      ? metadata.restaurant_names
+      : null;
+  let restaurantSnapshotMeta =
+    metadata.restaurant_snapshot && typeof metadata.restaurant_snapshot === 'object'
+      ? metadata.restaurant_snapshot
+      : null;
+  if (!restaurantSnapshotMeta && restaurantSnapshotsMap) {
+    restaurantSnapshotMeta =
+      restaurantSnapshotsMap[order.restaurant_id] ||
+      restaurantSnapshotsMap[String(order.restaurant_id)] ||
+      null;
+  }
 
   const placedAt = order.created_at || metadata.placed_at || new Date().toISOString();
   const lowerStatus = (order.status || '').toLowerCase();
@@ -155,6 +169,23 @@ const adaptOrderFromApi = (order) => {
   const etaMinutes = toNumberOr(metadata.eta_minutes, 30);
   const paymentMethodRaw = typeof paymentMeta.method === 'string' ? paymentMeta.method : 'cod';
   const paymentMethod = paymentMethodRaw.toUpperCase();
+  const restaurantName =
+    restaurantSnapshotMeta?.name ||
+    metadata.restaurant_name ||
+    restaurantNamesMap?.[order.restaurant_id] ||
+    restaurantNamesMap?.[String(order.restaurant_id)] ||
+    null;
+  const fallbackSnapshotFromMap =
+    restaurantSnapshotsMap?.[order.restaurant_id] ||
+    restaurantSnapshotsMap?.[String(order.restaurant_id)] ||
+    null;
+  const restaurantImage =
+    restaurantSnapshotMeta?.heroImage ||
+    restaurantSnapshotMeta?.image ||
+    metadata.restaurant_image ||
+    fallbackSnapshotFromMap?.heroImage ||
+    fallbackSnapshotFromMap?.image ||
+    restaurantPlaceholderImage;
   const timeline =
     Array.isArray(metadata.timeline) && metadata.timeline.length
       ? metadata.timeline
@@ -180,6 +211,9 @@ const adaptOrderFromApi = (order) => {
     timeline,
     courier: metadata.courier || null,
     deliveryAddress,
+    restaurantSnapshot: restaurantSnapshotMeta,
+    restaurantName,
+    restaurantImage,
     items: Array.isArray(order.items)
       ? order.items.map((item) => ({
           id: item.id,
@@ -191,6 +225,14 @@ const adaptOrderFromApi = (order) => {
           unitPrice: toNumberOr(item.unit_price, 0),
           price: toNumberOr(item.total_price, 0),
           productSnapshot: item.product_snapshot || {},
+          displayName:
+            item.product_snapshot?.title ||
+            item.product_snapshot?.name ||
+            null,
+          displayImage:
+            item.product_snapshot?.image ||
+            (item.product_snapshot?.images && item.product_snapshot.images[0]) ||
+            null,
         }))
       : [],
     metadata,
@@ -233,8 +275,8 @@ export const AppContextProvider = ({ children }) => {
     const [pastOrders, setPastOrders] = useState([]);
     const [ordersLoading, setOrdersLoading] = useState(false);
     const [notifications, setNotifications] = useState(notificationFeed);
-    const [addresses, setAddresses] = useState(customerAddresses);
-    const [selectedAddressId, setSelectedAddressId] = useState(customerAddresses[0]?.id ?? null);
+    const [addresses, setAddresses] = useState([]);
+    const [selectedAddressId, setSelectedAddressId] = useState(null);
     const selectedAddress = useMemo(
         () => addresses.find(address => address.id === selectedAddressId) || null,
         [addresses, selectedAddressId]
@@ -307,7 +349,7 @@ export const AppContextProvider = ({ children }) => {
     }, [refreshCatalog]);
 
     // --- Auth0 ---
-    const { user: auth0User, isAuthenticated: isAuth0, loginWithRedirect, logout: logoutAuth0 } = useSafeAuth0();
+    const { user: auth0User, isAuthenticated: isAuth0, loginWithRedirect, logout: rawLogoutAuth0 } = useSafeAuth0();
 
     // --- Clerk ---
     const { user: clerkUser } = useClerkUser();
@@ -319,25 +361,39 @@ export const AppContextProvider = ({ children }) => {
         try { return JSON.parse(localStorage.getItem('auth_profile') || 'null'); } catch { return null; }
     });
 
+    useEffect(() => {
+        try {
+            if (authToken) {
+                localStorage.setItem('auth_token', authToken);
+            } else {
+                localStorage.removeItem('auth_token');
+            }
+        } catch (storageErr) {
+            console.warn('Failed to persist auth token', storageErr);
+        }
+    }, [authToken]);
+
     const refreshOrders = useCallback(async () => {
         if (!authToken) {
-            setOrdersLoading(false);
             setActiveOrders([]);
             setPastOrders([]);
             return { cancelled: true };
         }
+
         setOrdersLoading(true);
         try {
             const data = await ordersService.list();
-            const adapted = Array.isArray(data) ? data.map(adaptOrderFromApi).filter(Boolean) : [];
+            const adapted = Array.isArray(data)
+                ? data.map(adaptOrderFromApi).filter(Boolean)
+                : [];
             const { active, past } = splitOrdersByStatus(adapted);
             setActiveOrders(active);
             setPastOrders(past);
             return { success: true, active, past };
         } catch (error) {
             console.error('Failed to load orders from order-service', error);
-            setActiveOrders(prev => (prev.length ? prev : FALLBACK_ACTIVE_ORDERS));
-            setPastOrders(prev => (prev.length ? prev : FALLBACK_ORDER_HISTORY));
+            setActiveOrders([]);
+            setPastOrders([]);
             return { success: false, error };
         } finally {
             setOrdersLoading(false);
@@ -350,6 +406,94 @@ export const AppContextProvider = ({ children }) => {
 
     // --- Unified user object ---
     const user = authProfile || auth0User || clerkUser || null;
+
+    const userFullName = useMemo(() => {
+        if (!user) return null;
+        if (user.fullName) return user.fullName;
+        const nameParts = [user.first_name, user.last_name].filter(Boolean);
+        if (nameParts.length) return nameParts.join(' ');
+        if (user.name) return user.name;
+        if (user.given_name || user.family_name) {
+            return [user.given_name, user.family_name].filter(Boolean).join(' ');
+        }
+        if (user.username) return user.username;
+        return null;
+    }, [user]);
+
+    const userPhoneNumber = useMemo(() => {
+        return (
+            user?.phone ||
+            user?.phone_number ||
+            user?.primaryPhone?.number ||
+            ''
+        );
+    }, [user]);
+
+    const normalizeAddressFromApi = useCallback((address) => {
+        if (!address) return null;
+        return {
+            id: address.id,
+            label: address.label || 'Home',
+            recipient: address.recipient || userFullName || 'FoodFast Customer',
+            phone: address.phone || userPhoneNumber || '',
+            street: address.street || '',
+            ward: address.ward || '',
+            district: address.district || '',
+            city: address.city || '',
+            instructions: address.instructions || '',
+            isDefault: Boolean(
+                address.is_default ??
+                address.isDefault ??
+                address.is_primary ??
+                address.isPrimary
+            ),
+        };
+    }, [userFullName, userPhoneNumber]);
+
+    const refreshAddresses = useCallback(async () => {
+        let effectiveToken = authToken;
+        if (!effectiveToken) {
+            try {
+                effectiveToken = localStorage.getItem('auth_token');
+            } catch {
+                effectiveToken = null;
+            }
+        }
+        if (!effectiveToken) {
+            setAddresses([]);
+            setSelectedAddressId(null);
+            return { cancelled: true };
+        }
+        try {
+            const data = await addressesService.list();
+            const normalized = Array.isArray(data)
+                ? data.map(normalizeAddressFromApi).filter(Boolean)
+                : [];
+            setAddresses(normalized);
+            setSelectedAddressId((prev) => {
+                if (prev && normalized.some((addr) => addr.id === prev)) {
+                    return prev;
+                }
+                const primary = normalized.find((addr) => addr.isDefault);
+                return primary?.id ?? normalized[0]?.id ?? null;
+            });
+            return { success: true, addresses: normalized };
+        } catch (error) {
+            console.error('Failed to load addresses from user-service', error);
+            setAddresses([]);
+            setSelectedAddressId(null);
+            return { success: false, error };
+        }
+    }, [authToken, normalizeAddressFromApi]);
+
+    useEffect(() => {
+        if (!authToken) {
+            setAddresses([]);
+            setSelectedAddressId(null);
+            return;
+        }
+        refreshAddresses();
+    }, [authToken, refreshAddresses]);
 
     // --- Cart Functions ---
     const addToCart = (itemId, size, quantity = 1) => {
@@ -442,14 +586,15 @@ export const AppContextProvider = ({ children }) => {
 
     const placeOrder = useCallback(async ({ paymentMethod: paymentMethodOverride, address: addressOverride, notes } = {}) => {
         if (!authToken) {
-            throw new Error('You need to sign in before placing an order.');
+            throw new Error('Please sign in to place an order.');
         }
         if (!user?.id) {
-            throw new Error('We could not verify your customer profile. Please sign out and sign in again.');
+            throw new Error('Unable to verify your account. Please sign in again.');
         }
 
         const orderItems = [];
-        const restaurantIds = new Set();
+        const restaurantStats = new Map();
+
         for (const itemId in cartItems) {
             const product = products.find((item) => item._id === itemId);
             if (!product) continue;
@@ -459,6 +604,44 @@ export const AppContextProvider = ({ children }) => {
                 if (quantity <= 0) continue;
                 const unitPrice = product.price?.[sizeKey] ?? product.basePrice ?? 0;
                 const totalPrice = unitPrice * quantity;
+                const restaurantId = product.restaurantId || null;
+
+                if (!restaurantId) {
+                    throw new Error('One or more dishes are missing restaurant information. Please try again.');
+                }
+
+                const restaurantRecord =
+                    restaurants.find((entry) => entry.id === restaurantId) ||
+                    FALLBACK_RESTAURANTS.find((entry) => entry.id === restaurantId) ||
+                    null;
+                const resolvedRestaurantImage =
+                    restaurantRecord?.heroImage ||
+                    restaurantRecord?.coverImage ||
+                    (Array.isArray(restaurantRecord?.images) ? restaurantRecord.images[0] : null) ||
+                    restaurantPlaceholderImage;
+
+                const existingStats = restaurantStats.get(restaurantId) || {
+                    subtotal: 0,
+                    itemCount: 0,
+                    snapshot: restaurantRecord
+                        ? {
+                            id: restaurantRecord.id,
+                            name: restaurantRecord.name,
+                            heroImage: restaurantRecord.heroImage || restaurantRecord.coverImage || resolvedRestaurantImage,
+                            image: resolvedRestaurantImage,
+                          }
+                        : {
+                            id: restaurantId,
+                            name: 'Restaurant',
+                            heroImage: restaurantPlaceholderImage,
+                            image: restaurantPlaceholderImage,
+                          },
+                };
+
+                existingStats.subtotal += totalPrice;
+                existingStats.itemCount += quantity;
+                restaurantStats.set(restaurantId, existingStats);
+
                 orderItems.push({
                     product_id: product._id,
                     variant_id: sizeKey !== 'Standard' ? sizeKey : null,
@@ -469,12 +652,10 @@ export const AppContextProvider = ({ children }) => {
                         title: product.title,
                         size: sizeKey,
                         image: product.images?.[0],
-                        restaurant_id: product.restaurantId,
+                        restaurant_id: restaurantId,
+                        restaurant_name: existingStats.snapshot?.name || restaurantRecord?.name || null,
                     },
                 });
-                if (product.restaurantId) {
-                    restaurantIds.add(product.restaurantId);
-                }
             }
         }
 
@@ -482,14 +663,9 @@ export const AppContextProvider = ({ children }) => {
             throw new Error('Your cart is currently empty.');
         }
 
-        if (restaurantIds.size > 1) {
-            throw new Error('Please create separate orders for each restaurant.');
-        }
-
-        const fallbackRestaurantId = orderItems[0]?.product_snapshot?.restaurant_id || null;
-        const restaurantId = Array.from(restaurantIds)[0] || fallbackRestaurantId;
-        if (!restaurantId) {
-            throw new Error('Unable to determine the restaurant for this order.');
+        const restaurantIds = Array.from(restaurantStats.keys());
+        if (!restaurantIds.length) {
+            throw new Error('Unable to determine restaurant information for this order.');
         }
 
         const subtotal = orderItems.reduce((sum, item) => sum + item.total_price, 0);
@@ -499,22 +675,61 @@ export const AppContextProvider = ({ children }) => {
         const currencyCode = (currency || 'VND').trim() || 'VND';
         const paymentMethod = (paymentMethodOverride || method || 'cod').toLowerCase();
         const deliveryAddressSource = addressOverride || selectedAddress || null;
-        const deliveryAddressSnapshot = deliveryAddressSource
-            ? {
-                id: deliveryAddressSource.id,
-                label: deliveryAddressSource.label,
-                recipient: deliveryAddressSource.recipient,
-                phone: deliveryAddressSource.phone,
-                street: deliveryAddressSource.street,
-                ward: deliveryAddressSource.ward,
-                district: deliveryAddressSource.district,
-                city: deliveryAddressSource.city,
-                instructions: deliveryAddressSource.instructions,
+        if (!deliveryAddressSource || !deliveryAddressSource.id) {
+            throw new Error('Bạn cần chọn hoặc tạo địa chỉ giao hàng trước khi đặt đơn.');
+        }
+        const normalizeAddressField = (value) => {
+            if (typeof value === 'string') {
+                const trimmed = value.trim();
+                return trimmed.length ? trimmed : null;
             }
-            : null;
+            return value ?? null;
+        };
+        const deliveryAddressSnapshot = {
+            id: deliveryAddressSource.id,
+            label: normalizeAddressField(deliveryAddressSource.label) || 'Home',
+            recipient: normalizeAddressField(deliveryAddressSource.recipient),
+            phone: normalizeAddressField(deliveryAddressSource.phone),
+            street: normalizeAddressField(deliveryAddressSource.street),
+            ward: normalizeAddressField(deliveryAddressSource.ward),
+            district: normalizeAddressField(deliveryAddressSource.district),
+            city: normalizeAddressField(deliveryAddressSource.city),
+            instructions: normalizeAddressField(deliveryAddressSource.instructions),
+        };
+        if (!deliveryAddressSnapshot.street) {
+            throw new Error('Địa chỉ giao hàng chưa đầy đủ. Vui lòng cập nhật lại.');
+        }
+        const deliveryAddressId = deliveryAddressSnapshot.id;
+
+        const restaurantSnapshots = {};
+        const pricingBreakdown = {};
+        restaurantIds.forEach((restaurantId) => {
+            const stats = restaurantStats.get(restaurantId);
+            if (!stats) return;
+            restaurantSnapshots[restaurantId] = stats.snapshot;
+            pricingBreakdown[restaurantId] = {
+                subtotal: stats.subtotal,
+                item_count: stats.itemCount,
+            };
+        });
+
+        const metadata = {
+            source: 'web-app',
+            discount_code: appliedDiscountCode?.code || null,
+            restaurant_ids: restaurantIds,
+            restaurant_snapshots: restaurantSnapshots,
+            pricing_breakdown: pricingBreakdown,
+            delivery_address_id: deliveryAddressId,
+            delivery_address: deliveryAddressSnapshot,
+        };
+        if (restaurantIds.length === 1) {
+            metadata.restaurant_snapshot = restaurantSnapshots[restaurantIds[0]];
+        }
+        if (notes) {
+            metadata.notes = notes;
+        }
 
         const payload = {
-            restaurant_id: restaurantId,
             items: orderItems,
             shipping_fee: shippingFee,
             discount,
@@ -522,41 +737,73 @@ export const AppContextProvider = ({ children }) => {
             currency: currencyCode,
             payment_method: paymentMethod,
             delivery_address: deliveryAddressSnapshot,
-            metadata: {
-                source: 'web-app',
-                discount_code: appliedDiscountCode?.code || null,
-            },
+            delivery_address_id: deliveryAddressId,
+            metadata,
         };
-        if (notes) {
-            payload.metadata.notes = notes;
+        if (restaurantIds.length === 1) {
+            payload.restaurant_id = restaurantIds[0];
         }
 
         try {
             const createdOrder = await ordersService.createOrder(payload);
-            const adapted = adaptOrderFromApi(createdOrder);
-            if (!adapted) {
+            const createdList = Array.isArray(createdOrder) ? createdOrder : [createdOrder];
+            if (!createdList.length) {
                 throw new Error('The server responded without order data.');
             }
-            try {
-                await paymentsService.createPayment({
-                    order_id: createdOrder.id,
-                    user_id: user.id,
-                    amount: totalAmount,
-                    currency: currencyCode,
-                    idempotency_key: `order-${createdOrder.id}`,
-                });
-            } catch (paymentError) {
-                console.error('Failed to persist payment for order', paymentError);
-                throw new Error(
-                    paymentError?.response?.data?.error ||
-                    'We created the order but could not record the payment. Please try again.'
-                );
+            const adaptedList = createdList.map(adaptOrderFromApi).filter(Boolean);
+            if (!adaptedList.length) {
+                throw new Error('Unable to parse order data from server response.');
             }
+
+            const recordPaymentsInBackground = async () => {
+                const tasks = createdList.map(async (orderRecord, index) => {
+                    try {
+                        const paymentAmount = Number(orderRecord.total_amount) || adaptedList[index]?.totalAmount || 0;
+                        const paymentPayload = {
+                            order_id: orderRecord.id,
+                            user_id: user.id,
+                            amount: paymentAmount,
+                            currency: currencyCode,
+                            payment_method: paymentMethod,
+                            idempotency_key: `order-${orderRecord.id}`,
+                        };
+                        const paymentRecord = await paymentsService.createPayment(paymentPayload);
+                        if (paymentRecord?.status && adaptedList[index]) {
+                            adaptedList[index].paymentStatus = paymentRecord.status;
+                        }
+                    } catch (paymentErr) {
+                        const errorMsg =
+                            paymentErr?.response?.data?.error ||
+                            paymentErr?.message ||
+                            'Không thể ghi nhận thanh toán cho đơn hàng.';
+                        console.error('Failed to persist payment for order', paymentErr);
+                        toast.error(errorMsg);
+                    }
+                });
+
+                await Promise.allSettled(tasks);
+                refreshOrders();
+            };
+
+            recordPaymentsInBackground().catch((err) => {
+                console.error('Unexpected payment background error', err);
+                toast.error('Không thể đồng bộ thanh toán. Vui lòng kiểm tra lại đơn hàng.');
+            });
+
             clearCart();
             setAppliedDiscountCode(null);
-            await refreshOrders();
-            return adapted;
+            refreshOrders().catch((err) => {
+                console.error('Failed to refresh orders after checkout', err);
+            });
+            return adaptedList.length === 1 ? adaptedList[0] : adaptedList;
         } catch (error) {
+            const statusCode = error?.response?.status;
+            if (statusCode === 401) {
+                throw new Error('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
+            }
+            if (error?.code === 'ECONNABORTED') {
+                throw new Error('Máy chủ phản hồi chậm. Vui lòng thử lại sau ít phút.');
+            }
             const message =
                 error?.response?.data?.error ||
                 error?.message ||
@@ -565,15 +812,16 @@ export const AppContextProvider = ({ children }) => {
         }
     }, [
         authToken,
+        user,
         cartItems,
         products,
         delivery_charges,
         getDiscountAmount,
         currency,
-        user,
         method,
         selectedAddress,
         appliedDiscountCode,
+        restaurants,
         clearCart,
         refreshOrders,
     ]);
@@ -587,16 +835,22 @@ export const AppContextProvider = ({ children }) => {
         }
     }, [isOwner]);
 
-    // Persist local auth
-    useEffect(() => {
-        if (authToken) localStorage.setItem('auth_token', authToken); else localStorage.removeItem('auth_token');
-    }, [authToken]);
     useEffect(() => {
         try {
             if (authProfile) localStorage.setItem('auth_profile', JSON.stringify(authProfile));
             else localStorage.removeItem('auth_profile');
         } catch {}
     }, [authProfile]);
+
+    useEffect(() => {
+        const handleAuthExpired = () => {
+            setAuthToken(null);
+            setAuthProfile(null);
+            toast.error('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
+        };
+        window.addEventListener('auth:expired', handleAuthExpired);
+        return () => window.removeEventListener('auth:expired', handleAuthExpired);
+    }, []);
 
     const sanitizeUser = (rawUser) => {
         if (!rawUser) return null;
@@ -613,9 +867,43 @@ export const AppContextProvider = ({ children }) => {
     const loginWithCredentials = async (email, password) => {
         try {
             const res = await authService.login(email, password);
-            if (res?.token) setAuthToken(res.token);
+            if (res?.token) {
+                try { localStorage.setItem('auth_token', res.token); } catch {}
+                setAuthToken(res.token);
+            }
             if (res?.user) setAuthProfile(sanitizeUser(res.user));
             toast.success(res?.message || 'Logged in successfully');
+            // Auto-create pending address captured during signup/guest flow
+            try {
+                const rawPending = localStorage.getItem('pending_address');
+                if (rawPending) {
+                    const pending = JSON.parse(rawPending);
+                    if (pending && pending.street) {
+                        const created = await addressesService.create({
+                            street: pending.street,
+                            ward: pending.ward,
+                            district: pending.district,
+                            city: pending.city,
+                            label: pending.label,
+                            recipient: pending.recipient,
+                            phone: pending.phone,
+                            instructions: pending.instructions,
+                            is_default: Boolean(pending.isDefault),
+                        });
+                        try { localStorage.removeItem('pending_address'); } catch {}
+                        const normalized = normalizeAddressFromApi(created);
+                        await refreshAddresses();
+                        if (normalized?.id) {
+                            setSelectedAddressId(normalized.id);
+                            toast.success('�? th�m �?a ch? m?c �?nh sau khi ��ng nh?p.');
+                        }
+                    }
+                }
+            } catch (e) {
+                console.warn('Failed to apply pending address after login', e);
+            }
+            await refreshAddresses();
+            await refreshOrders();
             return res;
         } catch (error) {
             const message = error?.response?.data?.message || error.message || 'Login failed';
@@ -671,6 +959,41 @@ export const AppContextProvider = ({ children }) => {
     const getDishesByRestaurant = (restaurantId) =>
         products.filter(item => item.restaurantId === restaurantId);
 
+    const getOrderById = useCallback(
+        (orderId) => {
+            if (!orderId) return null;
+            const combined = [...activeOrders, ...pastOrders];
+            return combined.find((order) => order.id === orderId) || null;
+        },
+        [activeOrders, pastOrders],
+    );
+
+    const fetchOrderById = useCallback(
+        async (orderId) => {
+            if (!authToken) {
+                throw new Error('Please sign in to view order details.');
+            }
+            if (!orderId) {
+                throw new Error('Order identifier is required.');
+            }
+            try {
+                const data = await ordersService.get(orderId);
+                const adapted = adaptOrderFromApi(data);
+                if (!adapted) {
+                    throw new Error('Order not found.');
+                }
+                return adapted;
+            } catch (error) {
+                const message =
+                    error?.response?.data?.error ||
+                    error?.message ||
+                    'Failed to load order details.';
+                throw new Error(message);
+            }
+        },
+        [authToken],
+    );
+
     const applyDiscountCode = (code) => {
         const trimmed = code.trim();
         if (!trimmed) {
@@ -699,33 +1022,146 @@ export const AppContextProvider = ({ children }) => {
         );
     };
 
-    const addNewAddress = (address) => {
-        setAddresses(prev => {
-            const updated = [...prev, address];
-            if (address.isDefault) {
-                updated.forEach(item => {
-                    if (item.id !== address.id) {
-                        item.isDefault = false;
+    const addNewAddress = useCallback(async (address) => {
+        if (!authToken) {
+            throw new Error('Bạn cần đăng nhập để lưu địa chỉ.');
+        }
+        const payload = {
+            street: address.street,
+            ward: address.ward,
+            district: address.district,
+            city: address.city,
+            label: address.label,
+            recipient: address.recipient,
+            phone: address.phone,
+            instructions: address.instructions,
+            is_default: Boolean(address.isDefault),
+        };
+        const created = await addressesService.create(payload);
+        const normalized = normalizeAddressFromApi(created);
+        // Auto-create pending address captured during signup/guest flow
+            try {
+                const rawPending = localStorage.getItem('pending_address');
+                if (rawPending) {
+                    const pending = JSON.parse(rawPending);
+                    if (pending && pending.street) {
+                        const created = await addressesService.create({
+                            street: pending.street,
+                            ward: pending.ward,
+                            district: pending.district,
+                            city: pending.city,
+                            label: pending.label,
+                            recipient: pending.recipient,
+                            phone: pending.phone,
+                            instructions: pending.instructions,
+                            is_default: Boolean(pending.isDefault),
+                        });
+                        try { localStorage.removeItem('pending_address'); } catch {}
+                        const normalized = normalizeAddressFromApi(created);
+                        await refreshAddresses();
+                        if (normalized?.id) {
+                            setSelectedAddressId(normalized.id);
+                            toast.success('�? th�m �?a ch? m?c �?nh sau khi ��ng nh?p.');
+                        }
                     }
-                });
-                setSelectedAddressId(address.id);
+                }
+            } catch (e) {
+                console.warn('Failed to apply pending address after login', e);
             }
-            return updated;
+            await refreshAddresses();
+        if (normalized?.id) {
+            setSelectedAddressId(normalized.id);
+        }
+        return normalized;
+    }, [authToken, normalizeAddressFromApi, refreshAddresses]);
+
+    const updateAddress = useCallback(async (addressId, updates) => {
+        if (!authToken) {
+            throw new Error('Bạn cần đăng nhập để cập nhật địa chỉ.');
+        }
+        const payload = {};
+        ['street', 'ward', 'district', 'city', 'label', 'recipient', 'phone', 'instructions'].forEach((field) => {
+            if (Object.prototype.hasOwnProperty.call(updates, field)) {
+                payload[field] = updates[field];
+            }
         });
-    };
+        if (Object.prototype.hasOwnProperty.call(updates, 'isDefault')) {
+            payload.is_default = Boolean(updates.isDefault);
+        }
+        const updated = await addressesService.update(addressId, payload);
+        const normalized = normalizeAddressFromApi(updated);
+        // Auto-create pending address captured during signup/guest flow
+            try {
+                const rawPending = localStorage.getItem('pending_address');
+                if (rawPending) {
+                    const pending = JSON.parse(rawPending);
+                    if (pending && pending.street) {
+                        const created = await addressesService.create({
+                            street: pending.street,
+                            ward: pending.ward,
+                            district: pending.district,
+                            city: pending.city,
+                            label: pending.label,
+                            recipient: pending.recipient,
+                            phone: pending.phone,
+                            instructions: pending.instructions,
+                            is_default: Boolean(pending.isDefault),
+                        });
+                        try { localStorage.removeItem('pending_address'); } catch {}
+                        const normalized = normalizeAddressFromApi(created);
+                        await refreshAddresses();
+                        if (normalized?.id) {
+                            setSelectedAddressId(normalized.id);
+                            toast.success('�? th�m �?a ch? m?c �?nh sau khi ��ng nh?p.');
+                        }
+                    }
+                }
+            } catch (e) {
+                console.warn('Failed to apply pending address after login', e);
+            }
+            await refreshAddresses();
+        if (normalized?.isDefault) {
+            setSelectedAddressId(normalized.id);
+        }
+        return normalized;
+    }, [authToken, normalizeAddressFromApi, refreshAddresses]);
 
-    const updateAddress = (addressId, updates) => {
-        setAddresses(prev =>
-            prev.map(address =>
-                address.id === addressId ? { ...address, ...updates } : address
-            )
-        );
-    };
-
-    const removeAddress = (addressId) => {
-        setAddresses(prev => prev.filter(address => address.id !== addressId));
-        setSelectedAddressId(prev => (prev === addressId ? null : prev));
-    };
+    const removeAddress = useCallback(async (addressId) => {
+        if (!authToken) {
+            throw new Error('Bạn cần đăng nhập để xoá địa chỉ.');
+        }
+        await addressesService.remove(addressId);
+        // Auto-create pending address captured during signup/guest flow
+            try {
+                const rawPending = localStorage.getItem('pending_address');
+                if (rawPending) {
+                    const pending = JSON.parse(rawPending);
+                    if (pending && pending.street) {
+                        const created = await addressesService.create({
+                            street: pending.street,
+                            ward: pending.ward,
+                            district: pending.district,
+                            city: pending.city,
+                            label: pending.label,
+                            recipient: pending.recipient,
+                            phone: pending.phone,
+                            instructions: pending.instructions,
+                            is_default: Boolean(pending.isDefault),
+                        });
+                        try { localStorage.removeItem('pending_address'); } catch {}
+                        const normalized = normalizeAddressFromApi(created);
+                        await refreshAddresses();
+                        if (normalized?.id) {
+                            setSelectedAddressId(normalized.id);
+                            toast.success('�? th�m �?a ch? m?c �?nh sau khi ��ng nh?p.');
+                        }
+                    }
+                }
+            } catch (e) {
+                console.warn('Failed to apply pending address after login', e);
+            }
+            await refreshAddresses();
+    }, [authToken, refreshAddresses]);
 
     const updateLocalProfile = (updates) => {
         setAuthProfile(prev => {
@@ -791,11 +1227,14 @@ export const AppContextProvider = ({ children }) => {
         setPastOrders,
         ordersLoading,
         refreshOrders,
+        getOrderById,
+        fetchOrderById,
         placeOrder,
         addresses,
         selectedAddress,
         selectedAddressId,
         setSelectedAddressId,
+        refreshAddresses,
         addNewAddress,
         updateAddress,
         removeAddress,
@@ -821,10 +1260,11 @@ export const AppContextProvider = ({ children }) => {
         verifyOtp,
         // Third-party auth (optional)
         loginWithRedirect,      // For Auth0
-        logoutAuth0
+        logoutAuth0: isAuth0 ? rawLogoutAuth0 : null
     };
 
     return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 };
 
 export const useAppContext = () => useContext(AppContext);
+

@@ -4,6 +4,7 @@ const ctrl = require('../controllers/order.controller');
 
 router.get('/', ctrl.list);
 router.post('/', ctrl.create);
+router.patch('/:id/payment', ctrl.updatePayment);
 router.get('/:id', ctrl.get);
 
 module.exports = router;

@@ -29,20 +29,25 @@ const AddressForm = () => {
     }));
   };
 
-  const handleSubmit = (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault();
     if (!formState.recipient || !formState.phone || !formState.street) {
       toast.error("Please fill in the required fields.");
       return;
     }
-    const newAddress = {
-      ...formState,
-      id: `addr-${Date.now()}`,
-    };
-    addNewAddress(newAddress);
-    setSelectedAddressId(newAddress.id);
-    toast.success("New address added to your account.");
-    navigate("/checkout");
+    try {
+      const created = await addNewAddress(formState);
+      if (created?.id) {
+        setSelectedAddressId(created.id);
+      }
+      toast.success("New address added to your account.");
+      navigate("/checkout");
+    } catch (error) {
+      const message =
+        error?.message ||
+        "We could not save this address. Please sign in and try again.";
+      toast.error(message);
+    }
   };
 
   return (

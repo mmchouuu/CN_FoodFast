@@ -21,7 +21,16 @@ const Settings = () => {
             <li className="font-semibold text-gray-900">{email || 'Guest'}</li>
           </ul>
           <button
-            onClick={() => { logoutLocal?.(); logoutAuth0?.({ returnTo: window.location.origin }); }}
+            onClick={() => {
+              logoutLocal?.();
+              if (logoutAuth0) {
+                try {
+                  logoutAuth0({ returnTo: window.location.origin });
+                } catch (error) {
+                  console.warn('Auth0 logout skipped:', error);
+                }
+              }
+            }}
             className="mt-6 w-full rounded-full bg-gray-900 px-6 py-2 text-sm font-semibold text-white hover:bg-gray-700"
           >
             Logout

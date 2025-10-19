@@ -137,47 +137,52 @@ const CustomerProfilePanel = ({ open, onClose, onLogout }) => {
     toast.success("Profile updated.");
   };
 
-  const handleAddAddress = (event) => {
+  const handleAddAddress = async (event) => {
     event.preventDefault();
     if (!newAddress.street || !newAddress.ward || !newAddress.district) {
       toast.error("Please provide the complete address.");
       return;
     }
-    const id = `addr-${Date.now()}`;
     const label =
       addressLabel === "custom"
         ? customLabel.trim() || "Other"
         : ADDRESS_LABELS.find((item) => item.id === addressLabel)?.label ||
           "Home";
-    addNewAddress({
-      id,
-      label,
-      recipient: newAddress.recipient || defaultFullName,
-      phone: newAddress.phone || defaultPhone,
-      street: newAddress.street,
-      ward: newAddress.ward,
-      district: newAddress.district,
-      city: newAddress.city,
-      instructions: newAddress.instructions,
-      isDefault: newAddress.isDefault,
-    });
-    if (newAddress.isDefault) {
-      setSelectedAddressId(id);
+    try {
+      const created = await addNewAddress({
+        label,
+        recipient: newAddress.recipient || defaultFullName,
+        phone: newAddress.phone || defaultPhone,
+        street: newAddress.street,
+        ward: newAddress.ward,
+        district: newAddress.district,
+        city: newAddress.city,
+        instructions: newAddress.instructions,
+        isDefault: newAddress.isDefault,
+      });
+      if (created?.isDefault && created?.id) {
+        setSelectedAddressId(created.id);
+      }
+      toast.success("New address added.");
+      setShowAddressForm(false);
+      setNewAddress({
+        recipient: defaultFullName,
+        phone: defaultPhone,
+        street: "",
+        ward: "",
+        district: "",
+        city: "Ho Chi Minh City",
+        instructions: "",
+        isDefault: false,
+      });
+      setAddressLabel(ADDRESS_LABELS[0].id);
+      setCustomLabel("");
+    } catch (error) {
+      const message =
+        error?.message ||
+        "We could not save this address. Please sign in and try again.";
+      toast.error(message);
     }
-    toast.success("New address added.");
-    setShowAddressForm(false);
-    setNewAddress({
-      recipient: defaultFullName,
-      phone: defaultPhone,
-      street: "",
-      ward: "",
-      district: "",
-      city: "Ho Chi Minh City",
-      instructions: "",
-      isDefault: false,
-    });
-    setAddressLabel(ADDRESS_LABELS[0].id);
-    setCustomLabel("");
   };
 
   const handleLinkPayment = (optionId) => {
@@ -345,7 +350,18 @@ const CustomerProfilePanel = ({ open, onClose, onLogout }) => {
                   </span>
                 ) : null}
                 <button
-                  onClick={() => removeAddress(address.id)}
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      await removeAddress(address.id);
+                      toast.success("Address removed.");
+                    } catch (error) {
+                      const message =
+                        error?.message ||
+                        "Unable to remove this address. Please try again.";
+                      toast.error(message);
+                    }
+                  }}
                   className="rounded-full border border-orange-100 px-3 py-1 text-xs font-semibold text-gray-500 transition hover:border-red-200 hover:text-red-500"
                 >
                   Xoa

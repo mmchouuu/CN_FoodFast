@@ -19,11 +19,19 @@ function authMiddleware(req, res, next) {
   }
 }
 
-router.use('/', authMiddleware, createProxyMiddleware({
-  target: PAYMENT_SERVICE,
-  changeOrigin: true,
-  pathRewrite: { '^/api/payments': '/api/payments' },
-  onError: (err, req, res) => res.status(502).json({ error: 'bad gateway', detail: err.message })
-}));
+router.use(
+  '/',
+  authMiddleware,
+  createProxyMiddleware({
+    target: PAYMENT_SERVICE,
+    changeOrigin: true,
+    pathRewrite: (path) => {
+      const suffix = !path || path === '/' ? '' : path;
+      return `/api/payments${suffix}`;
+    },
+    onError: (err, req, res) =>
+      res.status(502).json({ error: 'bad gateway', detail: err.message }),
+  })
+);
 
 module.exports = router;

@@ -6,6 +6,7 @@ const config = require('./config');
 
 // Routes
 const customerRoutes = require('./routes/customer.routes');
+const customerAddressRoutes = require('./routes/customer.address.routes');
 const restaurantRoutes = require('./routes/restaurant.routes');
 const adminRoutes = require('./routes/admin.routes');
 const userRoutes = require('./routes/user.routes');
@@ -38,6 +39,7 @@ app.get('/health', (req, res) => {
 
 // Routes
 app.use('/api/users', userRoutes);
+app.use('/api/customers/me/addresses', customerAddressRoutes);
 app.use('/api/customers', customerRoutes);
 app.use('/api/restaurants', restaurantRoutes);
 app.use('/api/admin', adminRoutes);

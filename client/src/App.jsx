@@ -71,6 +71,7 @@ import Checkout from './pages/Checkout';
 import Account from './pages/Account';
 import CurrentOrder from './pages/CurrentOrder';
 import OrderHistory from './pages/MyOrders';
+import OrderDetails from './pages/OrderDetails';
 import Review from './pages/Review';
 import Notifications from './pages/Notifications';
 import Blog from './pages/Blog';
@@ -137,6 +138,7 @@ const App = () => {
         <Route path="/address-form" element={<AddressForm />} />
         <Route path="/account" element={<Account />} />
         <Route path="/orders/current" element={<CurrentOrder />} />
+        <Route path="/orders/:orderId" element={<OrderDetails />} />
         <Route path="/orders/history" element={<OrderHistory />} />
         <Route path="/reviews" element={<Review />} />
         <Route path="/notifications" element={<Notifications />} />

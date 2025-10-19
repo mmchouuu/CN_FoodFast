@@ -9,9 +9,13 @@ const errorHandler = require('./middlewares/errorHandler');
 const health = require('./health');
 
 const customersRoutes = require('./routes/customers.routes');
+const customerAddressesRoutes = require('./routes/customer-addresses.routes');
 const restaurantsRoutes = require('./routes/restaurants.routes');
 const adminRoutes = require('./routes/admin.routes');
 const usersRoutes = require('./routes/users.routes');
+const productsRoutes = require('./routes/products.routes');
+const ordersRoutes = require('./routes/orders.routes');
+const paymentsRoutes = require('./routes/payments.routes');
 
 const app = express();
 app.use(bodyParser.json());
@@ -35,7 +39,11 @@ app.use(requestId);
 app.use('/api/users', usersRoutes);
 app.use('/api/customers', customersRoutes);
 app.use('/api/customer', customersRoutes);
+app.use('/api/customer-addresses', customerAddressesRoutes);
 app.use('/api/restaurants', restaurantsRoutes);
+app.use('/api/products', productsRoutes);
+app.use('/api/orders', ordersRoutes);
+app.use('/api/payments', paymentsRoutes);
 app.use('/api/admin', adminRoutes);
 
 // health
