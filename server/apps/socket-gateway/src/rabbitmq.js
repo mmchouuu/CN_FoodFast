@@ -8,19 +8,41 @@ export async function connectRabbitMQ(io) {
     const channel = await connection.createChannel();
     await channel.assertQueue(queue, { durable: true });
 
-    console.log(`✅ Connected to RabbitMQ, listening on queue: ${queue}`);
+    console.log(`[socket-gateway] listening to queue: ${queue}`);
 
     channel.consume(queue, (msg) => {
-      if (msg !== null) {
+      if (!msg) {
+        return;
+      }
+      try {
         const data = JSON.parse(msg.content.toString());
-        console.log("📡 Received socket event:", data);
-
-        // Phát ra cho tất cả client đang kết nối
-        io.emit("server-event", data);
+        dispatchEvent(io, data);
+      } catch (err) {
+        console.error("[socket-gateway] failed to process message", err);
+      } finally {
         channel.ack(msg);
       }
     });
   } catch (error) {
-    console.error("❌ RabbitMQ error:", error);
+    console.error("[socket-gateway] RabbitMQ error:", error);
+  }
+}
+
+function dispatchEvent(io, message) {
+  if (!message || typeof message !== "object") {
+    io.emit("server-event", message);
+    return;
+  }
+
+  const { event, payload, rooms } = message;
+  if (!event) {
+    io.emit("server-event", message);
+    return;
+  }
+
+  if (Array.isArray(rooms) && rooms.length > 0) {
+    rooms.forEach((room) => io.to(room).emit(event, payload));
+  } else {
+    io.emit(event, payload);
   }
 }

@@ -18,7 +18,7 @@ const ordersRoutes = require('./routes/orders.routes');
 const paymentsRoutes = require('./routes/payments.routes');
 
 const app = express();
-app.use(bodyParser.json());
+app.use(bodyParser.json({ limit: '10mb' }));
 // Basic CORS for development and SPA usage
 app.use((req, res, next) => {
   const origin = req.headers.origin || '*';

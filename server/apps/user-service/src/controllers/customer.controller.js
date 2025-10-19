@@ -21,7 +21,12 @@ async function login(req, res, next) {
   try {
     const result = await customerService.loginCustomer(req.body);
     res.json(result);
-  } catch (err) { next(err); }
+  } catch (err) {
+    if (err?.statusCode) {
+      return res.status(err.statusCode).json({ message: err.message });
+    }
+    next(err);
+  }
 }
 
 module.exports = { register, verify, login };

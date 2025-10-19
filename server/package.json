@@ -1,1 +1,11 @@
-{"type":"module","dependencies":{"amqplib":"^0.10.9","bcryptjs":"^3.0.2","dotenv":"^17.2.3"}}
+{
+  "name": "@foodfast/shared",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "db/pool.js",
+  "dependencies": {
+    "amqplib": "^0.10.9",
+    "bcryptjs": "^3.0.2",
+    "dotenv": "^17.2.3"
+  }
+}

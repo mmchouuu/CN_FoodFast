@@ -2,8 +2,7 @@ import React, { useMemo } from "react";
 import { dummyDashboardData, dummyOrdersData } from "../../assets/data";
 import { useAppContext } from "../../context/AppContext";
 
-const containerClasses =
-    "md:px-8 py-6 xl:py-8 m-1 sm:m-3 h-[97vh] overflow-y-auto w-full lg:w-11/12 bg-primary shadow rounded-xl";
+const containerClasses = "bg-white shadow-sm rounded-2xl p-6 space-y-6";
 
 const Dashboard = () => {
     const { currency } = useAppContext();
@@ -218,3 +217,9 @@ const StatusPill = ({ status }) => (
 );
 
 export default Dashboard;
+
+
+
+
+
+

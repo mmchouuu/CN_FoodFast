@@ -1,18 +1,27 @@
-const model = require('../models/product.model');
+import {
+  listProducts,
+  getProductById,
+  createProduct,
+  updateProduct,
+  deleteProduct,
+} from '../models/product.model.js';
 
-async function list(params = {}) {
-  return model.listProducts(params);
+export async function list(params = {}) {
+  return listProducts(params);
 }
-async function get(id) {
-  return model.getProductById(id);
+
+export async function get(id) {
+  return getProductById(id);
 }
-async function create(payload){
-  return model.createProduct(payload);
+
+export async function create(payload) {
+  return createProduct(payload);
 }
-async function update(id, payload){
-  return model.updateProduct(id, payload);
+
+export async function update(id, payload) {
+  return updateProduct(id, payload);
 }
-async function remove(id){
-  return model.deleteProduct(id);
+
+export async function remove(id) {
+  return deleteProduct(id);
 }
-module.exports = { list, get, create, update, remove };

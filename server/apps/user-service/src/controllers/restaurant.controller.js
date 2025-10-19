@@ -11,8 +11,18 @@ async function register(req, res, next) {
 
 async function verify(req, res, next) {
   try {
-    const { email, otp, password } = req.body;
-    const result = await restaurantService.verifyRestaurant(email, otp, password);
+    const {
+      email,
+      otp,
+      activationPassword,
+      newPassword,
+    } = req.body;
+    const result = await restaurantService.verifyRestaurant({
+      email,
+      otp_code: otp,
+      activationPassword,
+      newPassword,
+    });
     res.json(result);
   } catch (err) { next(err); }
 }
@@ -24,4 +34,34 @@ async function login(req, res, next) {
   } catch (err) { next(err); }
 }
 
-module.exports = { register, verify, login };
+async function getStatus(req, res, next) {
+  try {
+    const { email } = req.query;
+    if (!email) {
+      return res.status(400).json({ message: 'Email is required' });
+    }
+    const status = await restaurantService.getRestaurantStatus(email);
+    res.json(status);
+  } catch (err) { next(err); }
+}
+
+async function getOwnerAccount(req, res, next) {
+  try {
+    const { id } = req.params;
+    const account = await restaurantService.getRestaurantAccountById(id);
+    res.json(account);
+  } catch (err) {
+    if (err.message === 'Restaurant not found') {
+      return res.status(404).json({ message: err.message });
+    }
+    next(err);
+  }
+}
+
+module.exports = {
+  register,
+  verify,
+  login,
+  getStatus,
+  getOwnerAccount,
+};

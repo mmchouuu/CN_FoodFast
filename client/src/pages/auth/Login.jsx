@@ -1,11 +1,9 @@
 import React, { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import toast from "react-hot-toast";
 import { useAppContext } from "../../context/AppContext";
-import { assets } from "../../assets/data";
 
 const Login = () => {
-  const { loginWithCredentials, loginWithRedirect } = useAppContext();
+  const { loginWithCredentials } = useAppContext();
   const navigate = useNavigate();
 
   const [email, setEmail] = useState("");
@@ -16,9 +14,33 @@ const Login = () => {
   const [showPassword, setShowPassword] = useState(false);
 
   useEffect(() => {
-    const remembered = localStorage.getItem("foodfast_remembered_email");
-    if (remembered) {
-      setEmail(remembered);
+    const rememberedCredentials = localStorage.getItem("foodfast_remembered_login");
+    if (rememberedCredentials) {
+      try {
+        const parsed = JSON.parse(rememberedCredentials);
+        if (parsed.email) {
+          setEmail(parsed.email);
+        }
+        if (parsed.password) {
+          let decoded = parsed.password;
+          if (typeof atob === "function") {
+            try {
+              decoded = atob(parsed.password);
+            } catch {
+              decoded = parsed.password;
+            }
+          }
+          setPassword(decoded);
+        }
+        setRememberMe(true);
+        return;
+      } catch {
+        localStorage.removeItem("foodfast_remembered_login");
+      }
+    }
+    const legacyEmail = localStorage.getItem("foodfast_remembered_email");
+    if (legacyEmail) {
+      setEmail(legacyEmail);
       setRememberMe(true);
     }
   }, []);
@@ -30,8 +52,22 @@ const Login = () => {
     try {
       await loginWithCredentials(email.trim(), password);
       if (rememberMe) {
-        localStorage.setItem("foodfast_remembered_email", email.trim());
+        let encodedPassword = password;
+        if (typeof btoa === "function") {
+          try {
+            encodedPassword = btoa(password);
+          } catch {
+            encodedPassword = password;
+          }
+        }
+        const payload = {
+          email: email.trim(),
+          password: encodedPassword,
+        };
+        localStorage.setItem("foodfast_remembered_login", JSON.stringify(payload));
+        localStorage.removeItem("foodfast_remembered_email");
       } else {
+        localStorage.removeItem("foodfast_remembered_login");
         localStorage.removeItem("foodfast_remembered_email");
       }
       navigate("/");
@@ -43,18 +79,6 @@ const Login = () => {
       );
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleSocialLogin = async () => {
-    try {
-      if (loginWithRedirect) {
-        await loginWithRedirect({ connection: "google-oauth2" });
-      } else {
-        toast.error("Google login is not available in this environment yet.");
-      }
-    } catch (err) {
-      toast.error("Unable to start Google login.");
     }
   };
 
@@ -123,21 +147,11 @@ const Login = () => {
             {loading ? "Signing in..." : "Log in"}
           </button>
         </form>
-        <div className="mt-4 space-y-3">
-          <button
-            onClick={handleSocialLogin}
-            type="button"
-            className="flex w-full items-center justify-center gap-2 rounded-full border border-orange-100 px-6 py-3 text-sm font-semibold text-gray-600 transition hover:border-orange-200 hover:text-orange-500"
-          >
-            <img src={assets.gmail} alt="Gmail" className="h-4 w-4" />
-            Continue with Gmail
-          </button>
-          <p className="text-center text-sm text-gray-600">
-            Don't have an account?{" "}
-            <Link to="/auth/signup" className="font-semibold text-orange-500">
-              Create one now
-            </Link>
-          </p>
+        <div className="mt-4 text-center text-sm text-gray-600">
+          Don't have an account?{" "}
+          <Link to="/auth/signup" className="font-semibold text-orange-500">
+            Create one now
+          </Link>
         </div>
       </div>
     </div>
