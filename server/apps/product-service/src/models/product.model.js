@@ -1,8 +1,6 @@
-const { Pool } = require('pg');
-const config = require('../config');
-const pool = new Pool(config.DB);
+import pool from '../db/index.js';
 
-async function listProducts({ limit = 20, offset = 0, restaurantId } = {}) {
+export async function listProducts({ limit = 20, offset = 0, restaurantId } = {}) {
   const values = [];
   let idx = 1;
   let query = 'SELECT * FROM products';
@@ -19,12 +17,12 @@ async function listProducts({ limit = 20, offset = 0, restaurantId } = {}) {
   return res.rows;
 }
 
-async function getProductById(id) {
+export async function getProductById(id) {
   const res = await pool.query('SELECT * FROM products WHERE id=$1', [id]);
   return res.rows[0] || null;
 }
 
-async function createProduct(data) {
+export async function createProduct(data) {
   const {
     restaurant_id,
     title,
@@ -54,7 +52,7 @@ async function createProduct(data) {
   return res.rows[0];
 }
 
-async function updateProduct(id, data = {}) {
+export async function updateProduct(id, data = {}) {
   const fields = [];
   const values = [];
   let idx = 1;
@@ -95,16 +93,7 @@ async function updateProduct(id, data = {}) {
   return res.rows[0] || null;
 }
 
-async function deleteProduct(id) {
+export async function deleteProduct(id) {
   const res = await pool.query('DELETE FROM products WHERE id=$1 RETURNING id', [id]);
   return res.rows[0] || null;
 }
-
-module.exports = {
-  pool,
-  listProducts,
-  getProductById,
-  createProduct,
-  updateProduct,
-  deleteProduct,
-};

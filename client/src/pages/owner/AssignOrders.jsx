@@ -1,8 +1,7 @@
 import React from "react";
 import { dummyOrdersData } from "../../assets/data";
 
-const containerClasses =
-    "md:px-8 py-6 xl:py-8 m-1 sm:m-3 h-[97vh] overflow-y-auto w-full lg:w-11/12 bg-primary shadow rounded-xl";
+const containerClasses = "bg-white shadow-sm rounded-2xl p-6 space-y-6";
 
 const availableShippers = [
     { id: "shipper-01", name: "Nguyen Van A", currentLoad: 2, eta: "5 min" },
@@ -112,3 +111,9 @@ const AssignOrders = () => {
 };
 
 export default AssignOrders;
+
+
+
+
+
+
