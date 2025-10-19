@@ -10,7 +10,9 @@ RUN npm install
 
 COPY . .
 
-RUN npm rebuild bcrypt --build-from-source
+## bcrypt native module usually builds during npm install.
+## Remove explicit rebuild to avoid node-gyp-build missing errors.
+## If a build is still needed, npm will trigger it during install.
 
 ENV NODE_ENV=production
 

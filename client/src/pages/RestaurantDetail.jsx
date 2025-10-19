@@ -2,6 +2,11 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import RatingStars from "../components/RatingStars";
 import { useAppContext } from "../context/AppContext";
+import {
+  dishPlaceholderImage,
+  pickFirstImageUrl,
+  restaurantPlaceholderImage,
+} from "../utils/imageHelpers";
 
 const getBasePrice = (dish) => {
   if (!dish || !dish.price) return 0;
@@ -25,17 +30,24 @@ const sortOptions = [
 const DishCard = ({ dish, restaurantId, currency, onAdd }) => {
   const defaultSize = dish.sizes?.[0];
   const basePrice = getBasePrice(dish);
+  const dishImage = pickFirstImageUrl(
+    dishPlaceholderImage,
+    dish.images,
+    dish.image,
+    dish.heroImage,
+  );
 
   return (
     <div className="flex h-full flex-col overflow-hidden rounded-3xl bg-white shadow-sm transition hover:-translate-y-1 hover:shadow-lg">
       <Link
         to={`/restaurants/${restaurantId}/dishes/${dish._id}`}
-        className="relative aspect-[4/3] overflow-hidden"
+        className="relative aspect-[4/3] overflow-hidden bg-orange-50"
       >
         <img
-          src={dish.images?.[0]}
+          src={dishImage}
           alt={dish.title}
-          className="h-full w-full object-cover transition duration-300 hover:scale-105"
+          className="h-full w-full object-cover object-center transition duration-300 hover:scale-105"
+          onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = dishPlaceholderImage; }}
         />
         {dish.tags?.[0] ? (
           <span className="absolute left-4 top-4 rounded-full bg-white/90 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-orange-500 shadow">
@@ -145,6 +157,13 @@ const RestaurantDetail = () => {
     );
   }
 
+  const heroImage = pickFirstImageUrl(
+    restaurantPlaceholderImage,
+    restaurant.heroImage,
+    restaurant.coverImage,
+    restaurant.images,
+  );
+
   const filteredDishes = useMemo(() => {
     return dishes
       .filter((dish) => {
@@ -207,9 +226,10 @@ const RestaurantDetail = () => {
     <div className="space-y-14 pb-24">
       <section className="relative h-[360px] w-full overflow-hidden rounded-b-[48px]">
         <img
-          src={restaurant.heroImage}
+          src={heroImage}
           alt={restaurant.name}
-          className="h-full w-full object-cover"
+          className="h-full w-full object-cover object-center"
+          onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = restaurantPlaceholderImage; }}
         />
         <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/40 to-transparent" />
         <div className="absolute inset-x-0 bottom-10 max-padd-container text-white">

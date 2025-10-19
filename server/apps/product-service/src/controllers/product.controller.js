@@ -1,118 +1,65 @@
-// const service = require('../services/product.service');
+const service = require('../services/product.service');
 
-// async function list(req,res,next){
-//   try{
-//     const limit = parseInt(req.query.limit||20);
-//     const offset = parseInt(req.query.offset||0);
-//     const rows = await service.list({limit, offset});
-//     res.json({data: rows});
-//   }catch(err){ next(err); }
-// }
-
-// async function get(req,res,next){
-//   try{
-//     const p = await service.get(req.params.id);
-//     if(!p) return res.status(404).json({error:'not found'});
-//     res.json(p);
-//   }catch(err){ next(err); }
-// }
-
-// module.exports = { list, get };
-
-
-
-
-// import * as ProductService from '../services/product.service.js';
-
-// export async function getProducts(req, res) {
-//   try {
-//     const products = await ProductService.getAllProducts();
-//     res.json(products);
-//   } catch (err) {
-//     res.status(500).json({ error: err.message });
-//   }
-// }
-
-// export async function createProduct(req, res) {
-//   try {
-//     const product = await ProductService.createProduct(req.body);
-//     res.status(201).json(product);
-//   } catch (err) {
-//     res.status(500).json({ error: err.message });
-//   }
-// }
-
-
-// src/controllers/product.controller.js
-import * as ProductService from "../services/product.service.js";
-
-export const getAllProducts = async (req, res) => {
-  try {
-    const products = await ProductService.getAllProducts();
-    res.json(products);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-};
-
-export const getProductById = async (req, res) => {
-  try {
-    const product = await ProductService.getProductById(req.params.id);
-    if (!product) return res.status(404).json({ error: "Product not found" });
-    res.json(product);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-};
-
-export const createProduct = async (req, res) => {
-  try {
-    const newProduct = await ProductService.createProduct(req.body);
-    res.status(201).json(newProduct);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-};
-
-// export const updateProduct = async (req, res) => {
-//   try {
-//     const updated = await ProductService.updateProduct(req.params.id, req.body);
-//     res.json(updated);
-//   } catch (error) {
-//     res.status(500).json({ error: error.message });
-//   }
-// };
-
-export const updateProduct = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const data = req.body;
-
-    // Lấy dữ liệu cũ từ DB
-    const existing = await ProductService.getProductById(id);
-    if (!existing) {
-      return res.status(404).json({ error: "Product not found" });
+async function list(req,res,next){
+  try{
+    const limit = parseInt(req.query.limit||20);
+    const offset = parseInt(req.query.offset||0);
+    const params = { limit, offset };
+    if(req.query.restaurant_id){
+      params.restaurantId = req.query.restaurant_id;
     }
+    const rows = await service.list(params);
+    res.json({data: rows});
+  }catch(err){ next(err); }
+}
 
-    // Chỉ cập nhật field có trong req.body
-    const updatedData = {
-      ...existing,
-      ...data,
-      updated_at: new Date()
-    };
+async function get(req,res,next){
+  try{
+    const p = await service.get(req.params.id);
+    if(!p) return res.status(404).json({error:'not found'});
+    res.json(p);
+  }catch(err){ next(err); }
+}
 
-    const result = await ProductService.updateProduct(id, updatedData);
-    res.json(result);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-};
+async function create(req,res,next){
+  try{
+    const { restaurant_id, title, base_price } = req.body || {};
+    if(!restaurant_id || !title){
+      return res.status(400).json({ error: 'restaurant_id and title are required' });
+    }
+    const payload = { ...req.body };
+    if(typeof payload.base_price === 'string'){
+      payload.base_price = Number(payload.base_price);
+    }
+    if(Number.isNaN(payload.base_price)){
+      payload.base_price = undefined;
+    }
+    const created = await service.create(payload);
+    res.status(201).json(created);
+  }catch(err){ next(err); }
+}
 
-export const deleteProduct = async (req, res) => {
-  try {
-    await ProductService.deleteProduct(req.params.id);
-    res.json({ message: "Product deleted" });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-};
+async function update(req,res,next){
+  try{
+    const payload = { ...req.body };
+    if(typeof payload.base_price === 'string'){
+      payload.base_price = Number(payload.base_price);
+    }
+    if(Number.isNaN(payload.base_price)){
+      delete payload.base_price;
+    }
+    const updated = await service.update(req.params.id, payload);
+    if(!updated) return res.status(404).json({ error: 'not found' });
+    res.json(updated);
+  }catch(err){ next(err); }
+}
+
+async function remove(req,res,next){
+  try{
+    const deleted = await service.remove(req.params.id);
+    if(!deleted) return res.status(404).json({ error: 'not found' });
+    res.status(204).end();
+  }catch(err){ next(err); }
+}
+
+module.exports = { list, get, create, update, remove };

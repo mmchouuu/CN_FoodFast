@@ -2,6 +2,10 @@ import React, { useState } from "react";
 import { Link } from "react-router-dom";
 import { assets } from "../assets/data";
 import { useAppContext } from "../context/AppContext";
+import {
+  dishPlaceholderImage,
+  pickFirstImageUrl,
+} from "../utils/imageHelpers";
 
 const Item = ({ product }) => {
   const { currency, addToCart } = useAppContext();
@@ -9,16 +13,28 @@ const Item = ({ product }) => {
 
   if (!product) return null;
 
+  const productImage = pickFirstImageUrl(
+    dishPlaceholderImage,
+    product.images,
+    product.image,
+    product.heroImage,
+  );
+
+  const description =
+    product.description?.trim() ||
+    "Khám phá thêm hương vị đặc biệt của món ăn này.";
+
   return (
     <div className="relative flex flex-col overflow-hidden rounded-3xl bg-white shadow-sm transition hover:-translate-y-1 hover:shadow-lg">
       <Link
         to={`/restaurants/${product.restaurantId}/dishes/${product._id}`}
-        className="relative aspect-square overflow-hidden"
+        className="relative aspect-[4/3] overflow-hidden bg-orange-50"
       >
         <img
-          src={product.images?.[0]}
+          src={productImage}
           alt={product.title}
-          className="h-full w-full object-cover transition duration-300 hover:scale-105"
+          className="h-full w-full object-cover object-center transition duration-300 hover:scale-105"
+          onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = dishPlaceholderImage; }}
         />
         {product.tags?.[0] ? (
           <span className="absolute left-4 top-4 rounded-full bg-white/90 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-orange-500 shadow">
@@ -43,7 +59,7 @@ const Item = ({ product }) => {
           </div>
         </div>
         <p className="text-sm text-gray-500 line-clamp-2">
-          {product.description}
+          {description}
         </p>
 
         <div className="flex items-center justify-between">

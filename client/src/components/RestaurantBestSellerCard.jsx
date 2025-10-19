@@ -1,9 +1,20 @@
 import React from "react";
 import { Link } from "react-router-dom";
 import RatingStars from "./RatingStars";
+import {
+  dishPlaceholderImage,
+  pickFirstImageUrl,
+} from "../utils/imageHelpers";
 
 const RestaurantBestSellerCard = ({ restaurant, dish, currency }) => {
   if (!restaurant || !dish) return null;
+
+  const dishImage = pickFirstImageUrl(
+    dishPlaceholderImage,
+    dish.images,
+    dish.image,
+    dish.heroImage,
+  );
 
   const price =
     dish.sizes && dish.sizes.length
@@ -22,9 +33,9 @@ const RestaurantBestSellerCard = ({ restaurant, dish, currency }) => {
         aria-label={`View ${dish.title}`}
       >
         <img
-          src={dish.images?.[0]}
+          src={dishImage}
           alt={dish.title}
-          className="h-full w-full object-cover transition duration-300 hover:scale-105"
+          className="h-full w-full object-cover object-center transition duration-300 hover:scale-105"
         />
         {dish.tags?.[0] ? (
           <span className="absolute left-4 top-4 rounded-full bg-white/90 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-orange-500 shadow">

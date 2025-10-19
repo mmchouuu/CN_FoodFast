@@ -1,138 +1,198 @@
-// const model = require('../models/order.model');
+const model = require('../models/order.model');
 
-// async function create(payload) {
-//   // payload validation omitted for brevity
-//   return model.createOrder(payload);
-// }
-// async function get(id) {
-//   return model.getOrder(id);
-// }
-// module.exports = { create, get };
+function validationError(message) {
+  const err = new Error(message);
+  err.status = 400;
+  return err;
+}
 
-import pool from "../db/index.js";
+function toNumber(value, fallback = 0) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
 
-// ========== ORDERS ==========
-export const getAllOrders = async () => {
-  const result = await pool.query("SELECT * FROM orders ORDER BY created_at DESC");
-  return result.rows;
-};
-
-export const getOrderById = async (id) => {
-  const result = await pool.query("SELECT * FROM orders WHERE id = $1", [id]);
-  if (result.rows.length === 0) return null;
-
-  const items = await pool.query("SELECT * FROM order_items WHERE order_id = $1", [id]);
-  const delivery = await pool.query("SELECT * FROM deliveries WHERE order_id = $1", [id]);
-  const events = await pool.query("SELECT * FROM order_events WHERE order_id = $1 ORDER BY created_at", [id]);
-
-  return {
-    ...result.rows[0],
-    items: items.rows,
-    delivery: delivery.rows[0] || null,
-    events: events.rows,
-  };
-};
-
-export const createOrder = async (orderData) => {
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
-
-    const {
-      user_id,
-      restaurant_id,
-      branch_id,
-      total_amount,
-      metadata,
-      payment_status = "unpaid",
-      status = "pending",
-      order_items = [],
-      delivery = null,
-    } = orderData;
-
-    // Insert order
-    const orderRes = await client.query(
-      `INSERT INTO orders (user_id, restaurant_id, branch_id, total_amount, metadata, payment_status, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
-       RETURNING *`,
-      [user_id, restaurant_id, branch_id, total_amount, metadata, payment_status, status]
-    );
-
-    const order = orderRes.rows[0];
-
-    // Insert order items
-    for (const item of order_items) {
-      await client.query(
-        `INSERT INTO order_items (order_id, product_id, variant_id, product_snapshot, quantity, unit_price, total_price)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [
-          order.id,
-          item.product_id,
-          item.variant_id,
-          item.product_snapshot,
-          item.quantity,
-          item.unit_price,
-          item.total_price,
-        ]
-      );
-    }
-
-    // Insert delivery info (optional)
-    if (delivery) {
-      await client.query(
-        `INSERT INTO deliveries (order_id, delivery_address, delivery_status, estimated_at)
-         VALUES ($1, $2, $3, $4)`,
-        [order.id, delivery.delivery_address, delivery.delivery_status || "preparing", delivery.estimated_at]
-      );
-    }
-
-    // Insert event (order_created)
-    await client.query(
-      `INSERT INTO order_events (order_id, event_type, payload)
-       VALUES ($1, $2, $3)`,
-      [order.id, "ORDER_CREATED", { order_id: order.id, total_amount }]
-    );
-
-    await client.query("COMMIT");
-    return order;
-  } catch (err) {
-    await client.query("ROLLBACK");
-    throw err;
-  } finally {
-    client.release();
+function normalizeItems(items = []) {
+  if (!Array.isArray(items) || items.length === 0) {
+    throw validationError('items must contain at least one entry');
   }
-};
 
-export const updateOrderStatus = async (id, status) => {
-  const result = await pool.query(
-    `UPDATE orders
-     SET status = $1, updated_at = NOW()
-     WHERE id = $2
-     RETURNING *`,
-    [status, id]
+  return items.map((item, index) => {
+    const productId =
+      item.product_id ||
+      item.productId ||
+      item.dishId ||
+      item.id;
+    if (!productId) {
+      throw validationError(`items[${index}].product_id is required`);
+    }
+
+    const quantity = toNumber(item.quantity, NaN);
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      throw validationError(`items[${index}].quantity must be greater than 0`);
+    }
+
+    const unitPrice = toNumber(
+      item.unit_price ?? item.unitPrice ?? item.price,
+      NaN
+    );
+    if (!Number.isFinite(unitPrice) || unitPrice < 0) {
+      throw validationError(`items[${index}].unit_price is required`);
+    }
+
+    const totalPrice = toNumber(
+      item.total_price ?? item.totalPrice ?? unitPrice * quantity,
+      NaN
+    );
+    if (!Number.isFinite(totalPrice) || totalPrice < 0) {
+      throw validationError(
+        `items[${index}].total_price must be provided or derivable`
+      );
+    }
+
+    const snapshotCandidate =
+      item.product_snapshot ||
+      item.snapshot ||
+      (typeof item === 'object' ? {
+        title: item.title || item.name || null,
+        size: item.size || null,
+        image: item.image || null,
+        restaurant_id: item.restaurant_id || item.restaurantId || null,
+        additions: item.additions || item.extras || null,
+      } : {});
+
+    const productSnapshot =
+      snapshotCandidate && typeof snapshotCandidate === 'object'
+        ? snapshotCandidate
+        : {};
+
+    return {
+      product_id: productId,
+      variant_id: item.variant_id || item.variantId || null,
+      quantity,
+      unit_price: unitPrice,
+      total_price: totalPrice,
+      product_snapshot: productSnapshot,
+    };
+  });
+}
+
+function formatOrder(order) {
+  if (!order) return null;
+  const items = Array.isArray(order.items) ? order.items : [];
+  return {
+    id: order.id,
+    user_id: order.user_id,
+    restaurant_id: order.restaurant_id,
+    branch_id: order.branch_id,
+    status: order.status,
+    payment_status: order.payment_status,
+    total_amount: toNumber(order.total_amount),
+    currency: order.currency,
+    metadata: order.metadata || {},
+    created_at: order.created_at,
+    updated_at: order.updated_at,
+    items: items.map((item) => ({
+      id: item.id,
+      order_id: item.order_id,
+      product_id: item.product_id,
+      variant_id: item.variant_id,
+      quantity: item.quantity,
+      unit_price: toNumber(item.unit_price),
+      total_price: toNumber(item.total_price),
+      product_snapshot: item.product_snapshot || {},
+    })),
+  };
+}
+
+async function create(payload = {}) {
+  const userId = payload.user_id;
+  if (!userId) throw validationError('user_id is required');
+  if (!payload.restaurant_id) throw validationError('restaurant_id is required');
+
+  const normalizedItems = normalizeItems(payload.items);
+
+  const subtotal = normalizedItems.reduce(
+    (sum, item) => sum + item.total_price,
+    0
+  );
+  const shippingFee = toNumber(
+    payload.shipping_fee ?? payload.delivery_fee ?? payload?.metadata?.pricing?.shipping_fee
+  );
+  const discount = toNumber(
+    payload.discount ?? payload?.metadata?.pricing?.discount
   );
 
-  if (result.rows.length === 0) return null;
-
-  // Lưu event
-  await pool.query(
-    `INSERT INTO order_events (order_id, event_type, payload)
-     VALUES ($1, $2, $3)`,
-    [id, "STATUS_UPDATED", { new_status: status }]
+  const explicitTotal =
+    payload.total_amount ?? payload?.metadata?.pricing?.total;
+  const calculatedTotal = subtotal + shippingFee - discount;
+  const totalAmountCandidate = toNumber(explicitTotal, calculatedTotal);
+  const totalAmount = Math.max(
+    0,
+    Math.round(totalAmountCandidate * 100) / 100
   );
 
-  return result.rows[0];
-};
+  const paymentMethod =
+    (payload.payment_method || payload?.payment?.method || 'cod').toLowerCase();
+  const paymentStatus =
+    payload.payment_status ||
+    payload?.payment?.status ||
+    (paymentMethod === 'cod' ? 'pending' : 'paid');
 
-export const deleteOrder = async (id) => {
-  await pool.query("DELETE FROM orders WHERE id = $1", [id]);
-  return { message: "Order deleted successfully" };
-};
+  const metadataBase =
+    payload.metadata && typeof payload.metadata === 'object'
+      ? { ...payload.metadata }
+      : {};
 
-export const getOrdersByUserId = async (userId) => {
-  const result = await pool.query(
-    "SELECT * FROM orders WHERE user_id = $1 ORDER BY created_at DESC",
-    [userId]
+  const metadata = {
+    ...metadataBase,
+    pricing: {
+      subtotal,
+      shipping_fee: shippingFee,
+      discount,
+      total: totalAmount,
+    },
+    payment: {
+      method: paymentMethod,
+      status: paymentStatus,
+      reference:
+        payload?.payment?.reference || payload.payment_reference || null,
+    },
+    delivery_address:
+      payload.delivery_address ||
+      metadataBase.delivery_address ||
+      null,
+    notes: payload.notes || metadataBase.notes || null,
+    cart_source: payload.cart_source || metadataBase.cart_source || null,
+  };
+
+  const orderRecord = await model.createOrderWithItems(
+    {
+      user_id: userId,
+      restaurant_id: payload.restaurant_id,
+      branch_id: payload.branch_id || null,
+      status: payload.status || 'confirmed',
+      payment_status: paymentStatus,
+      total_amount: totalAmount,
+      currency: payload.currency || 'VND',
+      metadata,
+    },
+    normalizedItems
   );
-  return result.rows;
-};
+
+  return formatOrder(orderRecord);
+}
+
+async function listByUser(userId) {
+  if (!userId) throw validationError('user id missing');
+  const orders = await model.listOrdersByUser(userId);
+  return orders.map(formatOrder);
+}
+
+async function get(id, userId) {
+  if (!userId) throw validationError('user id missing');
+  const order = await model.getOrderForUser(id, userId);
+  return formatOrder(order);
+}
+
+module.exports = { create, get, listByUser };
+
