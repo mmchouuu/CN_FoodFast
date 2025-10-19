@@ -33,7 +33,7 @@ const allCategories = [
 
   return (
     <div className="md:px-8 py-6 xl:py-8 m-1.5 sm:m-3 h-[97vh] overflow-y-scroll w-full
-    lg:w-11/12 bg-primary shadow rounded-xl">
+    bg-white shadow-sm rounded-2xl p-6 space-y-6">
       <form className="flex flex-col gap-y-3.5 px-2 text-sm w-full lg:w-11/12">
         <div className="w-full">
           <h5>Product Name</h5>
@@ -122,3 +122,9 @@ const allCategories = [
 }
 
 export default AddProduct
+
+
+
+
+
+

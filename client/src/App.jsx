@@ -37,7 +37,7 @@
 //         <Route path='/address-form' element={<AddressForm />} />
 //         <Route path='/my-orders' element={<MyOrders />} />
 //         Owner routes
-//         <Route path='/owner' element={<Sidebar />}>
+//         <Route path='/owner' element={<OwnerLayout />}>
 //           <Route index element={<Statistics />} />
 //           <Route path='/owner/add-product' element={<AddProduct />} />
 //           <Route path='/owner/list-product' element={<ListProduct />} />
@@ -90,11 +90,10 @@ import RestaurantVerify from './pages/restaurant/RestaurantVerify';
 import RestaurantLogin from './pages/restaurant/RestaurantLogin';
 
 // Owner pages
+import OwnerLayout from './layouts/OwnerLayout';
 import OwnerDashboard from './pages/owner/Dashboard';
 import MenuManagement from './pages/owner/MenuManagement';
 import Orders from './pages/owner/Orders';
-import Sidebar from './components/owner/Sidebar';
-import AdminLayout from './components/admin/AdminLayout';
 import ShipperManagement from './pages/owner/ShipperManagement';
 import AssignOrders from './pages/owner/AssignOrders';
 import DeliveryTracking from './pages/owner/DeliveryTracking';
@@ -106,6 +105,7 @@ import AccountManagement from './pages/owner/AccountManagement';
 import EnableOwner from './pages/owner/EnableOwner';
 
 // Admin pages
+import AdminLayout from './components/admin/AdminLayout';
 import AdminDashboard from './pages/admin/AdminDashboard';
 import AdminCustomers from './pages/admin/AdminCustomers';
 import AdminRestaurants from './pages/admin/AdminRestaurants';
@@ -154,7 +154,7 @@ const App = () => {
         <Route path="/owner/enable" element={<EnableOwner />} />
 
         {/* Owner routes */}
-        <Route path="/owner" element={<Sidebar />}>
+        <Route path="/owner" element={<OwnerLayout />}>
           <Route index element={<OwnerDashboard />} />
           <Route path="menu" element={<MenuManagement />} />
           <Route path="orders" element={<Orders />} />
@@ -184,3 +184,5 @@ const App = () => {
   );
 };
 export default App;
+
+

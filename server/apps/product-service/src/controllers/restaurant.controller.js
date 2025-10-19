@@ -2,6 +2,7 @@ import {
   createRestaurant,
   createRestaurantBranch,
   deleteRestaurant,
+  deleteRestaurantBranch,
   getAllRestaurants,
   getBranchesForRestaurant,
   getRestaurantById,
@@ -63,7 +64,14 @@ export async function addRestaurant(req, res) {
     const newRestaurant = await createRestaurant(req.body);
     res.status(201).json(newRestaurant);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    const message = err?.message || 'Internal server error';
+    if (message === 'Owner account not found') {
+      return res.status(404).json({ error: message });
+    }
+    if (message === 'ownerId is required' || message === 'Restaurant name is required') {
+      return res.status(400).json({ error: message });
+    }
+    res.status(500).json({ error: message });
   }
 }
 
@@ -81,6 +89,9 @@ export async function removeRestaurant(req, res) {
   try {
     const { id } = req.params;
     const result = await deleteRestaurant(id);
+    if (!result) {
+      return res.status(404).json({ error: 'Restaurant not found' });
+    }
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -106,7 +117,17 @@ export async function addBranch(req, res) {
     const branch = await createRestaurantBranch(id, req.body);
     res.status(201).json(branch);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    const message = err?.message || 'Internal server error';
+    if (message === 'Restaurant not found') {
+      return res.status(404).json({ error: message });
+    }
+    if (message === 'Branch name is required') {
+      return res.status(400).json({ error: message });
+    }
+    if (message === 'Branch number already exists for this restaurant') {
+      return res.status(409).json({ error: message });
+    }
+    res.status(500).json({ error: message });
   }
 }
 
@@ -119,6 +140,30 @@ export async function editBranch(req, res) {
     }
     res.json(branch);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    const message = err?.message || 'Internal server error';
+    if (message === 'Branch not found for this restaurant') {
+      return res.status(404).json({ error: message });
+    }
+    if (message === 'Branch number already exists for this restaurant') {
+      return res.status(409).json({ error: message });
+    }
+    res.status(500).json({ error: message });
+  }
+}
+
+export async function removeBranch(req, res) {
+  try {
+    const { id, branchId } = req.params;
+    const result = await deleteRestaurantBranch(id, branchId);
+    if (!result) {
+      return res.status(404).json({ error: 'Branch not found' });
+    }
+    res.json(result);
+  } catch (err) {
+    const message = err?.message || 'Internal server error';
+    if (message === 'Branch not found for this restaurant') {
+      return res.status(404).json({ error: message });
+    }
+    res.status(500).json({ error: message });
   }
 }

@@ -1,4 +1,6 @@
 import pool from '../db/index.js';
+import { geocodeAddress } from '../utils/geocoding.js';
+import { publishSocketEvent } from '../utils/rabbitmq.js';
 
 const USER_SERVICE_URL = (process.env.USER_SERVICE_URL || 'http://user-service:3001').replace(/\/+$/, '');
 
@@ -25,9 +27,11 @@ const SELECT_RESTAURANT_BASE = `
          owner_id,
          name,
          description,
+         about,
          cuisine,
          phone,
          email,
+         logo,
          images,
          is_active,
          avg_branch_rating,
@@ -52,6 +56,12 @@ function sanitiseText(value) {
   if (value === undefined || value === null) return null;
   const trimmed = String(value).trim();
   return trimmed.length ? trimmed : null;
+}
+
+function parseCoordinate(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const numeric = Number.parseFloat(value);
+  return Number.isFinite(numeric) ? numeric : null;
 }
 
 function mapOpeningHours(rows) {
@@ -83,6 +93,65 @@ function mapSpecialHours(rows) {
   }));
 }
 
+function mapBranchRatings(rows) {
+  return rows.map((row) => ({
+    id: row.id,
+    branchId: row.branch_id,
+    userId: row.user_id,
+    orderId: row.order_id,
+    ratingValue: row.rating_value !== null && row.rating_value !== undefined
+      ? Number(row.rating_value)
+      : null,
+    comment: row.comment,
+    imageUrl: row.image_url,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }));
+}
+
+function mapRatingSummaryRows(rows) {
+  return rows.reduce((acc, row) => {
+    acc[row.branch_id] = {
+      branchId: row.branch_id,
+      avgRating: row.avg_rating !== null && row.avg_rating !== undefined
+        ? Number(row.avg_rating)
+        : null,
+      totalRatings: row.total_ratings ?? 0,
+      lastUpdated: row.last_updated || null,
+    };
+    return acc;
+  }, {});
+}
+
+const ADMIN_RESTAURANT_ROOM = 'admin:restaurants';
+
+function uniqueRooms(...lists) {
+  const acc = new Set();
+  lists.forEach((list) => {
+    if (!list) return;
+    const items = Array.isArray(list) ? list : [list];
+    items.filter(Boolean).forEach((item) => acc.add(item));
+  });
+  return Array.from(acc);
+}
+
+function roomsForRestaurantEntity(restaurant) {
+  if (!restaurant) return [ADMIN_RESTAURANT_ROOM];
+  return uniqueRooms(
+    ADMIN_RESTAURANT_ROOM,
+    'catalog:restaurants',
+    restaurant.id ? `restaurant:${restaurant.id}` : null,
+    restaurant.owner_id ? `restaurant-owner:${restaurant.owner_id}` : null,
+  );
+}
+
+function roomsForBranchEntity(restaurant, branch) {
+  return uniqueRooms(
+    roomsForRestaurantEntity(restaurant),
+    branch?.id ? `restaurant-branch:${branch.id}` : null,
+  );
+}
+
 async function fetchOwnerAccount(ownerId) {
   if (!ownerId) return null;
   const url = `${USER_SERVICE_URL}/api/restaurants/owners/${ownerId}`;
@@ -112,8 +181,8 @@ async function hydrateBranches(client, restaurantId) {
             restaurant_id,
             branch_number,
             name,
-            brand_phone,
-            brand_email,
+            branch_phone,
+            branch_email,
             images,
             street,
             ward,
@@ -150,6 +219,30 @@ async function hydrateBranches(client, restaurantId) {
      ORDER BY on_date ASC`,
     [branchIds],
   );
+  const ratingsRes = await client.query(
+    `SELECT id,
+            branch_id,
+            user_id,
+            order_id,
+            rating_value,
+            comment,
+            image_url,
+            created_at,
+            updated_at
+     FROM branch_rating
+     WHERE branch_id = ANY($1::uuid[])
+     ORDER BY created_at DESC`,
+    [branchIds],
+  );
+  const ratingSummaryRes = await client.query(
+    `SELECT branch_id,
+            avg_rating,
+            total_ratings,
+            last_updated
+     FROM branch_rating_avg
+     WHERE branch_id = ANY($1::uuid[])`,
+    [branchIds],
+  );
 
   const openingMap = openingRes.rows.reduce((acc, row) => {
     acc[row.branch_id] = acc[row.branch_id] || [];
@@ -163,23 +256,48 @@ async function hydrateBranches(client, restaurantId) {
     return acc;
   }, {});
 
+  const ratingsMap = ratingsRes.rows.reduce((acc, row) => {
+    acc[row.branch_id] = acc[row.branch_id] || [];
+    acc[row.branch_id].push(row);
+    return acc;
+  }, {});
+
+  const ratingSummaryMap = mapRatingSummaryRows(ratingSummaryRes.rows);
+
   return branches.map((branch) => ({
     id: branch.id,
     restaurantId: branch.restaurant_id,
     branchNumber: branch.branch_number,
     name: branch.name,
-    brandPhone: branch.brand_phone,
-    brandEmail: branch.brand_email,
+    branchPhone: branch.branch_phone,
+    branchEmail: branch.branch_email,
+    brandPhone: branch.branch_phone,
+    brandEmail: branch.branch_email,
     images: branch.images,
     street: branch.street,
     ward: branch.ward,
     district: branch.district,
     city: branch.city,
-    latitude: branch.latitude,
-    longitude: branch.longitude,
+    latitude: branch.latitude !== null && branch.latitude !== undefined
+      ? Number(branch.latitude)
+      : null,
+    longitude: branch.longitude !== null && branch.longitude !== undefined
+      ? Number(branch.longitude)
+      : null,
     isPrimary: branch.is_primary,
+    ratingSummary: ratingSummaryMap[branch.id] || {
+      branchId: branch.id,
+      avgRating: branch.rating !== null && branch.rating !== undefined
+        ? Number(branch.rating)
+        : null,
+      totalRatings: (ratingsMap[branch.id] || []).length,
+      lastUpdated: null,
+    },
+    ratings: mapBranchRatings(ratingsMap[branch.id] || []),
     isOpen: branch.is_open,
-    rating: branch.rating,
+    rating: branch.rating !== null && branch.rating !== undefined
+      ? Number(branch.rating)
+      : null,
     createdAt: branch.created_at,
     updatedAt: branch.updated_at,
     openingHours: mapOpeningHours(openingMap[branch.id] || []),
@@ -270,9 +388,11 @@ export async function getRestaurantByOwner(ownerId) {
     owner_id: ownerId,
     name: account.restaurantName || null,
     description: null,
+    about: null,
     cuisine: null,
     phone: account.phone || null,
     email: account.email || null,
+    logo: null,
     images: null,
     is_active: account.isActive ?? false,
     restaurant_status: account.restaurantStatus || null,
@@ -288,21 +408,30 @@ export async function createRestaurant(data) {
     ownerId,
     name,
     description = null,
+    about = null,
     cuisine = null,
     phone = null,
     email = null,
+    logo = null,
     images = null,
+    branches = [],
   } = data;
 
   if (!ownerId) throw new Error('ownerId is required');
   const trimmedName = sanitiseText(name);
   if (!trimmedName) throw new Error('Restaurant name is required');
 
+  const ownerAccount = await fetchOwnerAccount(ownerId);
+  if (!ownerAccount) {
+    throw new Error('Owner account not found');
+  }
+
   const imageArray = normaliseImages(images);
+  const logoArray = normaliseImages(logo);
 
   const query = `
-    INSERT INTO restaurants (owner_id, name, description, cuisine, phone, email, images)
-    VALUES ($1, $2, $3, $4, $5, $6, $7)
+    INSERT INTO restaurants (owner_id, name, description, about, cuisine, phone, email, logo, images)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
     RETURNING *;
   `;
 
@@ -310,14 +439,32 @@ export async function createRestaurant(data) {
     ownerId,
     trimmedName,
     sanitiseText(description),
+    sanitiseText(about),
     sanitiseText(cuisine),
     sanitiseText(phone),
     sanitiseText(email),
+    logoArray,
     imageArray,
   ];
 
   const { rows } = await pool.query(query, values);
-  return getRestaurantById(rows[0].id);
+  const restaurantId = rows[0].id;
+
+  if (Array.isArray(branches) && branches.length) {
+    try {
+      for (const branchPayload of branches) {
+        await createRestaurantBranch(restaurantId, branchPayload);
+      }
+    } catch (error) {
+      console.error('[product-service] Failed to create branch during restaurant onboarding:', error.message);
+      await pool.query('DELETE FROM restaurants WHERE id = $1', [restaurantId]);
+      throw error;
+    }
+  }
+
+  const restaurant = await getRestaurantById(restaurantId);
+  publishSocketEvent('restaurant.created', { restaurantId, restaurant }, roomsForRestaurantEntity(restaurant));
+  return restaurant;
 }
 
 export async function updateRestaurant(id, data) {
@@ -333,6 +480,10 @@ export async function updateRestaurant(id, data) {
     fields.push(`description = $${index++}`);
     values.push(sanitiseText(data.description));
   }
+  if (Object.prototype.hasOwnProperty.call(data, 'about')) {
+    fields.push(`about = $${index++}`);
+    values.push(sanitiseText(data.about));
+  }
   if (Object.prototype.hasOwnProperty.call(data, 'cuisine')) {
     fields.push(`cuisine = $${index++}`);
     values.push(sanitiseText(data.cuisine));
@@ -344,6 +495,10 @@ export async function updateRestaurant(id, data) {
   if (Object.prototype.hasOwnProperty.call(data, 'email')) {
     fields.push(`email = $${index++}`);
     values.push(sanitiseText(data.email));
+  }
+  if (Object.prototype.hasOwnProperty.call(data, 'logo')) {
+    fields.push(`logo = $${index++}`);
+    values.push(normaliseImages(data.logo));
   }
   if (Object.prototype.hasOwnProperty.call(data, 'images')) {
     fields.push(`images = $${index++}`);
@@ -366,12 +521,54 @@ export async function updateRestaurant(id, data) {
   if (!rows.length) {
     return null;
   }
-  return getRestaurantById(rows[0].id);
+  const restaurant = await getRestaurantById(rows[0].id);
+  if (restaurant) {
+    publishSocketEvent(
+      'restaurant.updated',
+      { restaurantId: restaurant.id, restaurant },
+      roomsForRestaurantEntity(restaurant),
+    );
+  }
+  return restaurant;
 }
 
 export async function deleteRestaurant(id) {
-  await pool.query('DELETE FROM restaurants WHERE id = $1', [id]);
-  return { message: 'Restaurant deleted successfully' };
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const restaurantRes = await client.query(
+      `${SELECT_RESTAURANT_BASE} WHERE id = $1`,
+      [id],
+    );
+    if (!restaurantRes.rowCount) {
+      await client.query('ROLLBACK');
+      return null;
+    }
+    const restaurant = restaurantRes.rows[0];
+
+    await client.query('DELETE FROM branch_special_hours WHERE branch_id IN (SELECT id FROM restaurant_branches WHERE restaurant_id = $1)', [id]);
+    await client.query('DELETE FROM branch_opening_hours WHERE branch_id IN (SELECT id FROM restaurant_branches WHERE restaurant_id = $1)', [id]);
+    await client.query('DELETE FROM branch_rating WHERE branch_id IN (SELECT id FROM restaurant_branches WHERE restaurant_id = $1)', [id]);
+    await client.query('DELETE FROM branch_rating_avg WHERE branch_id IN (SELECT id FROM restaurant_branches WHERE restaurant_id = $1)', [id]);
+    await client.query('DELETE FROM restaurant_branches WHERE restaurant_id = $1', [id]);
+    await client.query('DELETE FROM restaurants WHERE id = $1', [id]);
+
+    await client.query('COMMIT');
+
+    publishSocketEvent(
+      'restaurant.deleted',
+      { restaurantId: id, ownerId: restaurant.owner_id },
+      roomsForRestaurantEntity(restaurant),
+    );
+
+    return { message: 'Restaurant deleted successfully' };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function getBranchesForRestaurant(restaurantId) {
@@ -388,10 +585,24 @@ export async function createRestaurantBranch(restaurantId, payload) {
   try {
     await client.query('BEGIN');
 
+    const restaurantCheck = await client.query(
+      'SELECT id, owner_id FROM restaurants WHERE id = $1',
+      [restaurantId],
+    );
+    if (!restaurantCheck.rowCount) {
+      throw new Error('Restaurant not found');
+    }
+    const restaurantRecord = restaurantCheck.rows[0];
+
     const branchName = sanitiseText(payload.name);
     if (!branchName) {
       throw new Error('Branch name is required');
     }
+
+    const street = sanitiseText(payload.street);
+    const ward = sanitiseText(payload.ward);
+    const district = sanitiseText(payload.district);
+    const city = sanitiseText(payload.city);
 
     const maxRes = await client.query(
       'SELECT COALESCE(MAX(branch_number), 0) AS max_number, COUNT(*) AS total FROM restaurant_branches WHERE restaurant_id = $1',
@@ -424,16 +635,35 @@ export async function createRestaurantBranch(restaurantId, payload) {
     }
 
     const branchImages = normaliseImages(payload.images);
-
+    const branchPhoneValue = sanitiseText(
+      Object.prototype.hasOwnProperty.call(payload, 'branchPhone')
+        ? payload.branchPhone
+        : payload.brandPhone,
+    );
+    const branchEmailValue = sanitiseText(
+      Object.prototype.hasOwnProperty.call(payload, 'branchEmail')
+        ? payload.branchEmail
+        : payload.brandEmail,
+    );
     const branchIsOpen = payload.isOpen === true;
+
+    let latitude = parseCoordinate(payload.latitude);
+    let longitude = parseCoordinate(payload.longitude);
+    if ((latitude === null || longitude === null) && (street || ward || district || city)) {
+      const geocoded = await geocodeAddress({ street, ward, district, city });
+      if (geocoded) {
+        latitude = geocoded.latitude;
+        longitude = geocoded.longitude;
+      }
+    }
 
     const branchInsert = await client.query(
       `INSERT INTO restaurant_branches (
         restaurant_id,
         branch_number,
         name,
-        brand_phone,
-        brand_email,
+        branch_phone,
+        branch_email,
         images,
         street,
         ward,
@@ -450,15 +680,15 @@ export async function createRestaurantBranch(restaurantId, payload) {
         restaurantId,
         branchNumber,
         branchName,
-        sanitiseText(payload.brandPhone),
-        sanitiseText(payload.brandEmail),
+        branchPhoneValue,
+        branchEmailValue,
         branchImages,
-        sanitiseText(payload.street),
-        sanitiseText(payload.ward),
-        sanitiseText(payload.district),
-        sanitiseText(payload.city),
-        payload.latitude ? parseFloat(payload.latitude) : null,
-        payload.longitude ? parseFloat(payload.longitude) : null,
+        street,
+        ward,
+        district,
+        city,
+        latitude,
+        longitude,
         isPrimary === true,
         branchIsOpen,
       ],
@@ -505,7 +735,15 @@ export async function createRestaurantBranch(restaurantId, payload) {
     await client.query('COMMIT');
 
     const branches = await hydrateBranches(client, restaurantId);
-    return branches.find((item) => item.id === branch.id);
+    const resultBranch = branches.find((item) => item.id === branch.id);
+
+    publishSocketEvent(
+      'restaurant.branch.created',
+      { restaurantId, branch: resultBranch },
+      roomsForBranchEntity(restaurantRecord, branch),
+    );
+
+    return resultBranch;
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;
@@ -527,6 +765,12 @@ export async function updateRestaurantBranch(restaurantId, branchId, payload) {
       throw new Error('Branch not found for this restaurant');
     }
     const existing = existingRes.rows[0];
+
+    const restaurantRes = await client.query(
+      'SELECT id, owner_id FROM restaurants WHERE id = $1',
+      [restaurantId],
+    );
+    const restaurantRecord = restaurantRes.rowCount ? restaurantRes.rows[0] : { id: restaurantId };
 
     let branchNumber = existing.branch_number;
     if (Object.prototype.hasOwnProperty.call(payload, 'branchNumber')) {
@@ -552,6 +796,63 @@ export async function updateRestaurantBranch(restaurantId, branchId, payload) {
       );
     }
 
+    const streetValue = Object.prototype.hasOwnProperty.call(payload, 'street')
+      ? sanitiseText(payload.street)
+      : undefined;
+    const wardValue = Object.prototype.hasOwnProperty.call(payload, 'ward')
+      ? sanitiseText(payload.ward)
+      : undefined;
+    const districtValue = Object.prototype.hasOwnProperty.call(payload, 'district')
+      ? sanitiseText(payload.district)
+      : undefined;
+    const cityValue = Object.prototype.hasOwnProperty.call(payload, 'city')
+      ? sanitiseText(payload.city)
+      : undefined;
+
+    const finalStreet = streetValue !== undefined ? streetValue : existing.street;
+    const finalWard = wardValue !== undefined ? wardValue : existing.ward;
+    const finalDistrict = districtValue !== undefined ? districtValue : existing.district;
+    const finalCity = cityValue !== undefined ? cityValue : existing.city;
+    const addressChanged = streetValue !== undefined
+      || wardValue !== undefined
+      || districtValue !== undefined
+      || cityValue !== undefined;
+
+    const hasLatitude = Object.prototype.hasOwnProperty.call(payload, 'latitude');
+    const hasLongitude = Object.prototype.hasOwnProperty.call(payload, 'longitude');
+
+    const existingLatitude = existing.latitude !== null && existing.latitude !== undefined
+      ? Number.parseFloat(existing.latitude)
+      : null;
+    const existingLongitude = existing.longitude !== null && existing.longitude !== undefined
+      ? Number.parseFloat(existing.longitude)
+      : null;
+
+    let latitude = hasLatitude ? parseCoordinate(payload.latitude) : existingLatitude;
+    let longitude = hasLongitude ? parseCoordinate(payload.longitude) : existingLongitude;
+
+    if (addressChanged && !hasLatitude && !hasLongitude) {
+      if (finalStreet || finalWard || finalDistrict || finalCity) {
+        const geocoded = await geocodeAddress({
+          street: finalStreet,
+          ward: finalWard,
+          district: finalDistrict,
+          city: finalCity,
+        });
+        if (geocoded) {
+          latitude = geocoded.latitude;
+          longitude = geocoded.longitude;
+        }
+      }
+    }
+
+    const branchPhoneInput = Object.prototype.hasOwnProperty.call(payload, 'branchPhone')
+      ? payload.branchPhone
+      : (Object.prototype.hasOwnProperty.call(payload, 'brandPhone') ? payload.brandPhone : undefined);
+    const branchEmailInput = Object.prototype.hasOwnProperty.call(payload, 'branchEmail')
+      ? payload.branchEmail
+      : (Object.prototype.hasOwnProperty.call(payload, 'brandEmail') ? payload.brandEmail : undefined);
+
     const updates = [];
     const values = [];
     let index = 1;
@@ -560,45 +861,42 @@ export async function updateRestaurantBranch(restaurantId, branchId, payload) {
       updates.push(`name = $${index++}`);
       values.push(sanitiseText(payload.name));
     }
-    if (Object.prototype.hasOwnProperty.call(payload, 'brandPhone')) {
-      updates.push(`brand_phone = $${index++}`);
-      values.push(sanitiseText(payload.brandPhone));
+    if (branchPhoneInput !== undefined) {
+      updates.push(`branch_phone = $${index++}`);
+      values.push(sanitiseText(branchPhoneInput));
     }
-    if (Object.prototype.hasOwnProperty.call(payload, 'brandEmail')) {
-      updates.push(`brand_email = $${index++}`);
-      values.push(sanitiseText(payload.brandEmail));
+    if (branchEmailInput !== undefined) {
+      updates.push(`branch_email = $${index++}`);
+      values.push(sanitiseText(branchEmailInput));
     }
     if (Object.prototype.hasOwnProperty.call(payload, 'images')) {
       updates.push(`images = $${index++}`);
       values.push(normaliseImages(payload.images));
     }
-    if (Object.prototype.hasOwnProperty.call(payload, 'street')) {
+    if (streetValue !== undefined) {
       updates.push(`street = $${index++}`);
-      values.push(sanitiseText(payload.street));
+      values.push(streetValue);
     }
-    if (Object.prototype.hasOwnProperty.call(payload, 'ward')) {
+    if (wardValue !== undefined) {
       updates.push(`ward = $${index++}`);
-      values.push(sanitiseText(payload.ward));
+      values.push(wardValue);
     }
-    if (Object.prototype.hasOwnProperty.call(payload, 'district')) {
+    if (districtValue !== undefined) {
       updates.push(`district = $${index++}`);
-      values.push(sanitiseText(payload.district));
+      values.push(districtValue);
     }
-    if (Object.prototype.hasOwnProperty.call(payload, 'city')) {
+    if (cityValue !== undefined) {
       updates.push(`city = $${index++}`);
-      values.push(sanitiseText(payload.city));
+      values.push(cityValue);
     }
-    if (Object.prototype.hasOwnProperty.call(payload, 'latitude')) {
+    const coordinatesChanged = latitude !== existingLatitude || longitude !== existingLongitude;
+    if (hasLatitude || coordinatesChanged) {
       updates.push(`latitude = $${index++}`);
-      values.push(payload.latitude !== null && payload.latitude !== undefined
-        ? parseFloat(payload.latitude)
-        : null);
+      values.push(latitude ?? null);
     }
-    if (Object.prototype.hasOwnProperty.call(payload, 'longitude')) {
+    if (hasLongitude || coordinatesChanged) {
       updates.push(`longitude = $${index++}`);
-      values.push(payload.longitude !== null && payload.longitude !== undefined
-        ? parseFloat(payload.longitude)
-        : null);
+      values.push(longitude ?? null);
     }
     if (Object.prototype.hasOwnProperty.call(payload, 'isPrimary')) {
       updates.push(`is_primary = $${index++}`);
@@ -667,7 +965,59 @@ export async function updateRestaurantBranch(restaurantId, branchId, payload) {
     await client.query('COMMIT');
 
     const branches = await hydrateBranches(client, restaurantId);
-    return branches.find((item) => item.id === branchId);
+    const resultBranch = branches.find((item) => item.id === branchId) || null;
+
+    publishSocketEvent(
+      'restaurant.branch.updated',
+      { restaurantId, branchId, branch: resultBranch },
+      roomsForBranchEntity(restaurantRecord, resultBranch || existing),
+    );
+
+    return resultBranch;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function deleteRestaurantBranch(restaurantId, branchId) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const branchRes = await client.query(
+      'SELECT * FROM restaurant_branches WHERE id = $1 AND restaurant_id = $2',
+      [branchId, restaurantId],
+    );
+    if (!branchRes.rowCount) {
+      await client.query('ROLLBACK');
+      return null;
+    }
+    const branch = branchRes.rows[0];
+
+    const restaurantRes = await client.query(
+      `${SELECT_RESTAURANT_BASE} WHERE id = $1`,
+      [restaurantId],
+    );
+    const restaurant = restaurantRes.rowCount ? restaurantRes.rows[0] : null;
+
+    await client.query('DELETE FROM branch_special_hours WHERE branch_id = $1', [branchId]);
+    await client.query('DELETE FROM branch_opening_hours WHERE branch_id = $1', [branchId]);
+    await client.query('DELETE FROM branch_rating WHERE branch_id = $1', [branchId]);
+    await client.query('DELETE FROM branch_rating_avg WHERE branch_id = $1', [branchId]);
+    await client.query('DELETE FROM restaurant_branches WHERE id = $1', [branchId]);
+
+    await client.query('COMMIT');
+
+    publishSocketEvent(
+      'restaurant.branch.deleted',
+      { restaurantId, branchId },
+      roomsForBranchEntity(restaurant, branch),
+    );
+
+    return { message: 'Branch deleted successfully' };
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;

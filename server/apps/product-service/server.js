@@ -1,12 +1,6 @@
-import dotenv from 'dotenv';
-import app from './src/app.js';
-import { connectRabbitMQ } from './src/utils/rabbitmq.js';
+import { startProductService } from './src/index.js';
 
-dotenv.config();
-
-const PORT = process.env.PORT || 3002;
-
-app.listen(PORT, async () => {
-  console.log(`Product Service running on port ${PORT}`);
-  await connectRabbitMQ();
+startProductService().catch((error) => {
+  console.error('[product-service] Unable to start service:', error);
+  process.exit(1);
 });

@@ -1,33 +1,27 @@
-// require('dotenv').config();
-// const express = require('express');
-// const morgan = require('morgan');
-// const productRoutes = require('./routes/product.routes');
-// const config = require('./config');
+import dotenv from 'dotenv';
+import { pathToFileURL } from 'url';
+import app from './app.js';
+import { connectRabbitMQ } from './utils/rabbitmq.js';
 
-// const app = express();
-// app.use(express.json());
-// app.use(morgan('dev'));
+dotenv.config();
 
-// app.use('/api/products', productRoutes);
-// app.get('/health', (req,res)=>res.json({ok:true, service:'product-service'}));
+const PORT = process.env.PORT || 3002;
 
-// const port = config.PORT || 3002;
-// app.listen(port, ()=>console.log(`product-service listening ${port}`));
+export async function startProductService() {
+  const server = app.listen(PORT, async () => {
+    console.log(`Product Service running on port ${PORT}`);
+    try {
+      await connectRabbitMQ();
+    } catch (error) {
+      console.error('[product-service] Failed to connect to RabbitMQ:', error.message);
+    }
+  });
 
+  return server;
+}
 
-// import express from 'express';
-// import dotenv from 'dotenv';
-// import productRoutes from './routes/product.routes.js';
+const executedFile = process.argv[1] ? pathToFileURL(process.argv[1]).href : null;
 
-// dotenv.config();
-
-// const app = express();
-// app.use(express.json());
-
-// app.get('/health', (_, res) => res.send('OK'));
-// app.use('/api/products', productRoutes);
-
-// const PORT = process.env.PORT || 3002;
-// app.listen(PORT, () => {
-//   console.log(`Product Service running on port ${PORT}`);
-// });
+if (import.meta.url === executedFile) {
+  startProductService();
+}

@@ -1,12 +1,15 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
-import toast from "react-hot-toast";
+import React, { useEffect, useMemo, useState } from "react";
+import { FaStar } from "react-icons/fa";
 import { useAppContext } from "../../context/AppContext";
 import restaurantManagerService from "../../services/restaurantManager";
 
-const containerClasses =
-  "md:px-8 py-6 xl:py-8 m-1 sm:m-3 h-[97vh] overflow-y-auto flex-1 w-full lg:w-11/12 bg-primary shadow rounded-xl";
+const containerClasses = "bg-white shadow-sm rounded-2xl p-6 space-y-6";
 
-const defaultOpeningHours = () =>
+const BRANCHES_PER_PAGE = 4;
+
+const DAY_LABELS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
+const createDefaultHours = () =>
   Array.from({ length: 7 }, (_, index) => ({
     dayOfWeek: index,
     openTime: "08:00",
@@ -15,486 +18,322 @@ const defaultOpeningHours = () =>
     overnight: false,
   }));
 
-const DAY_LABELS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
-const mergeOpeningHoursWithDefaults = (source = []) => {
-  const base = defaultOpeningHours();
-  const byDay = new Map(source.map((item) => [Number(item.dayOfWeek), item]));
-  return base.map((item) => {
-    const matched = byDay.get(item.dayOfWeek);
-    if (!matched) return { ...item };
-    return {
-      ...item,
-      openTime: matched.openTime || "",
-      closeTime: matched.closeTime || "",
-      isClosed: Boolean(matched.isClosed),
-      overnight: Boolean(matched.overnight),
-    };
-  });
+
+const emptyRestaurantForm = {
+  name: "",
+  description: "",
+  about: "",
+  cuisine: "",
+  phone: "",
+  email: "",
+  logoUrl: "",
+  coverPhoto: "",
 };
 
-const mapSpecialHoursForForm = (source = []) =>
-  source.map((item) => ({
-    id: item.id,
-    date:
-      item.date instanceof Date
-        ? item.date.toISOString().split("T")[0]
-        : item.date || "",
-    openTime: item.openTime || "",
-    closeTime: item.closeTime || "",
-    isClosed: Boolean(item.isClosed),
-    overnight: Boolean(item.overnight),
-    note: item.note || "",
-  }));
+const buildBranchForm = (nextNumber, preset = {}) => ({
+  id: preset.id || null,
+  name: preset.name || "",
+  branchNumber: String(preset.branchNumber ?? nextNumber),
+  branchPhone: preset.branchPhone || preset.brandPhone || "",
+  branchEmail: preset.branchEmail || preset.brandEmail || "",
+  street: preset.street || "",
+  ward: preset.ward || "",
+  district: preset.district || "",
+  city: preset.city || "",
+  latitude:
+    preset.latitude !== undefined && preset.latitude !== null ? String(preset.latitude) : "",
+  longitude:
+    preset.longitude !== undefined && preset.longitude !== null ? String(preset.longitude) : "",
+  imageUrl: preset.imageUrl || "",
+  isPrimary: Boolean(preset.isPrimary),
+  isOpen: Boolean(preset.isOpen),
+});
+
+const mapRestaurantData = (raw) => {
+  if (!raw) return null;
+  const logoUrl = Array.isArray(raw.logo) && raw.logo.length ? raw.logo[0] : raw.logoUrl || "";
+  const coverPhoto = Array.isArray(raw.images) && raw.images.length ? raw.images[0] : raw.coverPhoto || "";
+  return {
+    ...raw,
+    logoUrl,
+    coverPhoto,
+  };
+};
+
+const mapBranchData = (branch) => {
+  if (!branch) return null;
+  const images = Array.isArray(branch.images) ? branch.images : null;
+  const imageUrl = images && images.length ? images[0] : branch.imageUrl || "";
+  const phone = branch.branchPhone ?? branch.brandPhone ?? "";
+  const email = branch.branchEmail ?? branch.brandEmail ?? "";
+  const branchNumber = Number(branch.branchNumber ?? branch.branch_number ?? 0) || 0;
+  return {
+    ...branch,
+    branchNumber,
+    branchPhone: phone,
+    branchEmail: email,
+    imageUrl,
+    openingHours: Array.isArray(branch.openingHours) ? branch.openingHours : [],
+    specialHours: Array.isArray(branch.specialHours) ? branch.specialHours : [],
+  };
+};
+
+const buildRestaurantFormFromData = (restaurant) => ({
+  name: restaurant?.name || "",
+  description: restaurant?.description || "",
+  about: restaurant?.about || "",
+  cuisine: restaurant?.cuisine || "",
+  phone: restaurant?.phone || "",
+  email: restaurant?.email || "",
+  logoUrl: restaurant?.logoUrl || "",
+  coverPhoto: restaurant?.coverPhoto || "",
+});
+
+const formatOpeningSchedule = (openingHours = []) => {
+  if (!Array.isArray(openingHours) || !openingHours.length) {
+    return "Schedule not set";
+  }
+
+  const normalised = openingHours
+    .filter((item) => item && Number.isInteger(item.dayOfWeek))
+    .map((item) => ({
+      dayOfWeek: Number(item.dayOfWeek),
+      isClosed: item.isClosed === true,
+      openTime: item.openTime || "",
+      closeTime: item.closeTime || "",
+    }))
+    .sort((a, b) => a.dayOfWeek - b.dayOfWeek);
+
+  if (!normalised.length) return "Schedule not set";
+
+  const groups = [];
+  normalised.forEach((item) => {
+    const label = item.isClosed
+      ? "Closed"
+      : `${item.openTime || "--:--"} - ${item.closeTime || "--:--"}`;
+    const last = groups[groups.length - 1];
+    if (last && last.label === label && item.dayOfWeek === last.end + 1) {
+      last.end = item.dayOfWeek;
+    } else {
+      groups.push({ start: item.dayOfWeek, end: item.dayOfWeek, label });
+    }
+  });
+
+  return groups
+    .map(({ start, end, label }) => {
+      const days = start === end ? DAY_LABELS[start] : `${DAY_LABELS[start]} - ${DAY_LABELS[end]}`;
+      return `${days}: ${label}`;
+    })
+    .join("; ");
+};
 
 const RestaurantProfile = () => {
-  const { user, restaurantProfile } = useAppContext();
-  const ownerId = restaurantProfile?.id || user?.id;
+  const { restaurantProfile } = useAppContext();
+  const ownerId = restaurantProfile?.id || null;
 
-  const buildOwnerAccount = useCallback((source) => {
-    const base = source || restaurantProfile || {};
-    return {
-      id: source?.id || base?.id || ownerId || "",
-      email: source?.email || base?.email || user?.email || "",
-      phone: source?.phone || base?.phone || "",
-      managerName:
-        source?.managerName ||
-        source?.manager_name ||
-        base?.managerName ||
-        base?.manager_name ||
-        "",
-      restaurantName:
-        source?.restaurantName ||
-        source?.restaurant_name ||
-        base?.restaurant_name ||
-        "",
-      companyAddress:
-        source?.companyAddress ||
-        source?.company_address ||
-        base?.company_address ||
-        "",
-      restaurantStatus:
-        source?.restaurantStatus ||
-        source?.restaurant_status ||
-        base?.restaurant_status ||
-        "",
-      taxCode: source?.taxCode || source?.tax_code || base?.tax_code || "",
-    };
-  }, [ownerId, restaurantProfile, user]);
-
-  const formatStatus = (status) => {
-    if (!status) return "";
-    return status
-      .toString()
-      .replace(/_/g, " ")
-      .replace(/\b\w/g, (char) => char.toUpperCase());
-  };
-
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
   const [restaurant, setRestaurant] = useState(null);
   const [branches, setBranches] = useState([]);
+  const [viewMode, setViewMode] = useState(ownerId ? "loading" : "createRestaurant");
+  const [editingBranchId, setEditingBranchId] = useState(null);
 
-  const [creatingRestaurant, setCreatingRestaurant] = useState(false);
-  const [creatingBranch, setCreatingBranch] = useState(false);
-  const [geocoding, setGeocoding] = useState(false);
-  const [ownerAccount, setOwnerAccount] = useState(() => buildOwnerAccount());
-  const [viewMode, setViewMode] = useState("loading"); // loading | createRestaurant | summary | editRestaurant | createBranch | editBranch
-  const [editingBranch, setEditingBranch] = useState(null);
+  const [branchSearch, setBranchSearch] = useState("");
+  const [branchFilter, setBranchFilter] = useState("all");
+  const [currentPage, setCurrentPage] = useState(1);
 
-  const [restaurantForm, setRestaurantForm] = useState(() => ({
-    name: ownerAccount.restaurantName || "",
-    description: "",
-    cuisine: "",
-    phone: ownerAccount.phone || "",
-    email: ownerAccount.email || "",
-  }));
+  const [restaurantForm, setRestaurantForm] = useState(emptyRestaurantForm);
+  const [logoPreview, setLogoPreview] = useState("");
+  const [coverPreview, setCoverPreview] = useState("");
 
-  const [brandImagePreview, setBrandImagePreview] = useState("");
-  const [brandImageValue, setBrandImageValue] = useState("");
-  const [brandImageLink, setBrandImageLink] = useState("");
-  const [brandImageTouched, setBrandImageTouched] = useState(false);
-  const brandImageInputRef = useRef(null);
-  const [branchImagePreview, setBranchImagePreview] = useState("");
-  const [branchImageValue, setBranchImageValue] = useState("");
-  const [branchImageLink, setBranchImageLink] = useState("");
-  const [branchImageTouched, setBranchImageTouched] = useState(false);
-  const branchImageInputRef = useRef(null);
-
-  const [branchForm, setBranchForm] = useState(() => ({
-    name: "",
-    branchNumber: "",
-    brandPhone: ownerAccount.phone || "",
-    brandEmail: ownerAccount.email || "",
-    street: "",
-    ward: "",
-    district: "",
-    city: "",
-    latitude: "",
-    longitude: "",
-    isPrimary: false,
-    isOpen: false,
-  }));
-
-  const [openingHours, setOpeningHours] = useState(() => defaultOpeningHours());
+  const [branchForm, setBranchForm] = useState(() => buildBranchForm(1));
+  const [openingHours, setOpeningHours] = useState(createDefaultHours);
   const [specialHours, setSpecialHours] = useState([]);
+  const [specialEnabled, setSpecialEnabled] = useState(false);
 
-  const applyRestaurantData = useCallback((data) => {
-    if (!data) {
-      setRestaurant(null);
-      setBranches([]);
-      const fallbackOwner = buildOwnerAccount();
-      setOwnerAccount(fallbackOwner);
-      setRestaurantForm({
-        name: fallbackOwner.restaurantName || "",
-        description: "",
-        cuisine: "",
-        phone: fallbackOwner.phone || "",
-        email: fallbackOwner.email || "",
-      });
-      setBrandImagePreview("");
-      setBrandImageValue("");
-      setBrandImageLink("");
-      setBrandImageTouched(false);
-      setBranchForm({
-        name: "",
-        branchNumber: "",
-        brandPhone: fallbackOwner.phone || "",
-        brandEmail: fallbackOwner.email || "",
-        street: "",
-        ward: "",
-        district: "",
-        city: "",
-        latitude: "",
-        longitude: "",
-        isPrimary: true,
-        isOpen: false,
-      });
-      setBranchImagePreview("");
-      setBranchImageValue("");
-      setBranchImageLink("");
-      setBranchImageTouched(false);
-      setOpeningHours(defaultOpeningHours());
-      setSpecialHours([]);
-      setEditingBranch(null);
-      setViewMode("createRestaurant");
-      return;
-    }
+  const [loading, setLoading] = useState(Boolean(ownerId));
+  const [error, setError] = useState("");
+  const [savingRestaurant, setSavingRestaurant] = useState(false);
+  const [savingBranch, setSavingBranch] = useState(false);
 
-    setRestaurant(data);
-    const branchList = Array.isArray(data.branches) ? data.branches : [];
-    setBranches(branchList);
-    const owner = buildOwnerAccount(data.owner);
-    setOwnerAccount(owner);
-
-    if (!data.id && data.pending_profile) {
-      setViewMode("createRestaurant");
-      setRestaurantForm({
-        name: data.name || owner.restaurantName || "",
-        description: "",
-        cuisine: "",
-        phone: data.phone || owner.phone || "",
-        email: data.email || owner.email || "",
-      });
-    } else if (data.id) {
-      setViewMode("summary");
-      setRestaurantForm({
-        name: data.name || owner.restaurantName || "",
-        description: data.description ?? "",
-        cuisine: data.cuisine ?? "",
-        phone: data.phone || owner.phone || "",
-        email: data.email || owner.email || "",
-      });
-    } else {
-      setViewMode("createRestaurant");
-    }
-
-    const firstImage =
-      Array.isArray(data.images) && data.images.length ? data.images[0] : "";
-    setBrandImagePreview(firstImage);
-    setBrandImageValue(firstImage);
-    setBrandImageLink("");
-    setBrandImageTouched(false);
-
-    setBranchForm((prev) => ({
-      ...prev,
-      brandPhone: data.phone || owner.phone || "",
-      brandEmail: data.email || owner.email || "",
-      isPrimary: branchList.length === 0,
-    }));
-    setBranchImagePreview("");
-    setBranchImageValue("");
-    setBranchImageLink("");
-    setBranchImageTouched(false);
-    setOpeningHours(defaultOpeningHours());
-    setSpecialHours([]);
-    setEditingBranch(null);
-  }, [buildOwnerAccount]);
-
+  const restaurantExists = Boolean(restaurant && restaurant.id);
 
   useEffect(() => {
+    let cancelled = false;
+
     if (!ownerId) {
+      setRestaurant(null);
+      setBranches([]);
+      setRestaurantForm(emptyRestaurantForm);
+      setLogoPreview("");
+      setCoverPreview("");
+      setViewMode("createRestaurant");
       setLoading(false);
       return;
     }
+
     const fetchData = async () => {
       setLoading(true);
       setError("");
       try {
         const data = await restaurantManagerService.getByOwner(ownerId);
-        applyRestaurantData(data);
+        if (cancelled) return;
+        if (!data) {
+          setRestaurant(null);
+          setBranches([]);
+          setRestaurantForm(emptyRestaurantForm);
+          setLogoPreview("");
+          setCoverPreview("");
+          setViewMode("createRestaurant");
+          return;
+        }
+        const mappedRestaurant = mapRestaurantData(data);
+        const mappedBranches = Array.isArray(data.branches)
+          ? data.branches.map((branch) => mapBranchData(branch)).filter(Boolean)
+          : [];
+        setRestaurant(mappedRestaurant);
+        setBranches(mappedBranches);
+        setRestaurantForm(buildRestaurantFormFromData(mappedRestaurant));
+        setLogoPreview(mappedRestaurant.logoUrl || "");
+        setCoverPreview(mappedRestaurant.coverPhoto || "");
+        setViewMode(data.pending_profile ? "createRestaurant" : "summary");
       } catch (err) {
-        setError(err?.response?.data?.error || err?.message || "Unable to load restaurant information.");
-        applyRestaurantData(null);
+        if (cancelled) return;
+        const message = err?.response?.data?.message || err?.message || "Unable to load restaurant profile.";
+        setError(message);
+        setRestaurant(null);
+        setBranches([]);
+        setRestaurantForm(emptyRestaurantForm);
+        setLogoPreview("");
+        setCoverPreview("");
         setViewMode("createRestaurant");
       } finally {
-        setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
     };
+
     fetchData();
-  }, [ownerId, applyRestaurantData]);
 
-  useEffect(() => {
-    if (restaurant?.id) {
-      return;
-    }
-    setOwnerAccount(buildOwnerAccount());
-  }, [restaurantProfile, restaurant?.id, buildOwnerAccount]);
+    return () => {
+      cancelled = true;
+    };
+  }, [ownerId]);
+  const showBranchForm = viewMode === "createBranch" || viewMode === "editBranch";
 
-  useEffect(() => {
-    if (!ownerAccount) {
-      return;
-    }
-    if (!restaurant?.id) {
-      setRestaurantForm((prev) => ({
-        ...prev,
-        name: ownerAccount.restaurantName || prev.name,
-        email: ownerAccount.email || prev.email,
-        phone: ownerAccount.phone || prev.phone,
-      }));
-    }
-    setBranchForm((prev) => ({
-      ...prev,
-      brandPhone: prev.brandPhone || ownerAccount.phone || "",
-      brandEmail: prev.brandEmail || ownerAccount.email || "",
-    }));
-  }, [ownerAccount, restaurant?.id]);
-
-  useEffect(() => {
-    if (branches.length === 0) {
-      setBranchForm((prev) => ({ ...prev, isPrimary: true }));
-    }
-  }, [branches.length]);
-
-  const handleRestaurantFormChange = (event) => {
+  const handleRestaurantTextChange = (event) => {
     const { name, value } = event.target;
+    setError("");
     setRestaurantForm((prev) => ({ ...prev, [name]: value }));
   };
 
-  const handleSelectBrandFile = (event) => {
+  const handleRestaurantFileChange = (event, field) => {
     const file = event.target.files?.[0];
     if (!file) return;
+    setError("");
     const reader = new FileReader();
     reader.onloadend = () => {
       const result = reader.result?.toString() || "";
-      setBrandImageValue(result);
-      setBrandImagePreview(result);
-      setBrandImageLink("");
-      setBrandImageTouched(true);
+      setRestaurantForm((prev) => ({ ...prev, [field]: result }));
+      if (field === "logoUrl") setLogoPreview(result);
+      if (field === "coverPhoto") setCoverPreview(result);
     };
     reader.readAsDataURL(file);
   };
 
-  const handleApplyBrandImageLink = () => {
-    const trimmed = brandImageLink.trim();
-    if (!trimmed) {
-      toast.error("Please enter an image URL first.");
+  const handleRestaurantSubmit = async (event) => {
+    event.preventDefault();
+    if (!ownerId) {
+      setError("Please sign in with a restaurant account first.");
       return;
     }
-    setBrandImageValue(trimmed);
-    setBrandImagePreview(trimmed);
-    toast.success("Image link applied.");
-    setBrandImageTouched(true);
-  };
-
-  const clearBrandImage = () => {
-    setBrandImagePreview("");
-    setBrandImageValue("");
-    setBrandImageLink("");
-    setBrandImageTouched(true);
-    if (brandImageInputRef.current) {
-      brandImageInputRef.current.value = "";
+    if (!restaurantForm.name.trim()) {
+      setError("Restaurant name is required.");
+      return;
     }
-  };
 
-  const handleSelectBranchImage = (event) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const result = reader.result?.toString() || "";
-      setBranchImageValue(result);
-      setBranchImagePreview(result);
-      setBranchImageLink("");
-      setBranchImageTouched(true);
+    const payload = {
+      ownerId,
+      name: restaurantForm.name.trim(),
+      description: restaurantForm.description.trim(),
+      about: restaurantForm.about.trim(),
+      cuisine: restaurantForm.cuisine.trim(),
+      phone: restaurantForm.phone.trim(),
+      email: restaurantForm.email.trim(),
+      logo: restaurantForm.logoUrl ? [restaurantForm.logoUrl] : [],
+      images: restaurantForm.coverPhoto ? [restaurantForm.coverPhoto] : [],
     };
-    reader.readAsDataURL(file);
-  };
 
-  const handleApplyBranchImageLink = () => {
-    const trimmed = branchImageLink.trim();
-    if (!trimmed) {
-      toast.error("Please enter a branch image URL first.");
-      return;
+    setSavingRestaurant(true);
+    setError("");
+    try {
+      let response;
+      if (restaurantExists) {
+        response = await restaurantManagerService.updateRestaurant(restaurant.id, payload);
+      } else {
+        response = await restaurantManagerService.createRestaurant(payload);
+      }
+      const mappedRestaurant = mapRestaurantData(response);
+      const mappedBranches = Array.isArray(response?.branches)
+        ? response.branches.map((branch) => mapBranchData(branch))
+        : branches;
+      setRestaurant(mappedRestaurant);
+      setBranches(mappedBranches);
+      setRestaurantForm(buildRestaurantFormFromData(mappedRestaurant));
+      setLogoPreview(mappedRestaurant.logoUrl || "");
+      setCoverPreview(mappedRestaurant.coverPhoto || "");
+      setViewMode("summary");
+    } catch (err) {
+      const message = err?.response?.data?.error || err?.message || "Unable to save restaurant.";
+      setError(message);
+    } finally {
+      setSavingRestaurant(false);
     }
-    setBranchImageValue(trimmed);
-    setBranchImagePreview(trimmed);
-    toast.success("Branch image applied.");
-    setBranchImageTouched(true);
   };
 
-  const clearBranchImage = () => {
-    setBranchImagePreview("");
-    setBranchImageValue("");
-    setBranchImageLink("");
-    setBranchImageTouched(true);
-    if (branchImageInputRef.current) {
-      branchImageInputRef.current.value = "";
-    }
+  const resetBranchState = (preset = {}) => {
+    const normalised =
+      preset && Object.keys(preset).length ? mapBranchData(preset) || {} : {};
+    const nextNumber =
+      normalised.branchNumber ||
+      (branches.length
+        ? Math.max(...branches.map((branch) => Number(branch.branchNumber) || 0)) + 1
+        : 1);
+    setBranchForm(buildBranchForm(nextNumber, normalised));
+    setOpeningHours(
+      normalised.openingHours && normalised.openingHours.length
+        ? normalised.openingHours.map((item) => ({ ...item }))
+        : createDefaultHours(),
+    );
+    setSpecialHours(
+      normalised.specialHours && normalised.specialHours.length
+        ? normalised.specialHours.map((item) => ({ ...item }))
+        : [],
+    );
+    setSpecialEnabled(Boolean(normalised.specialHours && normalised.specialHours.length));
   };
 
-  const handleBranchFormChange = (event) => {
-    const { name, value, type, checked } = event.target;
-    setBranchForm((prev) => ({ ...prev, [name]: type === "checkbox" ? checked : value }));
-  };
-
-  const resetBranchForm = (options = {}) => {
-    const {
-      isPrimary = branches.length === 0,
-      branchNumber = "",
-      persistContact = true,
-    } = options;
-    setBranchForm({
-      name: "",
-      branchNumber: branchNumber ? String(branchNumber) : "",
-      brandPhone: persistContact
-        ? restaurantForm.phone || ownerAccount.phone || ""
-        : "",
-      brandEmail: persistContact
-        ? restaurantForm.email || ownerAccount.email || ""
-        : "",
-      street: "",
-      ward: "",
-      district: "",
-      city: "",
-      latitude: "",
-      longitude: "",
-      isPrimary,
-      isOpen: false,
-    });
-    setBranchImagePreview("");
-    setBranchImageValue("");
-    setBranchImageLink("");
-    setBranchImageTouched(false);
-    setOpeningHours(() => defaultOpeningHours());
-    setSpecialHours([]);
-    setEditingBranch(null);
-  };
-
-  const startBranchCreation = (options = {}) => {
-    resetBranchForm(options);
+  const startCreateBranch = () => {
+    setEditingBranchId(null);
+    resetBranchState();
+    setError("");
     setViewMode("createBranch");
   };
 
-  const startBranchEdit = (branch) => {
-    if (!branch) return;
-    setEditingBranch(branch);
-    setBranchForm({
-      name: branch.name || "",
-      branchNumber: branch.branchNumber ? String(branch.branchNumber) : "",
-      brandPhone: branch.brandPhone || "",
-      brandEmail: branch.brandEmail || "",
-      street: branch.street || "",
-      ward: branch.ward || "",
-      district: branch.district || "",
-      city: branch.city || "",
-      latitude: branch.latitude != null ? String(branch.latitude) : "",
-      longitude: branch.longitude != null ? String(branch.longitude) : "",
-      isPrimary: Boolean(branch.isPrimary),
-      isOpen: Boolean(branch.isOpen),
-    });
-    const firstImage =
-      Array.isArray(branch.images) && branch.images.length
-        ? branch.images[0]
-        : "";
-    setBranchImagePreview(firstImage);
-    setBranchImageValue(firstImage);
-    setBranchImageLink("");
-    setBranchImageTouched(false);
-    setOpeningHours(mergeOpeningHoursWithDefaults(branch.openingHours || []));
-    setSpecialHours(mapSpecialHoursForForm(branch.specialHours || []));
+  const startEditBranch = (branch) => {
+    setEditingBranchId(branch.id);
+    resetBranchState(branch);
+    setError("");
     setViewMode("editBranch");
   };
 
-  const cancelBranchEdit = () => {
-    resetBranchForm();
-    setViewMode(restaurant?.id ? "summary" : "createRestaurant");
-  };
-
-  const handleAutoFillCoordinates = async () => {
-    const addressParts = [
-      branchForm.street,
-      branchForm.ward,
-      branchForm.district,
-      branchForm.city,
-    ]
-      .map((part) => part?.trim())
-      .filter(Boolean);
-
-    if (!addressParts.length) {
-      toast.error("Please provide the branch address before auto-filling coordinates.");
-      return;
-    }
-
-    setGeocoding(true);
-    try {
-      const params = new URLSearchParams({
-        format: "json",
-        addressdetails: "1",
-        limit: "1",
-        q: addressParts.join(", "),
-      });
-      const response = await fetch(`https://nominatim.openstreetmap.org/search?${params.toString()}`, {
-        headers: {
-          "Accept-Language": "vi,en",
-        },
-      });
-      if (!response.ok) {
-        throw new Error("Unable to contact the geocoding service.");
-      }
-      const results = await response.json();
-      if (!Array.isArray(results) || results.length === 0) {
-        toast.error("Could not determine coordinates for this address.");
-        return;
-      }
-      const { lat, lon } = results[0];
-      if (!lat || !lon) {
-        toast.error("Geocoding service did not return coordinates.");
-        return;
-      }
-      const latitude = Number.parseFloat(lat).toFixed(6);
-      const longitude = Number.parseFloat(lon).toFixed(6);
-      setBranchForm((prev) => ({
-        ...prev,
-        latitude,
-        longitude,
-      }));
-      toast.success("Coordinates filled based on the address.");
-    } catch (err) {
-      toast.error(err?.message || "Unable to auto-fill coordinates right now.");
-    } finally {
-      setGeocoding(false);
-    }
+  const handleBranchFieldChange = (event) => {
+    const { name, type, value, checked } = event.target;
+    setError("");
+    setBranchForm((prev) => ({
+      ...prev,
+      [name]: type === "checkbox" ? checked : value,
+    }));
   };
 
   const handleOpeningHourChange = (index, field, value) => {
@@ -518,18 +357,36 @@ const RestaurantProfile = () => {
     );
   };
 
-  const addSpecialHourRow = () => {
+  const addSpecialHour = () => {
     setSpecialHours((prev) => [
       ...prev,
       {
         date: "",
-        openTime: "",
-        closeTime: "",
-        isClosed: false,
-        overnight: false,
-        note: "",
+          openTime: "",
+          closeTime: "",
+          isClosed: false,
+          overnight: false,
+          note: "",
       },
     ]);
+  };
+  const handleSpecialHoursToggle = (checked) => {
+    const next = Boolean(checked);
+    setSpecialEnabled(next);
+    if (!next) {
+      setSpecialHours([]);
+    } else if (!specialHours.length) {
+      setSpecialHours([
+        {
+          date: "",
+          openTime: "",
+          closeTime: "",
+          isClosed: false,
+          overnight: false,
+          note: "",
+        },
+      ]);
+    }
   };
 
   const updateSpecialHour = (index, field, value) => {
@@ -557,1002 +414,1129 @@ const RestaurantProfile = () => {
     setSpecialHours((prev) => prev.filter((_, idx) => idx !== index));
   };
 
-  const refreshRestaurant = async () => {
-    if (!ownerId) return;
-    try {
-      const data = await restaurantManagerService.getByOwner(ownerId);
-      applyRestaurantData(data);
-    } catch (err) {
-      toast.error(err?.response?.data?.error || err?.message || "Unable to refresh restaurant data.");
-    }
-  };
-
-  const handleCreateRestaurant = async (event) => {
+  const handleBranchSubmit = async (event) => {
     event.preventDefault();
-    if (!ownerId) {
-      toast.error("Please sign in with a restaurant account first.");
+    if (!restaurantExists) {
+      setError("Create the restaurant profile before adding a branch.");
       return;
     }
-    setCreatingRestaurant(true);
+    const branchNumber = Number(branchForm.branchNumber) || branches.length + 1;
+    const payload = {
+      name: branchForm.name.trim() || `Branch #${branchNumber}`,
+      branchNumber,
+      branchPhone: branchForm.branchPhone.trim(),
+      branchEmail: branchForm.branchEmail.trim(),
+      street: branchForm.street.trim(),
+      ward: branchForm.ward.trim(),
+      district: branchForm.district.trim(),
+      city: branchForm.city.trim(),
+      latitude: branchForm.latitude ? Number(branchForm.latitude) : null,
+      longitude: branchForm.longitude ? Number(branchForm.longitude) : null,
+      images: branchForm.imageUrl ? [branchForm.imageUrl.trim()] : [],
+      isPrimary: branchForm.isPrimary,
+      isOpen: branchForm.isOpen,
+      openingHours: openingHours.map((item) => ({ ...item })),
+      specialHours: specialEnabled
+        ? specialHours
+            .filter((item) => item.date)
+            .map((item) => ({ ...item }))
+        : [],
+    };
+
+    setSavingBranch(true);
+    setError("");
     try {
-      const basePayload = {
-        name: restaurantForm.name.trim(),
-        description: restaurantForm.description.trim() || null,
-        cuisine: restaurantForm.cuisine.trim() || null,
-        phone: restaurantForm.phone.trim() || null,
-        email: restaurantForm.email.trim() || null,
-      };
-
-      if (!basePayload.name) {
-        toast.error("Restaurant name is required.");
-        return;
+      let updatedBranch;
+      if (editingBranchId) {
+        updatedBranch = await restaurantManagerService.updateBranch(
+          restaurant.id,
+          editingBranchId,
+          payload,
+        );
+      } else {
+        updatedBranch = await restaurantManagerService.createBranch(restaurant.id, payload);
       }
-
-      const isEditingRestaurant = viewMode === "editRestaurant" && restaurant?.id;
-
-      if (isEditingRestaurant) {
-        const updatePayload = { ...basePayload };
-        if (brandImageTouched) {
-          updatePayload.images = brandImageValue ? [brandImageValue] : [];
+      const mappedBranch = mapBranchData(updatedBranch);
+      setBranches((prev) => {
+        const base = editingBranchId
+          ? prev.map((branch) => (branch.id === editingBranchId ? mappedBranch : branch))
+          : [...prev, mappedBranch];
+        if (mappedBranch.isPrimary) {
+          return base.map((branch) => ({
+            ...branch,
+            isPrimary: branch.id === mappedBranch.id,
+          }));
         }
-        await restaurantManagerService.updateRestaurant(restaurant.id, updatePayload);
-        toast.success("Restaurant information updated.");
-      } else {
-        const createPayload = {
-          ownerId,
-          ...basePayload,
-          images: brandImageValue ? [brandImageValue] : undefined,
-        };
-        await restaurantManagerService.createRestaurant(createPayload);
-        toast.success("Restaurant created successfully.");
-      }
-
-      setBrandImageTouched(false);
-      await refreshRestaurant();
-
-      if (isEditingRestaurant) {
-        setViewMode("summary");
-      } else {
-        startBranchCreation({ isPrimary: true });
-      }
-    } catch (err) {
-      toast.error(err?.response?.data?.error || err?.message || "Unable to create restaurant.");
-    } finally {
-      setCreatingRestaurant(false);
-    }
-  };
-
-  const startRestaurantEdit = () => {
-    if (!restaurant?.id) {
-      setViewMode("createRestaurant");
-      return;
-    }
-    setViewMode("editRestaurant");
-    setRestaurantForm({
-      name: restaurant.name || "",
-      description: restaurant.description || "",
-      cuisine: restaurant.cuisine || "",
-      phone: restaurant.phone || ownerAccount.phone || "",
-      email: restaurant.email || ownerAccount.email || "",
-    });
-    const firstImage =
-      Array.isArray(restaurant.images) && restaurant.images.length
-        ? restaurant.images[0]
-        : "";
-    setBrandImagePreview(firstImage);
-    setBrandImageValue(firstImage);
-    setBrandImageLink("");
-    setBrandImageTouched(false);
-  };
-
-  const cancelRestaurantEdit = () => {
-    if (restaurant?.id) {
-      const firstImage =
-        Array.isArray(restaurant.images) && restaurant.images.length
-          ? restaurant.images[0]
-          : "";
-      setRestaurantForm({
-        name: restaurant.name || "",
-        description: restaurant.description || "",
-        cuisine: restaurant.cuisine || "",
-        phone: restaurant.phone || ownerAccount.phone || "",
-        email: restaurant.email || ownerAccount.email || "",
+        return base;
       });
-      setBrandImagePreview(firstImage);
-      setBrandImageValue(firstImage);
-      setBrandImageLink("");
+      setEditingBranchId(null);
+      resetBranchState();
       setViewMode("summary");
-    } else {
-      const owner = buildOwnerAccount();
-      setRestaurantForm({
-        name: owner.restaurantName || "",
-        description: "",
-        cuisine: "",
-        phone: owner.phone || "",
-        email: owner.email || "",
-      });
-      setBrandImagePreview("");
-      setBrandImageValue("");
-      setBrandImageLink("");
-      setViewMode("createRestaurant");
+    } catch (err) {
+      const message = err?.response?.data?.error || err?.message || "Unable to save branch.";
+      setError(message);
+    } finally {
+      setSavingBranch(false);
     }
-    setBrandImageTouched(false);
   };
 
-  const handleCreateBranch = async (event) => {
-    event.preventDefault();
-    if (!restaurant?.id) {
-      toast.error("Create a restaurant before adding branches.");
-      return;
-    }
-    setCreatingBranch(true);
+  const handleToggleBranchStatus = async (branchId) => {
+    if (!restaurantExists) return;
+    const target = branches.find((branch) => branch.id === branchId);
+    if (!target) return;
+    const nextStatus = !target.isOpen;
     try {
-      const payload = {
-        name: branchForm.name.trim(),
-        branchNumber: branchForm.branchNumber ? Number(branchForm.branchNumber) : undefined,
-        brandPhone: branchForm.brandPhone.trim() || null,
-        brandEmail: branchForm.brandEmail.trim() || null,
-        street: branchForm.street.trim() || null,
-        ward: branchForm.ward.trim() || null,
-        district: branchForm.district.trim() || null,
-        city: branchForm.city.trim() || null,
-        latitude: branchForm.latitude ? parseFloat(branchForm.latitude) : null,
-        longitude: branchForm.longitude ? parseFloat(branchForm.longitude) : null,
-        isPrimary: branchForm.isPrimary,
-        isOpen: branchForm.isOpen,
-        images:
-          editingBranch
-            ? branchImageTouched
-              ? branchImageValue
-                ? [branchImageValue]
-                : []
-              : undefined
-            : branchImageValue
-            ? [branchImageValue]
-            : undefined,
-        openingHours: openingHours.map((item) => ({
-          dayOfWeek: item.dayOfWeek,
-          openTime: item.isClosed ? null : item.openTime,
-          closeTime: item.isClosed ? null : item.closeTime,
-          isClosed: item.isClosed,
-          overnight: item.overnight,
-        })),
-        specialHours: specialHours.map((item) => ({
-          date: item.date,
-          openTime: item.isClosed ? null : item.openTime,
-          closeTime: item.isClosed ? null : item.closeTime,
-          isClosed: item.isClosed,
-          overnight: item.overnight,
-          note: item.note,
-        })),
-      };
-
-      if (editingBranch) {
-        await restaurantManagerService.updateBranch(restaurant.id, editingBranch.id, payload);
-        toast.success("Branch updated successfully.");
-      } else {
-        await restaurantManagerService.createBranch(restaurant.id, payload);
-        toast.success("Branch created successfully.");
-      }
-
-      resetBranchForm();
-      await refreshRestaurant();
-      setViewMode("summary");
+      const updated = await restaurantManagerService.updateBranch(restaurant.id, branchId, {
+        isOpen: nextStatus,
+      });
+      const mapped = mapBranchData(updated);
+      setBranches((prev) =>
+        prev.map((branch) => (branch.id === branchId ? mapped : branch)),
+      );
     } catch (err) {
-      toast.error(err?.response?.data?.error || err?.message || "Unable to create branch.");
-    } finally {
-      setCreatingBranch(false);
+      const message = err?.response?.data?.error || err?.message || "Unable to update branch status.";
+      setError(message);
     }
   };
 
-  const renderLoading = () => <p className="text-sm text-gray-600">Loading restaurant information...</p>;
+  const filteredBranches = useMemo(() => {
+    const term = branchSearch.trim().toLowerCase();
+    return branches
+      .slice()
+      .sort((a, b) => {
+        if (a.isPrimary && !b.isPrimary) return -1;
+        if (!a.isPrimary && b.isPrimary) return 1;
+        return a.branchNumber - b.branchNumber;
+      })
+      .filter((branch) => {
+        const matchesSearch = term
+          ? [branch.name, String(branch.branchNumber), branch.branchPhone, branch.branchEmail, branch.street, branch.ward, branch.district, branch.city]
+              .filter(Boolean)
+              .some((value) => value.toLowerCase().includes(term))
+          : true;
 
-  const renderRestaurantInfo = () => {
-    const statusLabel =
-      formatStatus(ownerAccount.restaurantStatus || restaurant?.restaurant_status) || null;
-    const averageRating =
-      restaurant?.avg_branch_rating != null
-        ? Number(restaurant.avg_branch_rating).toFixed(2)
-        : null;
-    const ratedBranches =
-      typeof restaurant?.total_branch_ratings === "number"
-        ? restaurant.total_branch_ratings
-        : null;
+        let matchesFilter = true;
+        switch (branchFilter) {
+          case "primary":
+            matchesFilter = branch.isPrimary;
+            break;
+          case "secondary":
+            matchesFilter = !branch.isPrimary;
+            break;
+          case "open":
+            matchesFilter = branch.isOpen;
+            break;
+          case "closed":
+            matchesFilter = !branch.isOpen;
+            break;
+          default:
+            matchesFilter = true;
+        }
+        return matchesSearch && matchesFilter;
+      });
+  }, [branches, branchFilter, branchSearch]);
 
-    return (
-      <section className="rounded-2xl border border-slate-100 bg-white p-6 shadow-sm space-y-6">
-        <header className="space-y-2">
-          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-            <div>
-              <h2 className="text-xl font-semibold text-slate-900">
-                {restaurant?.name || ownerAccount.restaurantName || "Restaurant profile"}
-              </h2>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              {statusLabel ? (
-                <span className="inline-flex items-center rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700">
-                  {statusLabel}
-                </span>
-              ) : null}
-              <button
-                type="button"
-                onClick={startRestaurantEdit}
-                disabled={viewMode === "editRestaurant"}
-                className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-100 disabled:opacity-60 disabled:cursor-not-allowed"
-              >
-                Edit restaurant
-              </button>
-            </div>
-          </div>
-          <p className="text-sm text-slate-600">
-            {restaurant?.description?.trim() ||
-              "No description provided yet. Add a short introduction for your brand."}
-          </p>
-        </header>
-        <div className="grid gap-6 md:grid-cols-2">
-          <div className="space-y-3">
-            <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-              Owner contact
-            </h3>
-            <InfoRow label="Manager" value={ownerAccount.managerName} />
-            <InfoRow label="Email" value={ownerAccount.email} />
-            <InfoRow label="Phone" value={ownerAccount.phone} />
-            <InfoRow label="Company address" value={ownerAccount.companyAddress} />
-            <InfoRow label="Tax code" value={ownerAccount.taxCode} />
-          </div>
-          <div className="space-y-3">
-            <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-              Brand profile
-            </h3>
-            <InfoRow
-              label="Hotline"
-              value={restaurant?.phone || ownerAccount.phone}
-              fallback="Not available"
-            />
-            <InfoRow
-              label="Contact email"
-              value={restaurant?.email || ownerAccount.email}
-              fallback="Not available"
-            />
-            <InfoRow label="Cuisine" value={restaurant?.cuisine} fallback="Not specified" />
-            <InfoRow
-              label="Operating status"
-              value={restaurant?.is_active ? "Active" : "Inactive"}
-              fallback="Inactive"
-            />
-            <InfoRow label="Rated branches" value={ratedBranches} fallback="0" />
-            <InfoRow label="Average branch rating" value={averageRating} fallback="0.00" />
-          </div>
-        </div>
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-            Brand image
-          </p>
-          <div className="mt-3 flex flex-wrap gap-3">
-            {Array.isArray(restaurant?.images) && restaurant.images.length ? (
-              restaurant.images.map((img, index) => (
-                <div
-                  key={img || index}
-                  className="h-32 w-32 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"
-                >
-                  <img src={img} alt={`Brand ${index + 1}`} className="h-full w-full object-cover" />
-                </div>
-              ))
-            ) : (
-              <span className="text-xs text-slate-500">No brand image uploaded.</span>
-            )}
-          </div>
-        </div>
-      </section>
-    );
-  };
+  const totalPages = Math.max(1, Math.ceil(filteredBranches.length / BRANCHES_PER_PAGE));
+  const safePage = Math.min(currentPage, totalPages);
+  const paginatedBranches = useMemo(() => {
+    const start = (safePage - 1) * BRANCHES_PER_PAGE;
+    return filteredBranches.slice(start, start + BRANCHES_PER_PAGE);
+  }, [filteredBranches, safePage]);
 
-  const renderBranches = () => {
-    const branchFormOpen = viewMode === "createBranch" || viewMode === "editBranch";
+  const rangeStart = filteredBranches.length ? (safePage - 1) * BRANCHES_PER_PAGE + 1 : 0;
+  const rangeEnd = filteredBranches.length ? Math.min(safePage * BRANCHES_PER_PAGE, filteredBranches.length) : 0;
 
-    return (
-      <section className="space-y-4">
-      <header className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h2 className="text-lg font-semibold text-slate-900">Branches</h2>
-          <span className="text-sm text-slate-500">
-            {branches.length ? `${branches.length} branch(es)` : "No branches yet"}
-          </span>
-        </div>
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={() => startBranchCreation({ isPrimary: branches.length === 0 })}
-            className="rounded-lg bg-emerald-500 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-600"
-          >
-            Add branch
-          </button>
-          <button
-            type="button"
-            onClick={() =>
-              branchFormOpen
-                ? cancelBranchEdit()
-                : startBranchCreation({ isPrimary: branches.length === 0 })
-            }
-            className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100"
-          >
-            {branchFormOpen ? (editingBranch ? "Cancel edit" : "Hide form") : "Show form"}
-          </button>
-        </div>
-      </header>
-      {branches.length ? (
-        <div className="space-y-4">
-          {branches.map((branch) => {
-            const branchImages = Array.isArray(branch.images)
-              ? branch.images.filter(Boolean)
-              : branch.images
-              ? [branch.images].filter(Boolean)
-              : [];
-              return (
-                <div key={branch.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                  <div>
-                    <h3 className="text-base font-semibold text-slate-900">
-                      {branch.name || `Branch #${branch.branchNumber}`}
-                    </h3>
-                    <p className="text-xs uppercase tracking-wide text-slate-500">
-                      {branch.isPrimary ? "Primary branch" : `Branch ${branch.branchNumber}`}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${
-                        branch.isOpen
-                          ? "bg-emerald-100 text-emerald-700"
-                          : "bg-amber-100 text-amber-700"
-                      }`}
-                    >
-                      {branch.isOpen ? "Open for service" : "Not open yet"}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => startBranchEdit(branch)}
-                      className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-100"
-                    >
-                      Edit
-                    </button>
-                  </div>
-                </div>
-                <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  <InfoCard
-                    label="Address"
-                    value={
-                    [branch.street, branch.ward, branch.district, branch.city]
-                      .filter(Boolean)
-                      .join(", ") || "Not specified"
-                  }
-                />
-                <InfoCard label="Phone" value={branch.brandPhone || "Not provided"} />
-                <InfoCard label="Email" value={branch.brandEmail || "Not provided"} />
-                <InfoCard
-                  label="Coordinates"
-                  value={
-                    branch.latitude && branch.longitude
-                      ? `${branch.latitude}, ${branch.longitude}`
-                      : "Not set"
-                  }
-                />
-                <InfoCard
-                  label="Rating"
-                  value={
-                    branch.rating != null
-                      ? Number(branch.rating).toFixed(1)
-                      : "Not rated"
-                  }
-                />
-              </div>
-              {branchImages.length ? (
-                <div className="mt-4">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Branch images</p>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {branchImages.map((img, index) => (
-                      <div
-                        key={img || index}
-                        className="h-20 w-20 overflow-hidden rounded-lg border border-slate-200 bg-slate-50"
-                      >
-                        <img
-                          src={img}
-                          alt={`Branch ${branch.branchNumber} image ${index + 1}`}
-                          className="h-full w-full object-cover"
-                        />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-              <div className="mt-4">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Opening hours</p>
-                <ul className="mt-2 space-y-1 text-sm text-slate-600">
-                  {branch.openingHours?.length ? (
-                    branch.openingHours.map((hour) => {
-                      const weekday = Number(hour.dayOfWeek);
-                      const label = DAY_LABELS[weekday] || `Day ${weekday}`;
-                      return (
-                        <li key={hour.id}>
-                          {label}:{" "}
-                          {hour.isClosed
-                            ? "Closed"
-                            : `${hour.openTime || "--:--"} - ${hour.closeTime || "--:--"}`}{" "}
-                          {hour.overnight ? "(Overnight)" : ""}
-                        </li>
-                      );
-                    })
-                  ) : (
-                    <li>Not configured.</li>
-                  )}
-                </ul>
-              </div>
-              <div className="mt-4">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Special days
-                </p>
-                <ul className="mt-2 space-y-1 text-sm text-slate-600">
-                  {branch.specialHours?.length ? (
-                    branch.specialHours.map((item) => {
-                      const formattedDate =
-                        item.date instanceof Date
-                          ? item.date.toISOString().split("T")[0]
-                          : item.date;
-                      return (
-                        <li key={item.id}>
-                          {formattedDate}:{" "}
-                          {item.isClosed
-                            ? "Closed"
-                            : `${item.openTime || "--:--"} - ${item.closeTime || "--:--"}`}{" "}
-                          {item.overnight ? "(Overnight)" : ""}
-                          {item.note ? ` – ${item.note}` : ""}
-                        </li>
-                      );
-                    })
-                  ) : (
-                    <li>No special schedule configured.</li>
-                  )}
-                </ul>
-              </div>
-              </div>
-            );
-          })}
-        </div>
-      ) : (
-        <p className="text-sm text-slate-600">No branches created yet. Use the form below to add one.</p>
-      )}
-      </section>
-    );
-  };
-
-  const renderRestaurantForm = () => (
-    <section className="rounded-xl border border-slate-100 bg-white p-5 shadow-sm space-y-4">
-      <header className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h2 className="text-lg font-semibold text-slate-900">
-            {viewMode === "editRestaurant" ? "Update restaurant" : "Create a restaurant"}
-          </h2>
-          <p className="text-sm text-slate-600">
-            Enter the base information for your brand. You can add branches afterwards.
-          </p>
-        </div>
-        {viewMode === "editRestaurant" && (
-          <button
-            type="button"
-            onClick={cancelRestaurantEdit}
-            className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100"
-          >
-            Cancel
-          </button>
-        )}
-      </header>
-      <form onSubmit={handleCreateRestaurant} className="space-y-4">
-        <div className="space-y-2">
-          <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-            Restaurant name
-          </label>
-          <input
-            name="name"
-            value={restaurantForm.name}
-            onChange={handleRestaurantFormChange}
-            required
-            className="w-full rounded-lg border border-slate-200 bg-white py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/60"
-          />
-        </div>
-        <div className="grid gap-4 md:grid-cols-2">
-          <FieldInput
-            label="Email"
-            name="email"
-            value={restaurantForm.email}
-            onChange={handleRestaurantFormChange}
-            type="email"
-          />
-          <FieldInput
-            label="Hotline"
-            name="phone"
-            value={restaurantForm.phone}
-            onChange={handleRestaurantFormChange}
-            type="tel"
-          />
-        </div>
-        <FieldInput
-          label="Description"
-          name="description"
-          value={restaurantForm.description}
-          onChange={handleRestaurantFormChange}
-          as="textarea"
-          rows={3}
-        />
-        <div className="grid gap-4 md:grid-cols-2">
-          <FieldInput
-            label="Cuisine"
-            name="cuisine"
-            value={restaurantForm.cuisine}
-            onChange={handleRestaurantFormChange}
-          />
-        </div>
-        <div className="space-y-3">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Brand image</p>
-          <div className="flex flex-col gap-3 md:flex-row md:items-center">
-            <div className="flex h-28 w-28 items-center justify-center overflow-hidden rounded-xl border border-dashed border-slate-300 bg-slate-50">
-              {brandImagePreview ? (
-                <img src={brandImagePreview} alt="Brand preview" className="h-full w-full object-cover" />
-              ) : (
-                <span className="px-2 text-center text-xs text-slate-500">
-                  No image selected
-                </span>
-              )}
-            </div>
-            <div className="flex-1 space-y-2">
-              <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  onClick={() => brandImageInputRef.current?.click()}
-                  className="rounded-lg border border-emerald-500 px-3 py-2 text-xs font-semibold text-emerald-600 hover:bg-emerald-50"
-                >
-                  Upload from device
-                </button>
-                <input
-                  ref={brandImageInputRef}
-                  type="file"
-                  accept="image/*"
-                  onChange={handleSelectBrandFile}
-                  className="hidden"
-                />
-                <button
-                  type="button"
-                  onClick={clearBrandImage}
-                  className="text-xs font-semibold text-rose-500 hover:text-rose-600"
-                >
-                  Clear image
-                </button>
-              </div>
-              <div className="flex flex-col gap-2">
-                <label className="text-xs uppercase tracking-wide text-slate-500">
-                  Or paste image URL
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    type="url"
-                    placeholder="https://example.com/brand-image.jpg"
-                    value={brandImageLink}
-                    onChange={(event) => setBrandImageLink(event.target.value)}
-                    className="flex-1 rounded-lg border border-slate-200 py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/60"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleApplyBrandImageLink}
-                    className="rounded-lg bg-emerald-500 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-600"
-                  >
-                    Apply
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div className="flex justify-end">
-          <button
-            type="submit"
-            disabled={creatingRestaurant}
-            className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-600 disabled:opacity-60"
-          >
-            {creatingRestaurant
-              ? viewMode === "editRestaurant"
-                ? "Saving..."
-                : "Creating..."
-              : viewMode === "editRestaurant"
-              ? "Save changes"
-              : "Create restaurant"}
-          </button>
-        </div>
-      </form>
-    </section>
-  );
-
-  const renderCreateBranchForm = () => (
-    <section className="rounded-xl border border-slate-100 bg-white p-5 shadow-sm space-y-4">
-      <header className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h2 className="text-lg font-semibold text-slate-900">
-            {editingBranch ? "Update branch" : "Add a branch"}
-          </h2>
-          <p className="text-sm text-slate-600">
-            Provide full branch details. The first branch will automatically be marked as primary.
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={cancelBranchEdit}
-          className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100"
-        >
-          {editingBranch ? "Cancel edit" : "Close form"}
-        </button>
-      </header>
-      <form onSubmit={handleCreateBranch} className="space-y-4">
-        <FieldInput
-          label="Branch name"
-          name="name"
-          value={branchForm.name}
-          onChange={handleBranchFormChange}
-          required
-        />
-        <div className="grid gap-4 md:grid-cols-2">
-          <FieldInput
-            label="Branch phone"
-            name="brandPhone"
-            value={branchForm.brandPhone}
-            onChange={handleBranchFormChange}
-          />
-          <FieldInput
-            label="Branch email"
-            name="brandEmail"
-            value={branchForm.brandEmail}
-            onChange={handleBranchFormChange}
-            type="email"
-          />
-        </div>
-        <FieldInput
-          label="Branch number (optional)"
-          name="branchNumber"
-          value={branchForm.branchNumber}
-          onChange={handleBranchFormChange}
-          type="number"
-          min="1"
-          placeholder={String((branches.length || 0) + 1)}
-        />
-        <div className="space-y-3">
-          <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-            Address
-          </label>
-          <div className="grid gap-3 md:grid-cols-2">
-            <input
-              name="street"
-              placeholder="Street and number"
-              value={branchForm.street}
-              onChange={handleBranchFormChange}
-              required
-              className="rounded-lg border border-slate-200 bg-white py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/60"
-            />
-            <input
-              name="ward"
-              placeholder="Ward"
-              value={branchForm.ward}
-              onChange={handleBranchFormChange}
-              className="rounded-lg border border-slate-200 bg-white py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/60"
-            />
-            <input
-              name="district"
-              placeholder="District"
-              value={branchForm.district}
-              onChange={handleBranchFormChange}
-              className="rounded-lg border border-slate-200 bg-white py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/60"
-            />
-            <input
-              name="city"
-              placeholder="City"
-              value={branchForm.city}
-              onChange={handleBranchFormChange}
-              required
-              className="rounded-lg border border-slate-200 bg-white py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/60"
-            />
-          </div>
-          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-            <p className="text-xs text-slate-500">
-              Provide a precise address so we can locate this branch on the map.
-            </p>
-            <button
-              type="button"
-              onClick={handleAutoFillCoordinates}
-              disabled={geocoding}
-              className="inline-flex items-center justify-center rounded-lg border border-emerald-500 px-3 py-2 text-xs font-semibold text-emerald-600 transition hover:bg-emerald-50 disabled:opacity-60"
-            >
-              {geocoding ? "Locating..." : "Auto-fill coordinates"}
-            </button>
-          </div>
-        </div>
-        <div className="grid gap-4 md:grid-cols-2">
-          <FieldInput
-            label="Latitude"
-            name="latitude"
-            value={branchForm.latitude}
-            onChange={handleBranchFormChange}
-            placeholder="E.g. 10.7731"
-          />
-          <FieldInput
-            label="Longitude"
-            name="longitude"
-            value={branchForm.longitude}
-            onChange={handleBranchFormChange}
-            placeholder="E.g. 106.7009"
-          />
-        </div>
-        <div className="space-y-3">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Branch image</p>
-          <div className="flex flex-col gap-3 md:flex-row md:items-center">
-            <div className="flex h-24 w-24 items-center justify-center overflow-hidden rounded-xl border border-dashed border-slate-300 bg-slate-50">
-              {branchImagePreview ? (
-                <img src={branchImagePreview} alt="Branch preview" className="h-full w-full object-cover" />
-              ) : (
-                <span className="px-2 text-center text-xs text-slate-500">No image selected</span>
-              )}
-            </div>
-            <div className="flex-1 space-y-2">
-              <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  onClick={() => branchImageInputRef.current?.click()}
-                  className="rounded-lg border border-emerald-500 px-3 py-2 text-xs font-semibold text-emerald-600 hover:bg-emerald-50"
-                >
-                  Upload from device
-                </button>
-                <input
-                  ref={branchImageInputRef}
-                  type="file"
-                  accept="image/*"
-                  onChange={handleSelectBranchImage}
-                  className="hidden"
-                />
-                <button
-                  type="button"
-                  onClick={clearBranchImage}
-                  className="text-xs font-semibold text-rose-500 hover:text-rose-600"
-                >
-                  Clear image
-                </button>
-              </div>
-              <div className="flex flex-col gap-2">
-                <label className="text-xs uppercase tracking-wide text-slate-500">
-                  Or paste image URL
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    type="url"
-                    placeholder="https://example.com/branch-image.jpg"
-                    value={branchImageLink}
-                    onChange={(event) => setBranchImageLink(event.target.value)}
-                    className="flex-1 rounded-lg border border-slate-200 py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/60"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleApplyBranchImageLink}
-                    className="rounded-lg bg-emerald-500 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-600"
-                  >
-                    Apply
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <label className="flex items-center gap-2 text-sm text-slate-600">
-            <input
-              type="checkbox"
-              name="isPrimary"
-              checked={branchForm.isPrimary}
-              onChange={handleBranchFormChange}
-              className="h-4 w-4 rounded border-slate-300 text-emerald-500 focus:ring-emerald-500/50"
-            />
-            Mark as primary branch
-          </label>
-          <label className="flex items-center gap-2 text-sm text-slate-600">
-            <input
-              type="checkbox"
-              name="isOpen"
-              checked={branchForm.isOpen}
-              onChange={handleBranchFormChange}
-              className="h-4 w-4 rounded border-slate-300 text-emerald-500 focus:ring-emerald-500/50"
-            />
-            Branch already operating
-          </label>
-        </div>
-        <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-          <p className="text-sm font-semibold text-slate-800">Opening hours</p>
-          <div className="mt-3 space-y-2">
-            {openingHours.map((item, index) => (
-              <div
-                key={item.dayOfWeek}
-                className="flex flex-col gap-2 rounded-lg bg-white p-3 shadow-sm md:flex-row md:items-center"
-              >
-                <span className="w-28 text-sm font-medium text-slate-700">
-                  {DAY_LABELS[item.dayOfWeek]}
-                </span>
-                <div className="flex flex-1 items-center gap-2">
-                  <input
-                    type="time"
-                    value={item.openTime}
-                    onChange={(event) => handleOpeningHourChange(index, "openTime", event.target.value)}
-                    disabled={item.isClosed}
-                    className="w-28 rounded-lg border border-slate-200 py-1 px-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/60 disabled:bg-slate-100"
-                  />
-                  <span className="text-sm text-slate-500">to</span>
-                  <input
-                    type="time"
-                    value={item.closeTime}
-                    onChange={(event) => handleOpeningHourChange(index, "closeTime", event.target.value)}
-                    disabled={item.isClosed}
-                    className="w-28 rounded-lg border border-slate-200 py-1 px-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/60 disabled:bg-slate-100"
-                  />
-                </div>
-                <label className="flex items-center gap-2 text-xs text-slate-600">
-                  <input
-                    type="checkbox"
-                    checked={item.isClosed}
-                    onChange={(event) => handleOpeningHourChange(index, "isClosed", event.target.checked)}
-                    className="h-4 w-4 rounded border-slate-300 text-emerald-500 focus:ring-emerald-500/50"
-                  />
-                  Closed
-                </label>
-                <label className="flex items-center gap-2 text-xs text-slate-600">
-                  <input
-                    type="checkbox"
-                    checked={item.overnight}
-                    onChange={(event) => handleOpeningHourChange(index, "overnight", event.target.checked)}
-                    className="h-4 w-4 rounded border-slate-300 text-emerald-500 focus:ring-emerald-500/50"
-                  />
-                  Overnight
-                </label>
-              </div>
-            ))}
-          </div>
-        </div>
-        <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-          <div className="flex items-center justify-between">
-            <p className="text-sm font-semibold text-slate-800">Special days</p>
-            <button
-              type="button"
-              onClick={addSpecialHourRow}
-              className="text-xs font-semibold text-emerald-600 hover:text-emerald-700"
-            >
-              + Add special day
-            </button>
-          </div>
-          {specialHours.length === 0 ? (
-            <p className="mt-2 text-xs text-slate-500">No special day configured.</p>
-          ) : (
-            <div className="mt-3 space-y-2">
-              {specialHours.map((item, index) => (
-                <div
-                  key={index}
-                  className="flex flex-col gap-2 rounded-lg bg-white p-3 shadow-sm md:flex-row md:items-center"
-                >
-                  <input
-                    type="date"
-                    value={item.date}
-                    onChange={(event) => updateSpecialHour(index, "date", event.target.value)}
-                    className="rounded-lg border border-slate-200 py-1 px-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/60"
-                  />
-                  <div className="flex flex-1 items-center gap-2">
-                    <input
-                      type="time"
-                      value={item.openTime}
-                      onChange={(event) => updateSpecialHour(index, "openTime", event.target.value)}
-                      disabled={item.isClosed}
-                      className="w-28 rounded-lg border border-slate-200 py-1 px-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/60 disabled:bg-slate-100"
-                    />
-                    <span className="text-sm text-slate-500">to</span>
-                    <input
-                      type="time"
-                      value={item.closeTime}
-                      onChange={(event) => updateSpecialHour(index, "closeTime", event.target.value)}
-                      disabled={item.isClosed}
-                      className="w-28 rounded-lg border border-slate-200 py-1 px-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/60 disabled:bg-slate-100"
-                    />
-                  </div>
-                  <label className="flex items-center gap-2 text-xs text-slate-600">
-                    <input
-                      type="checkbox"
-                      checked={item.isClosed}
-                      onChange={(event) => updateSpecialHour(index, "isClosed", event.target.checked)}
-                      className="h-4 w-4 rounded border-slate-300 text-emerald-500 focus:ring-emerald-500/50"
-                    />
-                    Closed
-                  </label>
-                  <label className="flex items-center gap-2 text-xs text-slate-600">
-                    <input
-                      type="checkbox"
-                      checked={item.overnight}
-                      onChange={(event) => updateSpecialHour(index, "overnight", event.target.checked)}
-                      className="h-4 w-4 rounded border-slate-300 text-emerald-500 focus:ring-emerald-500/50"
-                    />
-                    Overnight
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => removeSpecialHour(index)}
-                    className="text-xs font-semibold text-rose-500 hover:text-rose-600"
-                  >
-                    Remove
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-        <div className="flex justify-end">
-          <button
-            type="submit"
-            disabled={creatingBranch}
-            className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-600 disabled:opacity-60"
-          >
-            {creatingBranch
-              ? editingBranch
-                ? "Saving..."
-                : "Creating..."
-              : editingBranch
-              ? "Save branch"
-              : "Create branch"}
-          </button>
-        </div>
-      </form>
-    </section>
-  );
+  const canCreateRestaurant = !loading && !restaurantExists;
 
   if (!ownerId) {
     return (
       <div className={containerClasses}>
-        <p className="text-sm text-red-500">Please sign in with a restaurant account to manage information.</p>
+        <div className="flex min-h-[200px] items-center justify-center rounded-2xl border border-slate-100 bg-white text-sm text-slate-600 shadow-sm">
+          Sign in with your restaurant account to manage profile and branches.
+        </div>
       </div>
     );
   }
 
-  const hasRestaurantRecord = Boolean(restaurant?.id);
-  const showRestaurantFormSection =
-    viewMode === "createRestaurant" || viewMode === "editRestaurant";
-  const showBranchFormSection =
-    hasRestaurantRecord && (viewMode === "createBranch" || viewMode === "editBranch");
-
   return (
     <div className={containerClasses}>
-      <header className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between mb-6">
+      <header className="mb-6 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Restaurant Management</h1>
-          <p className="text-sm text-slate-600">Update your brand profile and manage branches.</p>
+          <h1 className="text-2xl font-bold text-slate-900">Restaurant information</h1>
+          <p className="text-sm text-slate-600">Manage your brand profile and its branches in one place.</p>
         </div>
-        <button
-          type="button"
-          onClick={refreshRestaurant}
-          className="rounded-lg border border-emerald-500 px-4 py-2 text-sm font-semibold text-emerald-600 hover:bg-emerald-50"
-        >
-          Refresh
-        </button>
+        {canCreateRestaurant ? (
+          <button
+            type="button"
+            onClick={() => setViewMode("createRestaurant")}
+            className="rounded-lg border border-emerald-500 px-4 py-2 text-sm font-semibold text-emerald-600 hover:bg-emerald-50"
+          >
+            Create new restaurant
+          </button>
+        ) : null}
       </header>
-      {error ? <p className="mb-4 text-sm text-red-500">{error}</p> : null}
+
+      {error ? <ErrorBanner message={error} onDismiss={() => setError("")} /> : null}
+
       {loading ? (
-        renderLoading()
+        <LoadingState />
       ) : (
         <div className="space-y-6">
-          {showRestaurantFormSection ? renderRestaurantForm() : renderRestaurantInfo()}
-          {hasRestaurantRecord ? renderBranches() : null}
-          {showBranchFormSection ? renderCreateBranchForm() : null}
+          {viewMode === "createRestaurant" ? (
+            <RestaurantForm
+              form={restaurantForm}
+              logoPreview={logoPreview}
+              coverPreview={coverPreview}
+              isSubmitting={savingRestaurant}
+              onChange={handleRestaurantTextChange}
+              onFileChange={handleRestaurantFileChange}
+              onSubmit={handleRestaurantSubmit}
+              onCancel={() => setViewMode("summary")}
+            />
+          ) : restaurantExists ? (
+            <>
+              <RestaurantSummary
+                restaurant={restaurant}
+                onEdit={() => {
+                  setRestaurantForm(buildRestaurantFormFromData(restaurant));
+                  setLogoPreview(restaurant.logoUrl || "");
+                  setCoverPreview(restaurant.coverPhoto || "");
+                  setViewMode("createRestaurant");
+                }}
+                onCreateBranch={startCreateBranch}
+              />
+              <RestaurantHero restaurant={restaurant} branches={branches} />
+            </>
+          ) : (
+            <EmptyState onCreate={() => setViewMode("createRestaurant")} />
+          )}
+
+          {restaurantExists ? (
+            <BranchManagement
+              branches={paginatedBranches}
+              branchCount={filteredBranches.length}
+              branchRangeStart={rangeStart}
+              branchRangeEnd={rangeEnd}
+              totalPages={totalPages}
+              currentPage={safePage}
+              branchSearch={branchSearch}
+              branchFilter={branchFilter}
+              showForm={showBranchForm}
+              branchForm={branchForm}
+              openingHours={openingHours}
+              specialHours={specialHours}
+              specialEnabled={specialEnabled}
+              isSubmittingBranch={savingBranch}
+              onSearchChange={(value) => {
+                setBranchSearch(value);
+                setCurrentPage(1);
+              }}
+              onFilterChange={(value) => {
+                setBranchFilter(value);
+                setCurrentPage(1);
+              }}
+              onResetFilters={() => {
+                setBranchSearch("");
+                setBranchFilter("all");
+                setCurrentPage(1);
+              }}
+              onPageChange={setCurrentPage}
+              onCreateBranch={startCreateBranch}
+              onEditBranch={startEditBranch}
+              onCancelForm={() => {
+                resetBranchState();
+                setEditingBranchId(null);
+                setViewMode("summary");
+              }}
+              onBranchFieldChange={handleBranchFieldChange}
+              onOpeningHourChange={handleOpeningHourChange}
+              onSpecialToggle={handleSpecialHoursToggle}
+              onAddSpecialHour={addSpecialHour}
+              onUpdateSpecialHour={updateSpecialHour}
+              onRemoveSpecialHour={removeSpecialHour}
+              onSubmitBranch={handleBranchSubmit}
+              onToggleBranchStatus={handleToggleBranchStatus}
+            />
+          ) : null}
         </div>
       )}
     </div>
   );
 };
+const EmptyState = ({ onCreate }) => (
+  <section className="rounded-2xl border border-dashed border-emerald-300 bg-white p-6 text-center shadow-sm">
+    <h2 className="text-xl font-semibold text-slate-900">No restaurant profile yet</h2>
+    <p className="mt-2 text-sm text-slate-600">
+      Create your brand profile to showcase restaurant details and manage branches.
+    </p>
+    <button
+      type="button"
+      onClick={onCreate}
+      className="mt-4 rounded-lg bg-emerald-500 px-5 py-2 text-sm font-semibold text-white hover:bg-emerald-600"
+    >
+      Create new restaurant
+    </button>
+  </section>
+);
+const ErrorBanner = ({ message, onDismiss }) => (
+  <div className="mb-6 flex items-start justify-between rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
+    <span>{message}</span>
+    {onDismiss ? (
+      <button
+        type="button"
+        onClick={onDismiss}
+        className="text-xs font-semibold uppercase tracking-wide text-rose-600 hover:text-rose-700"
+      >
+        Dismiss
+      </button>
+    ) : null}
+  </div>
+);
 
-const FieldInput = ({ label, as = "input", ...props }) => {
+const LoadingState = () => (
+  <div className="flex min-h-[200px] items-center justify-center rounded-2xl border border-slate-100 bg-white text-sm text-slate-600 shadow-sm">
+    Loading restaurant data...
+  </div>
+);
+
+const RestaurantForm = ({ form, logoPreview, coverPreview, onChange, onFileChange, onSubmit, onCancel, isSubmitting }) => (
+  <section className="rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
+    <header className="mb-5 flex items-center justify-between">
+      <div>
+        <h2 className="text-lg font-semibold text-slate-900">Manage restaurant profile</h2>
+        <p className="text-sm text-slate-600">
+          Provide the base information for your restaurant. Upload images from your device or paste a link from the web.
+        </p>
+      </div>
+      <button
+        type="button"
+        onClick={onCancel}
+        className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-100"
+      >
+        Cancel
+      </button>
+    </header>
+    <form className="space-y-6" onSubmit={onSubmit}>
+      <div className="grid gap-4 md:grid-cols-2">
+        <FieldInput
+          name="name"
+          label="Restaurant name"
+          value={form.name}
+          onChange={onChange}
+          required
+        />
+        <FieldInput
+          name="cuisine"
+          label="Cuisine"
+          placeholder="Vietnamese Fusion"
+          value={form.cuisine}
+          onChange={onChange}
+        />
+        <FieldInput
+          name="phone"
+          label="Hotline"
+          placeholder="+84 ..."
+          value={form.phone}
+          onChange={onChange}
+        />
+        <FieldInput
+          name="email"
+          label="Email"
+          type="email"
+          placeholder="contact@restaurant.com"
+          value={form.email}
+          onChange={onChange}
+        />
+      </div>
+      <FieldInput
+        name="description"
+        label="Short description"
+        as="textarea"
+        rows={3}
+        placeholder="Introduce your brand, signature dishes, or ambiance."
+        value={form.description}
+        onChange={onChange}
+      />
+      <FieldInput
+        name="about"
+        label="About / Story"
+        as="textarea"
+        rows={4}
+        placeholder="Share the story of your restaurant, chef, and dining experience."
+        value={form.about}
+        onChange={onChange}
+      />
+
+      <div className="grid gap-6 md:grid-cols-2">
+        <div className="space-y-3">
+          <SectionTitle
+            title="Logo"
+            subtitle="Ideal aspect ratio 1:1. Upload or paste a direct image URL."
+          />
+          <div className="flex items-center gap-4">
+            <div className="h-24 w-24 overflow-hidden rounded-xl border border-dashed border-emerald-200 bg-emerald-50">
+              {logoPreview ? (
+                <img src={logoPreview} alt="Logo preview" className="h-full w-full object-cover" />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center text-xs text-emerald-500">
+                  Logo
+                </div>
+              )}
+            </div>
+            <div className="space-y-2">
+              <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-emerald-500 px-3 py-2 text-xs font-semibold text-emerald-600 hover:bg-emerald-50">
+                Upload device image
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(event) => onFileChange(event, "logoUrl")}
+                />
+              </label>
+              <input
+                name="logoUrl"
+                value={form.logoUrl}
+                onChange={onChange}
+                placeholder="https://example.com/logo.png"
+                className="w-full rounded-lg border border-slate-200 py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/60"
+              />
+            </div>
+          </div>
+        </div>
+        <div className="space-y-3">
+          <SectionTitle
+            title="Cover photo"
+            subtitle="Displayed in the restaurant hero section. Upload landscape images."
+          />
+          <div className="h-32 w-full overflow-hidden rounded-xl border border-dashed border-emerald-200 bg-emerald-50">
+            {coverPreview ? (
+              <img src={coverPreview} alt="Cover preview" className="h-full w-full object-cover" />
+            ) : (
+              <div className="flex h-full w-full items-center justify-center text-xs text-emerald-500">
+                Cover image
+              </div>
+            )}
+          </div>
+          <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-emerald-500 px-3 py-2 text-xs font-semibold text-emerald-600 hover:bg-emerald-50">
+            Upload cover image
+            <input
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(event) => onFileChange(event, "coverPhoto")}
+            />
+          </label>
+          <input
+            name="coverPhoto"
+            value={form.coverPhoto}
+            onChange={onChange}
+            placeholder="https://example.com/cover.jpg"
+            className="w-full rounded-lg border border-slate-200 py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/60"
+          />
+        </div>
+      </div>
+
+      <div className="flex justify-end">
+        <button
+          type="submit"
+          disabled={isSubmitting}
+          className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {isSubmitting ? "Saving..." : "Save restaurant"}
+        </button>
+      </div>
+    </form>
+  </section>
+);
+const RestaurantSummary = ({ restaurant, onEdit, onCreateBranch }) => (
+  <section className="rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
+    <div className="flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
+      <div className="flex items-start gap-4">
+        <div className="h-24 w-24 overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
+          {restaurant.logoUrl ? (
+            <img src={restaurant.logoUrl} alt={`${restaurant.name} logo`} className="h-full w-full object-cover" />
+          ) : (
+            <div className="flex h-full w-full items-center justify-center text-xs text-slate-400">Logo</div>
+          )}
+        </div>
+        <div className="space-y-2">
+          <div>
+            <h2 className="text-2xl font-semibold text-slate-900">{restaurant.name}</h2>
+            <p className="text-sm text-slate-600">
+              {restaurant.cuisine ? `${restaurant.cuisine} cuisine` : "Cuisine not specified"}
+            </p>
+          </div>
+          <p className="text-sm text-slate-600">
+            {restaurant.about || restaurant.description || "Tell guests about your concept, chef, and experience."}
+          </p>
+          <div className="flex flex-wrap gap-3 text-sm text-slate-600">
+            <span className="inline-flex items-center gap-2">
+              <span className="font-semibold">Hotline:</span>
+              {restaurant.phone || "Updating"}
+            </span>
+            <span className="inline-flex items-center gap-2">
+              <span className="font-semibold">Email:</span>
+              {restaurant.email || "Updating"}
+            </span>
+          </div>
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          onClick={onEdit}
+          className="rounded-lg border border-emerald-500 px-4 py-2 text-sm font-semibold text-emerald-600 hover:bg-emerald-50"
+        >
+          Edit
+        </button>
+        <button
+          type="button"
+          onClick={onCreateBranch}
+          className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-600"
+        >
+          Create branch
+        </button>
+      </div>
+    </div>
+  </section>
+);
+
+const RestaurantHero = ({ restaurant, branches }) => (
+  <section className="relative overflow-hidden rounded-2xl border border-slate-100 bg-gradient-to-r p-[1px] shadow-lg">
+    <div className="relative flex flex-col gap-6 rounded-[calc(theme(borderRadius.2xl)-1px)] bg-white/95 p-6 backdrop-blur">
+      <div className="relative h-48 w-full overflow-hidden rounded-xl bg-slate-100">
+        {restaurant.coverPhoto ? (
+          <>
+            <img src={restaurant.coverPhoto} alt="Restaurant cover" className="h-full w-full object-cover" />
+            <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
+          </>
+        ) : (
+          <div className="flex h-full w-full items-center justify-center text-sm font-medium text-slate-500">
+            Upload a cover photo to preview it here.
+          </div>
+        )}
+        <div className="absolute bottom-4 left-4 text-white">
+          <p className="text-sm uppercase tracking-wide text-white/80">Hero preview</p>
+          <h3 className="text-2xl font-semibold">{restaurant.name}</h3>
+        </div>
+      </div>
+      <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+        <div className="space-y-3">
+          <h3 className="text-xl font-semibold text-slate-900">About this restaurant</h3>
+          <p className="text-sm leading-relaxed text-slate-600">
+            {restaurant.about ||
+              restaurant.description ||
+              "Use this space to highlight chef stories, best sellers, or dining experiences. The values come directly from your restaurant profile."}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {(() => {
+              const tags =
+                Array.isArray(restaurant.tags) && restaurant.tags.length
+                  ? restaurant.tags
+                  : restaurant.cuisine
+                  ? [restaurant.cuisine]
+                  : [];
+              return tags.length ? (
+                tags.map((tag) => (
+                  <span
+                    key={tag}
+                    className="inline-flex items-center rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-600"
+                  >
+                    {tag}
+                  </span>
+                ))
+              ) : (
+                <span className="text-xs text-slate-500">Add tags to highlight dining options.</span>
+              );
+            })()}
+          </div>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-3">
+          <HeroStat label="Branches" value={branches.length} />
+          <HeroStat label="Primary branch" value={branches.find((branch) => branch.isPrimary)?.name || "Not set"} />
+          <HeroStat
+            label="Average rating"
+            value={(() => {
+              const ratedValues = branches
+                .map((branch) => Number(branch.ratingSummary?.avgRating ?? branch.rating ?? 0))
+                .filter((value) => Number.isFinite(value) && value > 0);
+              if (!ratedValues.length) return "0.0";
+              const avg = ratedValues.reduce((sum, value) => sum + value, 0) / ratedValues.length;
+              return avg.toFixed(1);
+            })()}
+          />
+        </div>
+      </div>
+    </div>
+  </section>
+);
+
+const HeroStat = ({ label, value }) => (
+  <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-center shadow-sm">
+    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
+    <p className="mt-1 text-lg font-semibold text-slate-900">{value}</p>
+  </div>
+);
+const BranchManagement = ({
+  branches,
+  branchCount,
+  branchRangeStart,
+  branchRangeEnd,
+  totalPages,
+  currentPage,
+  branchSearch,
+  branchFilter,
+  showForm,
+  branchForm,
+  openingHours,
+  specialHours,
+  specialEnabled,
+  isSubmittingBranch,
+  onSearchChange,
+  onFilterChange,
+  onResetFilters,
+  onPageChange,
+  onCreateBranch,
+  onEditBranch,
+  onCancelForm,
+  onBranchFieldChange,
+  onOpeningHourChange,
+  onSpecialToggle,
+  onAddSpecialHour,
+  onUpdateSpecialHour,
+  onRemoveSpecialHour,
+  onSubmitBranch,
+  onToggleBranchStatus,
+}) => (
+  <section className="space-y-6">
+    <div className="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
+      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+        <div className="flex w-full flex-col gap-3 md:flex-row md:items-center">
+          <input
+            value={branchSearch}
+            onChange={(event) => onSearchChange(event.target.value)}
+            placeholder="Search branches by name, contact or location..."
+            className="w-full rounded-lg border border-slate-200 py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/60"
+            type="search"
+          />
+          <select
+            value={branchFilter}
+            onChange={(event) => onFilterChange(event.target.value)}
+            className="w-full rounded-lg border border-slate-200 py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/60 md:w-44"
+          >
+            <option value="all">All branches</option>
+            <option value="primary">Primary only</option>
+            <option value="secondary">Secondary branches</option>
+            <option value="open">Open now</option>
+            <option value="closed">Closed</option>
+          </select>
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-xs text-slate-500">
+            {branchCount
+              ? `Showing ${branchRangeStart}-${branchRangeEnd} of ${branchCount} branches`
+              : "No branches available"}
+          </span>
+          <button
+            type="button"
+            onClick={onResetFilters}
+            className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-100"
+          >
+            Reset filters
+          </button>
+          <button
+            type="button"
+            onClick={onCreateBranch}
+            disabled={showForm}
+            className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Create new branch
+          </button>
+        </div>
+      </div>
+    </div>
+
+    {showForm ? (
+      <BranchForm
+        form={branchForm}
+        openingHours={openingHours}
+        specialHours={specialHours}
+        specialEnabled={specialEnabled}
+        onFieldChange={onBranchFieldChange}
+        onOpeningHourChange={onOpeningHourChange}
+        onSpecialToggle={onSpecialToggle}
+        onAddSpecialHour={onAddSpecialHour}
+        onUpdateSpecialHour={onUpdateSpecialHour}
+        onRemoveSpecialHour={onRemoveSpecialHour}
+        onSubmit={onSubmitBranch}
+        isSubmitting={isSubmittingBranch}
+        onCancel={onCancelForm}
+      />
+    ) : null}
+
+    <div className="grid gap-4">
+      {branches.length ? (
+        branches.map((branch) => (
+          <BranchCard
+            key={branch.id}
+            branch={branch}
+            onToggleStatus={() => onToggleBranchStatus(branch.id)}
+            onEdit={() => onEditBranch(branch)}
+          />
+        ))
+      ) : (
+        <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-6 text-sm text-slate-600 shadow-sm">
+          No branches match the current filters. Try adjusting search keywords or filter options.
+        </div>
+      )}
+    </div>
+
+    {totalPages > 1 ? (
+      <div className="flex flex-col gap-2 rounded-2xl border border-slate-100 bg-white p-4 text-sm shadow-sm md:flex-row md:items-center md:justify-between">
+        <span className="text-xs text-slate-500">Page {currentPage} of {totalPages}</span>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => onPageChange(Math.max(1, currentPage - 1))}
+            disabled={currentPage === 1}
+            className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Previous
+          </button>
+          <button
+            type="button"
+            onClick={() => onPageChange(Math.min(totalPages, currentPage + 1))}
+            disabled={currentPage === totalPages}
+            className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Next
+          </button>
+        </div>
+      </div>
+    ) : null}
+  </section>
+);
+const BranchCard = ({ branch, onToggleStatus, onEdit }) => {
+  const statusDot = branch.isOpen ? "bg-emerald-500" : "bg-rose-500";
+  const statusLabel = branch.isOpen ? "Open now" : "Closed";
+  const badgeLabel = branch.isPrimary ? "Primary" : `Branch ${branch.branchNumber}`;
+  const coords = (() => {
+    const lat = branch.latitude != null ? Number(branch.latitude).toFixed(4) : null;
+    const lon = branch.longitude != null ? Number(branch.longitude).toFixed(4) : null;
+    if (lat && lon) return `${lat}, ${lon}`;
+    if (lat) return lat;
+    if (lon) return lon;
+    return "...";
+  })();
+  const schedule = formatOpeningSchedule(branch.openingHours);
+  const ratingValue = Number(
+    branch.ratingSummary?.avgRating ?? branch.rating ?? branch.ratingSummary?.avg_branch_rating ?? 0,
+  );
+  const ratingCount = Number(branch.ratingSummary?.totalRatings ?? branch.totalRatings ?? 0);
+
+  return (
+    <div className="relative flex flex-col gap-4 rounded-2xl border border-slate-100 bg-white p-5 shadow-sm lg:flex-row lg:items-center">
+      <span
+        className={`absolute right-4 top-4 inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${
+          branch.isPrimary ? "bg-amber-400 text-amber-900" : "bg-slate-100 text-slate-600"
+        }`}
+      >
+        {badgeLabel}
+      </span>
+      <div className="flex items-center gap-4">
+        <div className="h-28 w-36 overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
+          {branch.imageUrl ? (
+            <img src={branch.imageUrl} alt={branch.name} className="h-full w-full object-cover" />
+          ) : (
+            <div className="flex h-full w-full items-center justify-center text-xs text-slate-400">Branch image</div>
+          )}
+        </div>
+        <div className="space-y-3">
+          <div>
+            <h3 className="text-lg font-semibold text-slate-900">{branch.name}</h3>
+            <p className="text-xs uppercase tracking-wide text-slate-500">{badgeLabel}</p>
+          </div>
+          <div className="grid gap-1 text-sm text-slate-600">
+            <span className="inline-flex items-center gap-2">
+              <span className={`inline-block h-2.5 w-2.5 rounded-full ${statusDot}`} />
+              {statusLabel}
+            </span>
+            <span className="inline-flex items-center gap-2">
+              <span className="font-semibold">Phone:</span>
+              {branch.branchPhone || "Updating"}
+            </span>
+            <span className="inline-flex items-center gap-2">
+              <span className="font-semibold">Email:</span>
+              {branch.branchEmail || "Updating"}
+            </span>
+            <span className="inline-flex items-center gap-2">
+              <span className="font-semibold">Address:</span>
+              {[branch.street, branch.ward, branch.district, branch.city].filter(Boolean).join(", ") || "Updating"}
+            </span>
+            <span className="inline-flex items-center gap-2">
+              <span className="font-semibold">Coordinates:</span>
+              {coords}
+            </span>
+            <span className="inline-flex items-center gap-2">
+              <span className="font-semibold">Schedule:</span>
+              {schedule}
+            </span>
+          </div>
+        </div>
+      </div>
+      <div className="flex flex-1 flex-col gap-4 lg:items-end">
+        <RatingBadge rating={ratingValue} count={ratingCount} />
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={onToggleStatus}
+            className="rounded-lg border border-emerald-500 px-3 py-1 text-xs font-semibold text-emerald-600 hover:bg-emerald-50"
+          >
+            {branch.isOpen ? "Mark as closed" : "Mark as open"}
+          </button>
+          <button
+            type="button"
+            onClick={onEdit}
+            className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-100"
+          >
+            Edit branch
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const RatingBadge = ({ rating, count = 0 }) => {
+  const display = Number.isFinite(rating) && rating > 0 ? rating : 0;
+  const stars = Array.from({ length: 5 }, (_, index) => index + 1);
+  return (
+    <div className="inline-flex items-center gap-2 rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-600">
+      <span className="flex items-center gap-1">
+        {stars.map((star) => (
+          <FaStar key={star} className={star <= display ? "text-amber-400" : "text-slate-300"} />
+        ))}
+      </span>
+      <span>{display.toFixed(1)}</span>
+      <span className="text-amber-500">({count})</span>
+    </div>
+  );
+};
+const BranchForm = ({
+  form,
+  openingHours,
+  specialHours,
+  specialEnabled,
+  isSubmitting,
+  onFieldChange,
+  onOpeningHourChange,
+  onSpecialToggle,
+  onAddSpecialHour,
+  onUpdateSpecialHour,
+  onRemoveSpecialHour,
+  onSubmit,
+  onCancel,
+}) => (
+  <section className="rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
+    <header className="mb-4 flex items-center justify-between">
+      <div>
+        <h2 className="text-lg font-semibold text-slate-900">{form.id ? "Edit branch" : "Create branch"}</h2>
+        <p className="text-sm text-slate-600">
+          Map the fields to restaurant_branches, branch_opening_hours, and branch_special_hours tables.
+        </p>
+      </div>
+      <button
+        type="button"
+        onClick={onCancel}
+        className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-100"
+      >
+        Cancel
+      </button>
+    </header>
+    <form className="space-y-6" onSubmit={onSubmit}>
+      <div className="grid gap-4 md:grid-cols-2">
+        <FieldInput
+          name="name"
+          label="Branch name"
+          value={form.name}
+          onChange={onFieldChange}
+          required
+        />
+        <FieldInput
+          name="branchNumber"
+          label="Branch number"
+          type="number"
+          min="1"
+          value={form.branchNumber}
+          onChange={onFieldChange}
+        />
+        <FieldInput
+          name="branchPhone"
+          label="Branch phone"
+          value={form.branchPhone}
+          onChange={onFieldChange}
+          placeholder="+84 ..."
+        />
+        <FieldInput
+          name="branchEmail"
+          label="Branch email"
+          type="email"
+          value={form.branchEmail}
+          onChange={onFieldChange}
+          placeholder="branch@example.com"
+        />
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <FieldInput
+          name="imageUrl"
+          label="Branch image URL"
+          value={form.imageUrl}
+          onChange={onFieldChange}
+          placeholder="https://example.com/photo.jpg"
+        />
+        <div className="flex flex-wrap gap-4 text-sm text-slate-600">
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              name="isPrimary"
+              checked={form.isPrimary}
+              onChange={onFieldChange}
+              className="h-4 w-4 rounded border-slate-300 text-emerald-500 focus:ring-emerald-500/50"
+            />
+            Primary branch
+          </label>
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              name="isOpen"
+              checked={form.isOpen}
+              onChange={onFieldChange}
+              className="h-4 w-4 rounded border-slate-300 text-emerald-500 focus:ring-emerald-500/50"
+            />
+            Currently operating
+          </label>
+        </div>
+      </div>
+
+      <div>
+        <SectionTitle title="Branch address" subtitle="street, ward, district, city fields from restaurant_branches." />
+        <div className="mt-3 grid gap-3 md:grid-cols-2">
+          <input
+            name="street"
+            value={form.street}
+            onChange={onFieldChange}
+            placeholder="Street"
+            className="rounded-lg border border-slate-200 py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/60"
+            required
+          />
+          <input
+            name="ward"
+            value={form.ward}
+            onChange={onFieldChange}
+            placeholder="Ward"
+            className="rounded-lg border border-slate-200 py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/60"
+          />
+          <input
+            name="district"
+            value={form.district}
+            onChange={onFieldChange}
+            placeholder="District"
+            className="rounded-lg border border-slate-200 py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/60"
+          />
+          <input
+            name="city"
+            value={form.city}
+            onChange={onFieldChange}
+            placeholder="City"
+            className="rounded-lg border border-slate-200 py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/60"
+            required
+          />
+        </div>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <FieldInput
+          name="latitude"
+          label="Latitude"
+          value={form.latitude}
+          onChange={onFieldChange}
+          placeholder="10.7731"
+        />
+        <FieldInput
+          name="longitude"
+          label="Longitude"
+          value={form.longitude}
+          onChange={onFieldChange}
+          placeholder="106.7009"
+        />
+      </div>
+
+      <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+        <SectionTitle title="Opening hours" subtitle="branch_opening_hours records." />
+        <div className="mt-3 space-y-3">
+          {openingHours.map((item, index) => (
+            <div
+              key={item.dayOfWeek}
+              className="flex flex-col gap-2 rounded-lg bg-white p-3 shadow-sm md:flex-row md:items-center"
+            >
+              <span className="w-32 text-sm font-medium text-slate-700">{DAY_LABELS[item.dayOfWeek]}</span>
+              <div className="flex flex-1 items-center gap-2">
+                <input
+                  type="time"
+                  value={item.openTime}
+                  onChange={(event) => onOpeningHourChange(index, "openTime", event.target.value)}
+                  disabled={item.isClosed}
+                  className="w-28 rounded-lg border border-slate-200 py-1 px-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/60 disabled:bg-slate-100"
+                />
+                <span className="text-sm text-slate-500">to</span>
+                <input
+                  type="time"
+                  value={item.closeTime}
+                  onChange={(event) => onOpeningHourChange(index, "closeTime", event.target.value)}
+                  disabled={item.isClosed}
+                  className="w-28 rounded-lg border border-slate-200 py-1 px-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/60 disabled:bg-slate-100"
+                />
+              </div>
+              <label className="flex items-center gap-2 text-xs text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={item.isClosed}
+                  onChange={(event) => onOpeningHourChange(index, "isClosed", event.target.checked)}
+                  className="h-4 w-4 rounded border-slate-300 text-emerald-500 focus:ring-emerald-500/50"
+                />
+                Closed
+              </label>
+              <label className="flex items-center gap-2 text-xs text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={item.overnight}
+                  onChange={(event) => onOpeningHourChange(index, "overnight", event.target.checked)}
+                  className="h-4 w-4 rounded border-slate-300 text-emerald-500 focus:ring-emerald-500/50"
+                />
+                Overnight
+              </label>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+          <SectionTitle title="Special hours" subtitle="branch_special_hours optional overrides." />
+          <label className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+            <input
+              type="checkbox"
+              checked={specialEnabled}
+              onChange={(event) => onSpecialToggle(event.target.checked)}
+              className="h-4 w-4 rounded border-slate-300 text-emerald-500 focus:ring-emerald-500/50"
+            />
+            Enable special hours
+          </label>
+        </div>
+
+        {specialEnabled ? (
+          <>
+            <div className="mt-3 flex items-center justify-between">
+              <p className="text-xs text-slate-500">Override hours for holidays or events.</p>
+              <button
+                type="button"
+                onClick={onAddSpecialHour}
+                className="text-xs font-semibold text-emerald-600 hover:text-emerald-700"
+              >
+                + Add special day
+              </button>
+            </div>
+            {specialHours.length === 0 ? (
+              <p className="mt-3 text-xs text-slate-500">No special schedules yet.</p>
+            ) : (
+              <div className="mt-3 space-y-2">
+                {specialHours.map((item, index) => (
+                  <div
+                    key={index}
+                    className="flex flex-col gap-2 rounded-lg bg-white p-3 shadow-sm md:flex-row md:items-center"
+                  >
+                    <input
+                      type="date"
+                      value={item.date}
+                      onChange={(event) => onUpdateSpecialHour(index, "date", event.target.value)}
+                      className="rounded-lg border border-slate-200 py-1 px-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/60"
+                    />
+                    <div className="flex flex-1 items-center gap-2">
+                      <input
+                        type="time"
+                        value={item.openTime}
+                        onChange={(event) => onUpdateSpecialHour(index, "openTime", event.target.value)}
+                        disabled={item.isClosed}
+                        className="w-28 rounded-lg border border-slate-200 py-1 px-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/60 disabled:bg-slate-100"
+                      />
+                      <span className="text-sm text-slate-500">to</span>
+                      <input
+                        type="time"
+                        value={item.closeTime}
+                        onChange={(event) => onUpdateSpecialHour(index, "closeTime", event.target.value)}
+                        disabled={item.isClosed}
+                        className="w-28 rounded-lg border border-slate-200 py-1 px-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/60 disabled:bg-slate-100"
+                      />
+                    </div>
+                    <label className="flex items-center gap-2 text-xs text-slate-600">
+                      <input
+                        type="checkbox"
+                        checked={item.isClosed}
+                        onChange={(event) => onUpdateSpecialHour(index, "isClosed", event.target.checked)}
+                        className="h-4 w-4 rounded border-slate-300 text-emerald-500 focus:ring-emerald-500/50"
+                      />
+                      Closed
+                    </label>
+                    <label className="flex items-center gap-2 text-xs text-slate-600">
+                      <input
+                        type="checkbox"
+                        checked={item.overnight}
+                        onChange={(event) => onUpdateSpecialHour(index, "overnight", event.target.checked)}
+                        className="h-4 w-4 rounded border-slate-300 text-emerald-500 focus:ring-emerald-500/50"
+                      />
+                      Overnight
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => onRemoveSpecialHour(index)}
+                      className="text-xs font-semibold text-rose-500 hover:text-rose-600"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        ) : (
+          <p className="mt-3 text-xs text-slate-500">
+            Turn on special hours for public holidays or custom schedules.
+          </p>
+        )}
+      </div>
+
+      <div className="flex justify-end">
+        <button
+          type="submit"
+          disabled={isSubmitting}
+          className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {isSubmitting ? "Saving..." : form.id ? "Save branch" : "Create branch"}
+        </button>
+      </div>
+    </form>
+  </section>
+);
+
+const SectionTitle = ({ title, subtitle }) => (
+  <div className="space-y-1">
+    <p className="text-sm font-semibold text-slate-800">{title}</p>
+    {subtitle ? <p className="text-xs text-slate-500">{subtitle}</p> : null}
+  </div>
+);
+
+const FieldInput = ({ label, as = "input", className = "", ...props }) => {
   const Component = as;
   return (
     <div className="space-y-2">
@@ -1561,38 +1545,23 @@ const FieldInput = ({ label, as = "input", ...props }) => {
       </label>
       <Component
         {...props}
-        className={`w-full rounded-lg border border-slate-200 bg-white py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/60 ${props.className || ""}`}
+        className={`w-full rounded-lg border border-slate-200 bg-white py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/60 ${className}`}
       />
     </div>
   );
 };
 
-const InfoRow = ({ label, value, fallback = "Not provided" }) => {
-  const display =
-    value === null || value === undefined || value === ""
-      ? fallback
-      : value;
-  return (
-    <div className="flex flex-col">
-      <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-        {label}
-      </span>
-      <span className="text-sm text-slate-700">{display}</span>
-    </div>
-  );
-};
-
-const InfoCard = ({ label, value, fallback = "Not provided" }) => {
-  const display =
-    value === null || value === undefined || value === ""
-      ? fallback
-      : value;
-  return (
-    <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm">
-      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
-      <p className="mt-1 text-sm text-slate-700">{display}</p>
-    </div>
-  );
-};
-
 export default RestaurantProfile;
+
+
+
+
+
+
+
+
+
+
+
+
+

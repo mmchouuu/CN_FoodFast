@@ -12,10 +12,9 @@ const customersRoutes = require('./routes/customers.routes');
 const restaurantsRoutes = require('./routes/restaurants.routes');
 const adminRoutes = require('./routes/admin.routes');
 const usersRoutes = require('./routes/users.routes');
-const catalogRoutes = require('./routes/catalog.routes');
 
 const app = express();
-app.use(bodyParser.json());
+app.use(bodyParser.json({ limit: '10mb' }));
 // Basic CORS for development and SPA usage
 app.use((req, res, next) => {
   const origin = req.headers.origin || '*';
@@ -38,7 +37,6 @@ app.use('/api/customers', customersRoutes);
 app.use('/api/customer', customersRoutes);
 app.use('/api/restaurants', restaurantsRoutes);
 app.use('/api/admin', adminRoutes);
-app.use('/api/catalog/restaurants', catalogRoutes);
 
 // health
 app.get('/health', health);

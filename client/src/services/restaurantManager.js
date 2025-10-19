@@ -1,6 +1,6 @@
 import api from './api';
 
-const basePath = '/api/catalog/restaurants';
+const basePath = '/api/restaurants';
 
 const restaurantManagerService = {
   async getByOwner(ownerId) {
@@ -25,6 +25,11 @@ const restaurantManagerService = {
 
   async updateBranch(restaurantId, branchId, payload) {
     const { data } = await api.put(`${basePath}/${restaurantId}/branches/${branchId}`, payload);
+    return data;
+  },
+
+  async deleteBranch(restaurantId, branchId) {
+    const { data } = await api.delete(`${basePath}/${restaurantId}/branches/${branchId}`);
     return data;
   },
 
