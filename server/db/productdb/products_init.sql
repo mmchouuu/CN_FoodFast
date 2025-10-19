@@ -11,9 +11,11 @@ CREATE TABLE IF NOT EXISTS restaurants (
   owner_id             UUID NOT NULL, 
   name                 VARCHAR(150) NOT NULL,
   description          TEXT,
+  about                TEXT,
   cuisine              VARCHAR(100),                 -- loại ẩm thực chính
   phone                VARCHAR(50),                  -- hotline/CSKH
   email                VARCHAR(150),                 -- email CSKH
+  logo                 TEXT[],
   images               TEXT[],                       -- ảnh thương hiệu
   is_active            BOOLEAN DEFAULT TRUE,         -- thương hiệu còn hoạt động?
   avg_branch_rating    NUMERIC(3,2) NOT NULL DEFAULT 0,  -- điểm TB của toàn bộ chi nhánh
@@ -34,8 +36,8 @@ CREATE TABLE IF NOT EXISTS restaurant_branches (
   restaurant_id  UUID NOT NULL REFERENCES restaurants(id) ON DELETE CASCADE,
   branch_number  INT NOT NULL,                 -- mã chi nhánh nội bộ
   name           VARCHAR(150),                 -- tên hiển thị chi nhánh
-  brand_phone    VARCHAR(50),
-  brand_email    VARCHAR(150),
+  branch_phone   VARCHAR(50),
+  branch_email   VARCHAR(150),
   rating         NUMERIC(3,2) DEFAULT 0 CHECK (rating >= 0 AND rating <= 5),
   images         TEXT[],                       -- hình ảnh riêng của chi nhánh
   street         VARCHAR(200) NOT NULL,

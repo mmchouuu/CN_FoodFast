@@ -24,8 +24,7 @@ ChartJS.register(
     Legend,
 );
 
-const containerClasses =
-    "md:px-8 py-6 xl:py-8 m-1 sm:m-3 h-[97vh] overflow-y-auto w-full lg:w-11/12 bg-primary shadow rounded-xl";
+const containerClasses = "bg-white shadow-sm rounded-2xl p-6 space-y-6";
 
 const monthLabels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const monthlyRevenue = [32000000, 28500000, 35400000, 36800000, 40200000, 41800000, 45000000, 43700000, 46200000, 49800000, 47200000, 52500000];
@@ -191,3 +190,9 @@ const StatCard = ({ label, value, subtitle }) => (
 );
 
 export default RevenueStatistics;
+
+
+
+
+
+

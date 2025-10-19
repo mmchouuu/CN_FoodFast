@@ -54,4 +54,103 @@ async function ownerAccount(req, res, next) {
   } catch (err) { next(err); }
 }
 
-module.exports = { register, verify, login, status, ownerAccount };
+function sendCatalogError(err, res, next) {
+  if (err.status) {
+    return res.status(err.status).json(err.data || { message: err.message });
+  }
+  return next(err);
+}
+
+async function createRestaurant(req, res, next) {
+  try {
+    const result = await restaurantClient.createRestaurant(req.body, req);
+    return res.status(201).json(result);
+  } catch (err) { return sendCatalogError(err, res, next); }
+}
+
+async function updateRestaurant(req, res, next) {
+  try {
+    const result = await restaurantClient.updateRestaurant(req.params.id, req.body, req);
+    return res.json(result);
+  } catch (err) { return sendCatalogError(err, res, next); }
+}
+
+async function deleteRestaurant(req, res, next) {
+  try {
+    const result = await restaurantClient.deleteRestaurant(req.params.id, req);
+    return res.json(result);
+  } catch (err) { return sendCatalogError(err, res, next); }
+}
+
+async function getRestaurant(req, res, next) {
+  try {
+    const result = await restaurantClient.getRestaurant(req.params.id, req);
+    if (!result) {
+      return res.status(404).json({ message: 'Restaurant not found' });
+    }
+    return res.json(result);
+  } catch (err) { return sendCatalogError(err, res, next); }
+}
+
+async function getOwnerRestaurants(req, res, next) {
+  try {
+    const result = await restaurantClient.getRestaurantsByOwner(req.params.ownerId, req);
+    return res.json(result);
+  } catch (err) { return sendCatalogError(err, res, next); }
+}
+
+async function getOwnerRestaurantDetail(req, res, next) {
+  try {
+    const result = await restaurantClient.getRestaurantByOwner(req.params.ownerId, req);
+    if (!result) {
+      return res.status(404).json({ message: 'Restaurant not found' });
+    }
+    return res.json(result);
+  } catch (err) { return sendCatalogError(err, res, next); }
+}
+
+async function listBranches(req, res, next) {
+  try {
+    const result = await restaurantClient.listBranches(req.params.id, req);
+    return res.json(result);
+  } catch (err) { return sendCatalogError(err, res, next); }
+}
+
+async function createBranch(req, res, next) {
+  try {
+    const result = await restaurantClient.createBranch(req.params.id, req.body, req);
+    return res.status(201).json(result);
+  } catch (err) { return sendCatalogError(err, res, next); }
+}
+
+async function updateBranch(req, res, next) {
+  try {
+    const result = await restaurantClient.updateBranch(req.params.id, req.params.branchId, req.body, req);
+    return res.json(result);
+  } catch (err) { return sendCatalogError(err, res, next); }
+}
+
+async function deleteBranch(req, res, next) {
+  try {
+    const result = await restaurantClient.deleteBranch(req.params.id, req.params.branchId, req);
+    return res.json(result);
+  } catch (err) { return sendCatalogError(err, res, next); }
+}
+
+module.exports = {
+  register,
+  verify,
+  login,
+  status,
+  ownerAccount,
+  createRestaurant,
+  updateRestaurant,
+  deleteRestaurant,
+  getRestaurant,
+  getOwnerRestaurants,
+  getOwnerRestaurantDetail,
+  listBranches,
+  createBranch,
+  updateBranch,
+  deleteBranch,
+};
