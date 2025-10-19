@@ -4,8 +4,6 @@ import React, { createContext, useState, useContext, useEffect } from 'react';
 import toast from 'react-hot-toast';
 
 // --- Auth Systems ---
-import { useAuth0 } from '@auth0/auth0-react';
-import { useUser as useClerkUser } from "@clerk/clerk-react";
 import authService from '../services/auth';
 import {
   dishes as menuDishes,
@@ -75,13 +73,6 @@ export const AppContextProvider = ({ children }) => {
     const currency = import.meta.env.VITE_CURRENCY || "VND ";
     const delivery_charges = 15000;
 
-    // --- Auth0 ---
-    const { user: auth0User, isAuthenticated: isAuth0, loginWithRedirect, logout: logoutAuth0 } = useAuth0();
-
-    // --- Clerk ---
-    const { user: clerkUser } = useClerkUser();
-    const isClerkAuthenticated = Boolean(clerkUser);
-
     // --- Local auth (via API Gateway) ---
     const [authToken, setAuthToken] = useState(() => localStorage.getItem('auth_token'));
     const [authProfile, setAuthProfile] = useState(() => {
@@ -97,7 +88,7 @@ export const AppContextProvider = ({ children }) => {
     });
 
     // --- Unified user object ---
-    const user = authProfile || auth0User || clerkUser || null;
+    const user = authProfile ||  null;
 
     // --- Cart Functions ---
     const addToCart = (itemId, size, quantity = 1) => {
@@ -421,9 +412,6 @@ export const AppContextProvider = ({ children }) => {
         requestPasswordReset,
         logoutLocal,
         verifyOtp,
-        // Third-party auth (optional)
-        loginWithRedirect,      // For Auth0
-        logoutAuth0
     };
 
     return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
