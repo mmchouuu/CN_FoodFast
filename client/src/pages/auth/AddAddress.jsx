@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import toast from "react-hot-toast";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAppContext } from "../../context/AppContext";
 
@@ -10,7 +11,7 @@ const LABEL_OPTIONS = [
 ];
 
 const AddAddress = () => {
-  const { addNewAddress, setSelectedAddressId } = useAppContext();
+  const { addNewAddress, setSelectedAddressId, isAuthenticated } = useAppContext();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -25,15 +26,14 @@ const AddAddress = () => {
   const [instructions, setInstructions] = useState("");
   const [isDefault, setIsDefault] = useState(true);
 
-  const onSubmit = (event) => {
+  const onSubmit = async (event) => {
     event.preventDefault();
     const computedLabel =
       label === "custom"
         ? customLabel.trim() || "Other"
         : LABEL_OPTIONS.find((item) => item.id === label)?.label || "Home";
-    const id = `addr-${Date.now()}`;
-    addNewAddress({
-      id,
+
+    const payload = {
       label: computedLabel,
       recipient: "",
       phone: "",
@@ -43,14 +43,43 @@ const AddAddress = () => {
       city,
       instructions,
       isDefault,
-    });
-    if (isDefault) {
-      setSelectedAddressId(id);
+    };
+
+    if (!isAuthenticated) {
+      try {
+        localStorage.setItem(
+          "pending_address",
+          JSON.stringify({
+            ...payload,
+            isDefault,
+          })
+        );
+      } catch {
+        /* no-op */
+      }
+      toast.success("Please log in to finish saving your address.");
+      const redirectTo = location?.state?.redirectTo || "/checkout";
+      navigate("/auth/login", {
+        replace: true,
+        state: { email: defaultEmail, redirectTo },
+      });
+      return;
     }
-    navigate("/auth/login", {
-      replace: true,
-      state: { email: defaultEmail },
-    });
+
+    try {
+      const created = await addNewAddress(payload);
+      if (created?.id) {
+        setSelectedAddressId(created.id);
+      }
+      toast.success("Address saved successfully.");
+      const redirectTo = location?.state?.redirectTo || "/checkout";
+      navigate(redirectTo, { replace: true });
+    } catch (error) {
+      const message =
+        error?.message ||
+        "Unable to save address without signing in. Please log in to continue.";
+      toast.error(message);
+    }
   };
 
   return (

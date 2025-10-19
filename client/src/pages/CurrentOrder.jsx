@@ -1,6 +1,10 @@
 import React from "react";
 import { Link } from "react-router-dom";
 import { useAppContext } from "../context/AppContext";
+import {
+  restaurantPlaceholderImage,
+  dishPlaceholderImage,
+} from "../utils/imageHelpers";
 
 const StatusDot = ({ completed }) => (
   <span
@@ -34,6 +38,18 @@ const CurrentOrder = () => {
   }
 
   const restaurant = getRestaurantById(order.restaurantId);
+  const restaurantSnapshot =
+    order.restaurantSnapshot || order.metadata?.restaurant_snapshot || {};
+  const restaurantDisplayName =
+    restaurant?.name ||
+    restaurantSnapshot?.name ||
+    "Restaurant";
+  const restaurantDisplayImage =
+    restaurant?.heroImage ||
+    (Array.isArray(restaurant?.images) ? restaurant.images[0] : null) ||
+    restaurantSnapshot?.heroImage ||
+    restaurantSnapshot?.image ||
+    restaurantPlaceholderImage;
   const courier = order.courier || {};
   const deliveryAddress = order.deliveryAddress || {};
   const hasTimeline = Array.isArray(order.timeline) && order.timeline.length > 0;
@@ -50,24 +66,39 @@ const CurrentOrder = () => {
     <div className="max-padd-container grid gap-6 py-24 lg:grid-cols-[2fr,1.2fr]">
       <section className="space-y-6">
         <header className="rounded-3xl bg-white p-8 shadow-sm">
-          <p className="text-sm uppercase text-gray-400">Current order</p>
-          <h1 className="text-3xl font-bold text-gray-900">
-            Order #{order.id}
-          </h1>
-          <p className="mt-2 text-sm text-gray-500">
-            Placed at{" "}
-            {new Date(order.placedAt).toLocaleTimeString([], {
-              hour: "2-digit",
-              minute: "2-digit",
-            })}{" "}
-            - Expected in {order.etaMinutes} minutes
-          </p>
-          <Link
-            to={`/restaurants/${order.restaurantId}`}
-            className="mt-3 inline-block text-sm font-semibold text-orange-500 hover:underline"
-          >
-            {restaurant?.name || "View restaurant"}
-          </Link>
+          <div className="flex items-start gap-4">
+            <img
+              src={restaurantDisplayImage}
+              alt={restaurantDisplayName}
+              className="h-20 w-20 flex-shrink-0 rounded-3xl object-cover"
+            />
+            <div className="flex-1">
+              <p className="text-sm uppercase text-gray-400">Current order</p>
+              <h1 className="text-3xl font-bold text-gray-900">
+                Order #{order.id}
+              </h1>
+              <p className="mt-2 text-sm text-gray-500">
+                Placed at{" "}
+                {new Date(order.placedAt).toLocaleTimeString([], {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}{" "}
+                - Expected in {order.etaMinutes} minutes
+              </p>
+              <Link
+                to={`/restaurants/${order.restaurantId}`}
+                className="mt-3 inline-block text-sm font-semibold text-orange-500 hover:underline"
+              >
+                {restaurantDisplayName}
+              </Link>
+              <Link
+                to={`/orders/${order.id}`}
+                className="mt-1 inline-block text-xs font-semibold text-gray-400 hover:text-orange-500"
+              >
+                View order details
+              </Link>
+            </div>
+          </div>
         </header>
 
         <div className="rounded-3xl bg-white p-8 shadow-sm">
@@ -77,7 +108,7 @@ const CurrentOrder = () => {
           <div className="mt-6 space-y-4">
             {hasTimeline ? (
               order.timeline.map((step) => (
-                <div key={step.id} className="flex items-start gap-4">
+                <div key={step.id || step.label} className="flex items-start gap-4">
                   <StatusDot completed={step.completed} />
                   <div>
                     <p
@@ -106,18 +137,38 @@ const CurrentOrder = () => {
           <ul className="mt-4 space-y-3 text-sm text-gray-600">
             {order.items.map((item, index) => {
               const dish = getDishById(item.dishId);
+              const snapshot = item.productSnapshot || {};
+              const dishTitle =
+                dish?.title ||
+                snapshot.title ||
+                snapshot.name ||
+                item.displayName ||
+                item.dishId;
+              const dishImage =
+                (Array.isArray(dish?.images) ? dish.images[0] : null) ||
+                snapshot.image ||
+                (Array.isArray(snapshot.images) ? snapshot.images[0] : null) ||
+                item.displayImage ||
+                dishPlaceholderImage;
               return (
                 <li
                   key={`${item.dishId}-${index}`}
-                  className="flex items-center justify-between"
+                  className="flex items-center justify-between gap-4"
                 >
-                  <div>
-                    <p className="font-semibold text-gray-900">
-                      {item.quantity} x {dish?.title || item.dishId}
-                    </p>
-                    <p className="text-xs text-gray-500">Size: {item.size}</p>
+                  <div className="flex items-center gap-4">
+                    <img
+                      src={dishImage}
+                      alt={dishTitle}
+                      className="h-14 w-14 rounded-2xl object-cover"
+                    />
+                    <div>
+                      <p className="font-semibold text-gray-900">
+                        {item.quantity} x {dishTitle}
+                      </p>
+                      <p className="text-xs text-gray-500">Size: {item.size}</p>
+                    </div>
                   </div>
-                  <span className="font-semibold text-gray-900">
+                  <span className="font-semibold text-gray-900 text-right">
                     {currency}
                     {item.price.toLocaleString()}
                   </span>

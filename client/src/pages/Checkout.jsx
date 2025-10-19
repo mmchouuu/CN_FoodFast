@@ -82,13 +82,12 @@ const Checkout = () => {
     }
   };
 
-  const handleAddAddress = (event) => {
+  const handleAddAddress = async (event) => {
     event.preventDefault();
     if (!newAddress.street || !newAddress.ward || !newAddress.district) {
       toast.error("Please complete the street, ward, and district fields.");
       return;
     }
-    const id = `addr-${Date.now()}`;
     const matchedLabel = addressLabels.find(
       (item) => item.id === newAddress.label
     );
@@ -96,35 +95,41 @@ const Checkout = () => {
       newAddress.label === "custom"
         ? newAddress.customLabel?.trim() || "Other"
         : matchedLabel?.label || "Home";
-    addNewAddress({
-      id,
-      label,
-      recipient: newAddress.recipient || "Customer",
-      phone: newAddress.phone || "",
-      street: newAddress.street,
-      ward: newAddress.ward,
-      district: newAddress.district,
-      city: newAddress.city,
-      instructions: newAddress.instructions,
-      isDefault: newAddress.isDefault,
-    });
-    if (newAddress.isDefault) {
-      setSelectedAddressId(id);
+    try {
+      const created = await addNewAddress({
+        label,
+        recipient: newAddress.recipient || "Customer",
+        phone: newAddress.phone || "",
+        street: newAddress.street,
+        ward: newAddress.ward,
+        district: newAddress.district,
+        city: newAddress.city,
+        instructions: newAddress.instructions,
+        isDefault: newAddress.isDefault,
+      });
+      if (created?.id) {
+        setSelectedAddressId(created.id);
+      }
+      toast.success("New address added.");
+      setShowAddressForm(false);
+      setNewAddress({
+        label: "home",
+        customLabel: "",
+        recipient: "",
+        phone: "",
+        street: "",
+        ward: "",
+        district: "",
+        city: "Ho Chi Minh City",
+        instructions: "",
+        isDefault: false,
+      });
+    } catch (error) {
+      const message =
+        error?.message ||
+        "We could not save this address. Please sign in and try again.";
+      toast.error(message);
     }
-    toast.success("New address added.");
-    setShowAddressForm(false);
-    setNewAddress({
-      label: "home",
-      customLabel: "",
-      recipient: "",
-      phone: "",
-      street: "",
-      ward: "",
-      district: "",
-      city: "TP. Ho Chi Minh",
-      instructions: "",
-      isDefault: false,
-    });
   };
 
   return (
