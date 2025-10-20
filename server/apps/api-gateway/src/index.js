@@ -12,6 +12,7 @@ const customersRoutes = require('./routes/customers.routes');
 const restaurantsRoutes = require('./routes/restaurants.routes');
 const adminRoutes = require('./routes/admin.routes');
 const usersRoutes = require('./routes/users.routes');
+const paymentsRoutes = require('./routes/payments.routes');
 
 const app = express();
 app.use(bodyParser.json({ limit: '10mb' }));
@@ -37,6 +38,7 @@ app.use('/api/customers', customersRoutes);
 app.use('/api/customer', customersRoutes);
 app.use('/api/restaurants', restaurantsRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/payments', paymentsRoutes);
 
 // health
 app.get('/health', health);
