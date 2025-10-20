@@ -1,5 +1,12 @@
 import * as service from '../services/product.service.js';
 
+function handleServiceError(err, res, next) {
+  if (err?.statusCode) {
+    return res.status(err.statusCode).json({ error: err.message });
+  }
+  return next(err);
+}
+
 export async function list(req, res, next) {
   try {
     const limit = parseInt(req.query.limit || 20, 10);
@@ -11,7 +18,7 @@ export async function list(req, res, next) {
     const rows = await service.list(params);
     res.json({ data: rows });
   } catch (err) {
-    next(err);
+    handleServiceError(err, res, next);
   }
 }
 
@@ -21,7 +28,7 @@ export async function get(req, res, next) {
     if (!product) return res.status(404).json({ error: 'not found' });
     res.json(product);
   } catch (err) {
-    next(err);
+    handleServiceError(err, res, next);
   }
 }
 
@@ -43,7 +50,7 @@ export async function create(req, res, next) {
     const created = await service.create(payload);
     res.status(201).json(created);
   } catch (err) {
-    next(err);
+    handleServiceError(err, res, next);
   }
 }
 
@@ -60,7 +67,7 @@ export async function update(req, res, next) {
     if (!updated) return res.status(404).json({ error: 'not found' });
     res.json(updated);
   } catch (err) {
-    next(err);
+    handleServiceError(err, res, next);
   }
 }
 
@@ -70,6 +77,6 @@ export async function remove(req, res, next) {
     if (!deleted) return res.status(404).json({ error: 'not found' });
     res.status(204).end();
   } catch (err) {
-    next(err);
+    handleServiceError(err, res, next);
   }
 }

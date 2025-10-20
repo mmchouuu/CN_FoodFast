@@ -1,4 +1,5 @@
-const { pool } = require('./product.model');
+const db = require('../db');
+const pool = db?.default || db;
 
 async function listRestaurants({ limit = 20, offset = 0, ownerId } = {}) {
   const values = [];

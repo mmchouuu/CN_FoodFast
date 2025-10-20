@@ -94,6 +94,9 @@ export async function updateProduct(id, data = {}) {
 }
 
 export async function deleteProduct(id) {
-  const res = await pool.query('DELETE FROM products WHERE id=$1 RETURNING id', [id]);
+  const res = await pool.query(
+    'DELETE FROM products WHERE id=$1 RETURNING id, restaurant_id',
+    [id],
+  );
   return res.rows[0] || null;
 }

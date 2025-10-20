@@ -13,13 +13,14 @@ import seedRoutes from './routes/seed.routes.js';
 dotenv.config();
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '25mb' }));
 app.use(morgan('dev'));
 app.use(cors({ origin: '*' }));
 
 // Routes
 app.use('/api/products', productRoutes);
 app.use('/api/restaurants', restaurantRoutes);
+app.use('/api/catalog/restaurants', restaurantRoutes);
 app.use('/api/seed', seedRoutes);
 app.get('/health', (req, res) =>
   res.json({ ok: true, service: 'product-service' })

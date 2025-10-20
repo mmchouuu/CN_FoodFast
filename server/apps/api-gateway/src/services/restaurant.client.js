@@ -8,7 +8,7 @@ const userClient = createAxiosInstance({
 });
 
 const productClient = createAxiosInstance({
-  baseURL: `${config.productServiceUrl}/api/catalog/restaurants`,
+  baseURL: `${config.productServiceUrl}/api/restaurants`,
   timeout: config.requestTimeout,
 });
 
