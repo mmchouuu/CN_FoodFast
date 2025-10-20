@@ -20,6 +20,7 @@ const emptyFormState = {
   popular: false,
 };
 
+
 const formatCurrency = (value) => {
   const numeric = Number(value || 0);
   if (!Number.isFinite(numeric)) return "0đ";
@@ -160,7 +161,7 @@ const DishFormModal = ({
             />
           </label>
 
-  <label className="flex flex-col gap-1 md:col-span-2">
+          <label className="flex flex-col gap-1 md:col-span-2">
             <span className="text-sm font-medium text-slate-700">
               Description
             </span>
@@ -209,22 +210,20 @@ const DishFormModal = ({
             <div className="flex items-center gap-3">
               <button
                 type="button"
-                className={`rounded-lg border px-3 py-2 text-sm font-medium transition ${
-                  form.imageMode === "url"
+                className={`rounded-lg border px-3 py-2 text-sm font-medium transition ${form.imageMode === "url"
                     ? "border-emerald-500 bg-emerald-50 text-emerald-600"
                     : "border-slate-200 text-slate-600 hover:bg-slate-50"
-                }`}
+                  }`}
                 onClick={() => handleModeChange("url")}
               >
                 Dùng link ảnh
               </button>
               <button
                 type="button"
-                className={`rounded-lg border px-3 py-2 text-sm font-medium transition ${
-                  form.imageMode === "upload"
+                className={`rounded-lg border px-3 py-2 text-sm font-medium transition ${form.imageMode === "upload"
                     ? "border-emerald-500 bg-emerald-50 text-emerald-600"
                     : "border-slate-200 text-slate-600 hover:bg-slate-50"
-                }`}
+                  }`}
                 onClick={() => handleModeChange("upload")}
               >
                 Tải ảnh lên
@@ -233,14 +232,12 @@ const DishFormModal = ({
 
             {form.imageMode === "url" ? (
               <label className="flex flex-col gap-1">
-                <span className="text-sm font-medium text-slate-700">
-                  Image URL
-                </span>
-              <input
-                type="url"
-                value={form.imageUrl}
-                onChange={(event) => handleUrlChange(event.target.value)}
-                className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
+                <span className="text-sm font-medium text-slate-700">Image URL</span>
+                <input
+                  type="url"
+                  value={form.imageUrl ?? ""}
+                  onChange={(event) => handleUrlChange(event.target.value)}
+                  className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
                   placeholder="https://cdn.example.com/images/dish.jpg"
                 />
               </label>
@@ -250,8 +247,10 @@ const DishFormModal = ({
                   Chọn ảnh từ máy
                 </span>
                 <input
+                  key={form.imageMode}  // ⚡ reset input file mỗi khi đổi mode
                   type="file"
                   accept="image/*"
+                  value={""}             // ⚡ LUÔN có value="" để controlled
                   onChange={handleFileChange}
                   className="text-sm text-slate-600 file:mr-3 file:rounded-lg file:border file:border-slate-200 file:bg-white file:px-3 file:py-2 file:text-sm file:font-medium file:text-slate-600 hover:file:bg-slate-50"
                 />
@@ -275,6 +274,8 @@ const DishFormModal = ({
               </div>
             ) : null}
           </div>
+
+
 
           <label className="flex items-center gap-2 md:col-span-2">
             <input
@@ -704,7 +705,7 @@ const MenuManagement = () => {
         </div>
       </section>
 
-      <DishFormModal
+      {/* <DishFormModal
         open={modalOpen}
         mode={modalMode}
         form={formState}
@@ -712,7 +713,18 @@ const MenuManagement = () => {
         onChange={setFormState}
         onSubmit={handleSubmit}
         saving={saving}
+      /> */}
+      <DishFormModal
+        open={modalOpen}
+        mode={modalMode}
+        form={{ ...emptyFormState, ...formState }}
+        onClose={closeModal}
+        onChange={(changes) => setFormState((prev) => ({ ...prev, ...changes }))}
+        onSubmit={handleSubmit}
+        saving={saving}
       />
+
+
     </div>
   );
 };
