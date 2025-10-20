@@ -1,4 +1,5 @@
-const pool = require('../db');
+const db = require('../db');
+const pool = db?.default || db;
 const { geocodeAddress } = require('../utils/geocoding');
 const { publishSocketEvent } = require('../utils/rabbitmq');
 
@@ -330,7 +331,7 @@ async function getRestaurantById(id, { includeBranches = true } = {}) {
   let restaurant = null;
   let branches = [];
   try {
-    const res = await client.query(`${SELECT_RESTAURANT_BASE} WHERE id = $1, [id]`);
+    const res = await client.query(`${SELECT_RESTAURANT_BASE} WHERE id = $1`, [id]);
     if (!res.rowCount) {
       return null;
     }
@@ -382,7 +383,25 @@ async function getRestaurantByOwner(ownerId) {
     };
   }
 
-  if (!account) return null;
+  if (!account) {
+    return {
+      owner_id: ownerId,
+      name: null,
+      description: null,
+      about: null,
+      cuisine: null,
+      phone: null,
+      email: null,
+      logo: null,
+      images: null,
+      is_active: false,
+      restaurant_status: null,
+      manager_name: null,
+      pending_profile: true,
+      branches: [],
+      owner: null,
+    };
+  }
 
   return {
     owner_id: ownerId,
@@ -420,11 +439,6 @@ async function createRestaurant(data) {
   if (!ownerId) throw new Error('ownerId is required');
   const trimmedName = sanitiseText(name);
   if (!trimmedName) throw new Error('Restaurant name is required');
-
-  const ownerAccount = await fetchOwnerAccount(ownerId);
-  if (!ownerAccount) {
-    throw new Error('Owner account not found');
-  }
 
   const imageArray = normaliseImages(images);
   const logoArray = normaliseImages(logo);
