@@ -285,7 +285,13 @@ const Header = () => {
           onClose={() => setProfileOpen(false)}
           onLogout={() => {
             logoutLocal?.();
-            logoutAuth0?.({ returnTo: window.location.origin });
+            if (logoutAuth0) {
+              try {
+                logoutAuth0({ returnTo: window.location.origin });
+              } catch (error) {
+                console.warn('Auth0 logout skipped:', error);
+              }
+            }
           }}
         />
       ) : null}

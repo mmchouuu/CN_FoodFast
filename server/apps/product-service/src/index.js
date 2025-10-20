@@ -1,78 +1,68 @@
-// import express from 'express';
-// import morgan from 'morgan';
-// import cors from 'cors';
-// import { pathToFileURL } from 'url';
-// import { connectRabbitMQ } from './utils/rabbitmq.js';
+// index.js
+import dotenv from 'dotenv';
+import express from 'express';
+import morgan from 'morgan';
+import cors from 'cors';
+import { fileURLToPath } from 'url';
+import { connectRabbitMQ } from './utils/rabbitmq.js';
 
-// import productRoutes from './routes/product.routes.js';
-// import restaurantRoutes from './routes/restaurant.routes.js';
-// import seedRoutes from './routes/seed.routes.js';
-
-// dotenv.config();
-
-// const app = express();
-// app.use(express.json());
-// app.use(morgan('dev'));
-// app.use(cors({ origin: '*' }));
-
-// // Routes
-// app.use('/api/products', productRoutes);
-// app.use('/api/restaurants', restaurantRoutes);
-// app.use('/api/seed', seedRoutes);
-// app.get('/health', (req, res) =>
-//   res.json({ ok: true, service: 'product-service' })
-// );
-
-// const PORT = process.env.PORT || 3002;
-
-// export async function startProductService() {
-//   const server = app.listen(PORT, async () => {
-//     console.log(✅ Product Service running on port ${PORT});
-//     try {
-//       await connectRabbitMQ();
-//       console.log('✅ Connected to RabbitMQ');
-//     } catch (error) {
-//       console.error('[product-service] ❌ Failed to connect RabbitMQ:', error.message);
-//     }
-//   });
-
-//   return server;
-// }
-
-// const executedFile = process.argv[1] ? pathToFileURL(process.argv[1]).href : null;
-// if (import.meta.url === executedFile) {
-//   startProductService();
-// }
-
-
-const dotenv = require('dotenv');
-const app = require('./app');
-const { connectRabbitMQ } = require('./utils/rabbitmq');
+import productRoutes, {
+  categoriesRouter,
+  restaurantProductsRouter,
+  restaurantInventoryRouter,
+  productInventoryRouter,
+  branchInventoryRouter,
+} from './routes/product.routes.js';
+import restaurantRoutes from './routes/restaurant.routes.js';
+import seedRoutes from './routes/seed.routes.js';
 
 dotenv.config();
 
-const PORT = Number(process.env.PORT) || 3002;
+const app = express();
+app.use(express.json({ limit: '25mb' }));
+app.use(
+  morgan('dev', {
+    skip: (req) => req.path === '/health',
+  }),
+);
+app.use(cors({ origin: '*' }));
 
-async function startProductService() {
+// Routes
+app.use('/api/products', productRoutes);
+app.use('/api/categories', categoriesRouter);
+app.use('/api/restaurants/:restaurantId/categories', categoriesRouter);
+app.use('/api/restaurants/:restaurantId/products', restaurantProductsRouter);
+app.use('/api/restaurants/:restaurantId/products/:productId/inventory', productInventoryRouter);
+app.use('/api/restaurants/:restaurantId/branches/:branchId/inventory', branchInventoryRouter);
+app.use('/api/restaurants/:restaurantId/inventory', restaurantInventoryRouter);
+app.use('/api/restaurants', restaurantRoutes);
+app.use('/api/catalog/restaurants', restaurantRoutes);
+app.use('/api/seed', seedRoutes);
+app.get('/health', (req, res) =>
+  res.json({ ok: true, service: 'product-service' })
+);
+
+const PORT = process.env.PORT || 3002;
+
+export async function startProductService() {
   const server = app.listen(PORT, async () => {
     console.log(`Product Service running on port ${PORT}`);
     try {
       await connectRabbitMQ();
+      console.log('[product-service] Connected to RabbitMQ');
     } catch (error) {
-      console.error('[product-service] Failed to connect to RabbitMQ:', error.message);
+      console.error('[product-service] Failed to connect RabbitMQ:', error.message);
     }
   });
 
   return server;
 }
 
-if (require.main === module) {
+const isDirectRun = process.argv[1] === fileURLToPath(import.meta.url);
+
+if (isDirectRun) {
   startProductService().catch((error) => {
     console.error('[product-service] Failed to start service:', error);
     process.exit(1);
   });
 }
-
-module.exports = {
-  startProductService,
-};

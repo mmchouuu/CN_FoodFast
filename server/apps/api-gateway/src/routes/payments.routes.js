@@ -44,4 +44,5 @@ router.use('/', authMiddleware, createProxyMiddleware({
   onError: (err, req, res) => res.status(502).json({ error: 'bad gateway', detail: err.message })
 }));
 
+
 module.exports = router;

@@ -1,9 +1,9 @@
 // src/context/AppContext.jsx
 import { useNavigate } from 'react-router-dom';
-
 // import React, { createContext, useState, useContext, useEffect } from 'react';
 
 import React, { createContext, useState, useContext, useEffect, useCallback, useMemo } from 'react'
+
 
 import toast from 'react-hot-toast';
 import catalogService from '../services/catalog';
@@ -14,243 +14,373 @@ import { restaurantPlaceholderImage, dishPlaceholderImage } from '../utils/image
 // --- Auth Systems ---
 import authService from '../services/auth';
 import {
-  dishes as menuDishes,
-  restaurants as restaurantList,
-  currentOrders as liveOrders,
-  orderHistory as historyOrders,
-  notificationFeed,
-  paymentOptions as paymentOptionList,
-  restaurantReviews as initialRestaurantReviews,
+    dishes as menuDishes,
+    restaurants as restaurantList,
+    notificationFeed,
+    paymentOptions as paymentOptionList,
+    restaurantReviews as initialRestaurantReviews,
 } from '../data/customerData';
+
 
 const AppContext = createContext();
 
 const sanitizeUser = (rawUser) => {
-  if (!rawUser) return null;
-  const firstName = rawUser.first_name || rawUser.firstName || '';
-  const lastName = rawUser.last_name || rawUser.lastName || '';
-  const fullNameSource =
-    rawUser.fullName ||
-    rawUser.full_name ||
-    [firstName, lastName].filter(Boolean).join(' ').trim();
-  const resolvedFullName = fullNameSource || rawUser.email || 'FoodFast Customer';
-  const phoneSource =
-    rawUser.phone != null
-      ? String(rawUser.phone).trim()
-      : rawUser.phone_number != null
-      ? String(rawUser.phone_number).trim()
-      : '';
+    if (!rawUser) return null;
+    const firstName = rawUser.first_name || rawUser.firstName || '';
+    const lastName = rawUser.last_name || rawUser.lastName || '';
+    const fullNameSource =
+        rawUser.fullName ||
+        rawUser.full_name ||
+        [firstName, lastName].filter(Boolean).join(' ').trim();
+    const resolvedFullName = fullNameSource || rawUser.email || 'FoodFast Customer';
+    const phoneSource =
+        rawUser.phone != null
+            ? String(rawUser.phone).trim()
+            : rawUser.phone_number != null
+                ? String(rawUser.phone_number).trim()
+                : '';
 
-  return {
-    id: rawUser.id,
-    first_name: firstName || null,
-    last_name: lastName || null,
-    fullName: resolvedFullName,
-    email: rawUser.email || rawUser.email_address || null,
-    phone: phoneSource,
-    role: rawUser.role,
-    avatar: rawUser.avatar_url || rawUser.avatar || null,
-  };
+    return {
+        id: rawUser.id,
+        first_name: firstName || null,
+        last_name: lastName || null,
+        fullName: resolvedFullName,
+        email: rawUser.email || rawUser.email_address || null,
+        phone: phoneSource,
+        role: rawUser.role,
+        avatar: rawUser.avatar_url || rawUser.avatar || null,
+    };
 };
 
 const FALLBACK_PRODUCTS = menuDishes;
 const FALLBACK_RESTAURANTS = restaurantList;
-const FALLBACK_ACTIVE_ORDERS = liveOrders;
-const FALLBACK_ORDER_HISTORY = historyOrders;
 const DEFAULT_PAYMENT_METHOD = paymentOptionList[0]?.id || 'wallet';
-
 const ORDER_HISTORY_STATUSES = new Set(['delivered', 'completed', 'cancelled']);
 const ORDER_REVIEWABLE_STATUSES = new Set(['delivered', 'completed']);
 
 const toNumberOr = (value, fallback = 0) => {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
 };
 
 const ensureArray = (value) => (Array.isArray(value) ? value : value ? [value] : []);
 
 const adaptRestaurantFromApi = (restaurant) => {
-  if (!restaurant) return null;
-  const images = ensureArray(restaurant.images).filter(Boolean);
-  const heroImage = images[0] || restaurant.heroImage || restaurant.coverImage || restaurantPlaceholderImage;
-  const coverImage = images[1] || heroImage;
-  const createdAt = restaurant.created_at ? new Date(restaurant.created_at).getTime() : undefined;
-  const updatedAt = restaurant.updated_at ? new Date(restaurant.updated_at).getTime() : undefined;
-  return {
-    id: restaurant.id,
-    name: restaurant.name || 'Restaurant',
-    description: restaurant.description || '',
-    address: restaurant.address || restaurant.description || 'Thông tin đang được cập nhật.',
-    distanceKm: toNumberOr(restaurant.distance_km, 0),
-    rating: toNumberOr(restaurant.avg_branch_rating, 0),
-    reviewCount: toNumberOr(restaurant.total_branch_ratings, 0),
-    heroImage,
-    coverImage,
-    images: images.length ? images : [restaurantPlaceholderImage],
-    tags: restaurant.cuisine ? [restaurant.cuisine] : [],
-    cuisine: restaurant.cuisine,
-    phone: restaurant.phone,
-    email: restaurant.email,
-    mapHint: restaurant.cuisine || 'Đang cập nhật',
-    promotions: [],
-    featuredDishIds: [],
-    categories: restaurant.cuisine ? [restaurant.cuisine] : [],
-    createdAt,
-    updatedAt,
-  };
+    if (!restaurant) return null;
+    const images = ensureArray(restaurant.images).filter(Boolean);
+    const heroImage = images[0] || restaurant.heroImage || restaurant.coverImage || restaurantPlaceholderImage;
+    const coverImage = images[1] || heroImage;
+    const createdAt = restaurant.created_at ? new Date(restaurant.created_at).getTime() : undefined;
+    const updatedAt = restaurant.updated_at ? new Date(restaurant.updated_at).getTime() : undefined;
+
+    const restaurantProductsRaw = Array.isArray(restaurant.products) ? restaurant.products : [];
+    const restaurantProducts = restaurantProductsRaw
+        .map((item) => adaptProductFromApi(item))
+        .filter(Boolean);
+    const popularIds = restaurantProducts.filter((item) => item.popular).map((item) => item._id);
+
+    const branchList = Array.isArray(restaurant.branches)
+        ? restaurant.branches.map((branch) => {
+            const branchImages = ensureArray(branch.images).filter(Boolean);
+            const addressParts = [branch.street, branch.ward, branch.district, branch.city]
+                .filter(Boolean)
+                .join(', ');
+            const branchProductsRaw = Array.isArray(branch.products) ? branch.products : [];
+            const branchProducts = branchProductsRaw
+                .map((item) => {
+                    const adapted = adaptProductFromApi(item);
+                    if (item && typeof item.inventory === 'object') {
+                        const inventoryQuantity = toNumberOr(item.inventory.quantity, null);
+                        adapted.inventory = {
+                            quantity: inventoryQuantity,
+                            reserved: toNumberOr(item.inventory.reserved_qty, null),
+                            branchId: item.inventory.branch_id || item.inventory.branchId || branch.id,
+                        };
+                        if (inventoryQuantity !== null) {
+                            adapted.inStock = inventoryQuantity > 0;
+                        }
+                    }
+                    adapted.branchId = branch.id;
+                    return adapted;
+                })
+                .filter(Boolean);
+            return {
+                id: branch.id,
+                name: branch.name || 'Branch',
+                number: branch.branchNumber ?? branch.branch_number ?? null,
+                address: addressParts || branch.street || '',
+                isPrimary: branch.isPrimary ?? branch.is_primary ?? false,
+                isOpen: branch.isOpen ?? branch.is_open ?? false,
+                rating: branch.ratingSummary?.avgRating ?? branch.rating ?? null,
+                ratingCount: branch.ratingSummary?.totalRatings ?? branch.ratingCount ?? null,
+                phone: branch.branchPhone || branch.phone || null,
+                email: branch.branchEmail || branch.email || null,
+                images: branchImages.length ? branchImages : [restaurantPlaceholderImage],
+                products: branchProducts,
+            };
+        })
+        : [];
+
+    return {
+        id: restaurant.id,
+        name: restaurant.name || 'Restaurant',
+        description: restaurant.description || '',
+        address: restaurant.address || restaurant.description || 'Information is updating.',
+        distanceKm: toNumberOr(restaurant.distance_km, 0),
+        rating: toNumberOr(restaurant.avg_branch_rating, 0),
+        reviewCount: toNumberOr(restaurant.total_branch_ratings, 0),
+        heroImage,
+        coverImage,
+        images: images.length ? images : [restaurantPlaceholderImage],
+        tags: restaurant.cuisine ? [restaurant.cuisine] : [],
+        cuisine: restaurant.cuisine,
+        phone: restaurant.phone,
+        email: restaurant.email,
+        mapHint: restaurant.cuisine || 'Updating',
+        promotions: [],
+        featuredDishIds: popularIds,
+        categories: restaurant.cuisine ? [restaurant.cuisine] : [],
+        products: restaurantProducts,
+        branches: branchList,
+        createdAt,
+        updatedAt,
+    };
 };
 
 const adaptProductFromApi = (product) => {
-  if (!product) return null;
-  const images = ensureArray(product.images).filter(Boolean);
-  const basePrice = toNumberOr(product.base_price, 0);
-  const createdAt = product.created_at ? new Date(product.created_at).getTime() : undefined;
-  const updatedAt = product.updated_at ? new Date(product.updated_at).getTime() : undefined;
-  return {
-    _id: product.id,
-    restaurantId: product.restaurant_id,
-    title: product.title || 'Sản phẩm',
-    description: product.description || '',
-    category: product.category || 'General',
-    type: product.type || 'Standard',
-    spiceLevel: product.spice_level || 0,
-    sizes: ['Standard'],
-    price: { Standard: basePrice },
-    basePrice,
-    images: images.length ? images : [dishPlaceholderImage],
-    tags: product.popular ? ['Popular'] : [],
-    rating: toNumberOr(product.rating, 0),
-    reviewCount: toNumberOr(product.review_count, 0),
-    toppings: [],
-    options: [],
-    preparation: {
-      prepMinutes: toNumberOr(product.prep_minutes, 5),
-      cookMinutes: toNumberOr(product.cook_minutes, 15),
-    },
-    createdAt,
-    updatedAt,
-  };
+    if (!product) return null;
+    const images = ensureArray(product.images).filter(Boolean);
+    const basePrice = toNumberOr(product.base_price, 0);
+    const priceWithTax = toNumberOr(product.price_with_tax, basePrice);
+
+    const inventorySource =
+        (product.inventory_summary && typeof product.inventory_summary === 'object')
+            ? product.inventory_summary
+            : (product.inventory && typeof product.inventory === 'object')
+                ? product.inventory
+                : null;
+
+    const inventoryQuantity = inventorySource && inventorySource.quantity !== undefined
+        ? toNumberOr(inventorySource.quantity, null)
+        : null;
+    const inventoryReserved = inventorySource && inventorySource.reserved_qty !== undefined
+        ? toNumberOr(inventorySource.reserved_qty, null)
+        : null;
+    const inventoryBranchId = inventorySource
+        ? (inventorySource.branch_id || inventorySource.branchId || null)
+        : null;
+
+    const inventory = inventorySource
+        ? {
+            quantity: inventoryQuantity,
+            reserved: inventoryReserved,
+            branchId: inventoryBranchId,
+        }
+        : null;
+
+    const inStock =
+        inventoryQuantity === null || inventoryQuantity === undefined
+            ? true
+            : inventoryQuantity > 0;
+
+    const createdAt = product.created_at ? new Date(product.created_at).getTime() : undefined;
+    const updatedAt = product.updated_at ? new Date(product.updated_at).getTime() : undefined;
+    return {
+        _id: product.id,
+        restaurantId: product.restaurant_id,
+        title: product.title || 'Product',
+        description: product.description || '',
+        category: product.category || 'General',
+        type: product.type || 'Standard',
+        spiceLevel: product.spice_level || 0,
+        sizes: ['Standard'],
+        price: { Standard: basePrice },
+        basePrice,
+        priceWithTax,
+        images: images.length ? images : [dishPlaceholderImage],
+        tags: product.popular ? ['Popular'] : [],
+        popular: Boolean(product.popular),
+        rating: toNumberOr(product.rating, 0),
+        reviewCount: toNumberOr(product.review_count, 0),
+        toppings: [],
+        options: [],
+        preparation: {
+            prepMinutes: toNumberOr(product.prep_minutes, 5),
+            cookMinutes: toNumberOr(product.cook_minutes, 15),
+        },
+        inventory,
+        inStock,
+        available: product.available !== false,
+        createdAt,
+        updatedAt,
+    };
 };
 
 const adaptAddressFromApi = (address) => {
-  if (!address) return null;
-  const primaryFlag =
-    address.isDefault ??
-    address.is_default ??
-    address.is_primary ??
-    false;
+    if (!address) return null;
+    const primaryFlag =
+        address.isDefault ??
+        address.is_default ??
+        address.is_primary ??
+        false;
 
-  return {
-    id: address.id,
-    label: address.label || 'Address',
-    recipient: address.recipient || '',
-    phone: address.phone || '',
-    street: address.street || '',
-    ward: address.ward || '',
-    district: address.district || '',
-    city: address.city || '',
-    instructions: address.instructions || '',
-    isDefault: Boolean(primaryFlag),
-    createdAt: address.createdAt || address.created_at || null,
-    updatedAt: address.updatedAt || address.updated_at || null,
-  };
+    return {
+        id: address.id,
+        label: address.label || 'Address',
+        recipient: address.recipient || '',
+        phone: address.phone || '',
+        street: address.street || '',
+        ward: address.ward || '',
+        district: address.district || '',
+        city: address.city || '',
+        instructions: address.instructions || '',
+        isDefault: Boolean(primaryFlag),
+        createdAt: address.createdAt || address.created_at || null,
+        updatedAt: address.updatedAt || address.updated_at || null,
+    };
 };
 
 const buildDefaultTimeline = (status, placedAt) => {
-  const lowerStatus = (status || '').toLowerCase();
-  const placedTime = placedAt
-    ? new Date(placedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    : null;
-  const isPreparing = ['preparing', 'delivering', 'delivered', 'completed'].includes(lowerStatus);
-  const isDelivering = ['delivering', 'delivered', 'completed'].includes(lowerStatus);
-  const isDelivered = ['delivered', 'completed'].includes(lowerStatus);
+    const lowerStatus = (status || '').toLowerCase();
+    const placedTime = placedAt
+        ? new Date(placedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        : null;
+    const isPreparing = ['preparing', 'delivering', 'delivered', 'completed'].includes(lowerStatus);
+    const isDelivering = ['delivering', 'delivered', 'completed'].includes(lowerStatus);
+    const isDelivered = ['delivered', 'completed'].includes(lowerStatus);
 
-  return [
-    { id: 'stage-confirmed', label: 'Order confirmed', timestamp: placedTime, completed: true },
-    { id: 'stage-preparing', label: 'Preparing', timestamp: null, completed: isPreparing },
-    { id: 'stage-delivering', label: 'Out for delivery', timestamp: null, completed: isDelivering },
-    { id: 'stage-delivered', label: 'Delivered', timestamp: null, completed: isDelivered },
-  ];
+    return [
+        { id: 'stage-confirmed', label: 'Order confirmed', timestamp: placedTime, completed: true },
+        { id: 'stage-preparing', label: 'Preparing', timestamp: null, completed: isPreparing },
+        { id: 'stage-delivering', label: 'Out for delivery', timestamp: null, completed: isDelivering },
+        { id: 'stage-delivered', label: 'Delivered', timestamp: null, completed: isDelivered },
+    ];
 };
 
 const adaptOrderFromApi = (order) => {
-  if (!order) return null;
-  const metadata = order.metadata && typeof order.metadata === 'object' ? order.metadata : {};
-  const pricing = metadata.pricing && typeof metadata.pricing === 'object' ? metadata.pricing : {};
-  const paymentMeta = metadata.payment && typeof metadata.payment === 'object' ? metadata.payment : {};
-  const deliveryAddress = metadata.delivery_address || null;
+    if (!order) return null;
+    const metadata = order.metadata && typeof order.metadata === 'object' ? order.metadata : {};
+    const pricing = metadata.pricing && typeof metadata.pricing === 'object' ? metadata.pricing : {};
+    const paymentMeta = metadata.payment && typeof metadata.payment === 'object' ? metadata.payment : {};
+    const deliveryAddress = metadata.delivery_address || null;
+    const restaurantSnapshotsMap =
+        metadata.restaurant_snapshots && typeof metadata.restaurant_snapshots === 'object'
+            ? metadata.restaurant_snapshots
+            : null;
+    const restaurantNamesMap =
+        metadata.restaurant_names && typeof metadata.restaurant_names === 'object'
+            ? metadata.restaurant_names
+            : null;
+    let restaurantSnapshotMeta =
+        metadata.restaurant_snapshot && typeof metadata.restaurant_snapshot === 'object'
+            ? metadata.restaurant_snapshot
+            : null;
+    if (!restaurantSnapshotMeta && restaurantSnapshotsMap) {
+        restaurantSnapshotMeta =
+            restaurantSnapshotsMap[order.restaurant_id] ||
+            restaurantSnapshotsMap[String(order.restaurant_id)] ||
+            null;
+    }
 
-  const placedAt = order.created_at || metadata.placed_at || new Date().toISOString();
-  const lowerStatus = (order.status || '').toLowerCase();
-  const totalAmount = toNumberOr(pricing.total ?? order.total_amount, 0);
-  const subtotal = toNumberOr(pricing.subtotal ?? order.total_amount, totalAmount);
-  const shippingFee = toNumberOr(pricing.shipping_fee, 0);
-  const discount = toNumberOr(pricing.discount, 0);
-  const etaMinutes = toNumberOr(metadata.eta_minutes, 30);
-  const paymentMethodRaw = typeof paymentMeta.method === 'string' ? paymentMeta.method : 'cod';
-  const paymentMethod = paymentMethodRaw.toUpperCase();
-  const timeline =
-    Array.isArray(metadata.timeline) && metadata.timeline.length
-      ? metadata.timeline
-      : buildDefaultTimeline(lowerStatus, placedAt);
+    const placedAt = order.created_at || metadata.placed_at || new Date().toISOString();
+    const lowerStatus = (order.status || '').toLowerCase();
+    const totalAmount = toNumberOr(pricing.total ?? order.total_amount, 0);
+    const subtotal = toNumberOr(pricing.subtotal ?? order.total_amount, totalAmount);
+    const shippingFee = toNumberOr(pricing.shipping_fee, 0);
+    const discount = toNumberOr(pricing.discount, 0);
+    const etaMinutes = toNumberOr(metadata.eta_minutes, 30);
+    const paymentMethodRaw = typeof paymentMeta.method === 'string' ? paymentMeta.method : 'cod';
+    const paymentMethod = paymentMethodRaw.toUpperCase();
+    const restaurantName =
+        restaurantSnapshotMeta?.name ||
+        metadata.restaurant_name ||
+        restaurantNamesMap?.[order.restaurant_id] ||
+        restaurantNamesMap?.[String(order.restaurant_id)] ||
+        null;
+    const fallbackSnapshotFromMap =
+        restaurantSnapshotsMap?.[order.restaurant_id] ||
+        restaurantSnapshotsMap?.[String(order.restaurant_id)] ||
+        null;
+    const restaurantImage =
+        restaurantSnapshotMeta?.heroImage ||
+        restaurantSnapshotMeta?.image ||
+        metadata.restaurant_image ||
+        fallbackSnapshotFromMap?.heroImage ||
+        fallbackSnapshotFromMap?.image ||
+        restaurantPlaceholderImage;
+    const timeline =
+        Array.isArray(metadata.timeline) && metadata.timeline.length
+            ? metadata.timeline
+            : buildDefaultTimeline(lowerStatus, placedAt);
 
-  return {
-    id: order.id,
-    restaurantId: order.restaurant_id,
-    branchId: order.branch_id,
-    status: order.status,
-    paymentStatus: order.payment_status,
-    paymentMethod,
-    paymentMethodKey: paymentMethodRaw,
-    totalAmount,
-    subtotal,
-    shippingFee,
-    discount,
-    currency: order.currency || 'VND',
-    placedAt,
-    updatedAt: order.updated_at,
-    deliveredAt: metadata.delivered_at || null,
-    etaMinutes,
-    timeline,
-    courier: metadata.courier || null,
-    deliveryAddress,
-    items: Array.isArray(order.items)
-      ? order.items.map((item) => ({
-          id: item.id,
-          orderItemId: item.id,
-          dishId: item.product_id,
-          productId: item.product_id,
-          size: item.product_snapshot?.size || item.product_snapshot?.variant || 'Standard',
-          quantity: item.quantity,
-          unitPrice: toNumberOr(item.unit_price, 0),
-          price: toNumberOr(item.total_price, 0),
-          productSnapshot: item.product_snapshot || {},
-        }))
-      : [],
-    metadata,
-    canReview: ORDER_REVIEWABLE_STATUSES.has(lowerStatus),
-  };
+    return {
+        id: order.id,
+        restaurantId: order.restaurant_id,
+        branchId: order.branch_id,
+        status: order.status,
+        paymentStatus: order.payment_status,
+        paymentMethod,
+        paymentMethodKey: paymentMethodRaw,
+        totalAmount,
+        subtotal,
+        shippingFee,
+        discount,
+        currency: order.currency || 'VND',
+        placedAt,
+        updatedAt: order.updated_at,
+        deliveredAt: metadata.delivered_at || null,
+        etaMinutes,
+        timeline,
+        courier: metadata.courier || null,
+        deliveryAddress,
+        restaurantSnapshot: restaurantSnapshotMeta,
+        restaurantName,
+        restaurantImage,
+        items: Array.isArray(order.items)
+            ? order.items.map((item) => ({
+                id: item.id,
+                orderItemId: item.id,
+                dishId: item.product_id,
+                productId: item.product_id,
+                size: item.product_snapshot?.size || item.product_snapshot?.variant || 'Standard',
+                quantity: item.quantity,
+                unitPrice: toNumberOr(item.unit_price, 0),
+                price: toNumberOr(item.total_price, 0),
+                productSnapshot: item.product_snapshot || {},
+                displayName:
+                    item.product_snapshot?.title ||
+                    item.product_snapshot?.name ||
+                    null,
+                displayImage:
+                    item.product_snapshot?.image ||
+                    (item.product_snapshot?.images && item.product_snapshot.images[0]) ||
+                    null,
+            }))
+            : [],
+        metadata,
+        canReview: ORDER_REVIEWABLE_STATUSES.has(lowerStatus),
+    };
 };
 
 const sortOrdersByPlacedAt = (orders) =>
-  [...orders].sort((a, b) => {
-    const dateA = a?.placedAt ? new Date(a.placedAt).getTime() : 0;
-    const dateB = b?.placedAt ? new Date(b.placedAt).getTime() : 0;
-    return dateB - dateA;
-  });
+    [...orders].sort((a, b) => {
+        const dateA = a?.placedAt ? new Date(a.placedAt).getTime() : 0;
+        const dateB = b?.placedAt ? new Date(b.placedAt).getTime() : 0;
+        return dateB - dateA;
+    });
 
 const splitOrdersByStatus = (orders) => {
-  const active = [];
-  const past = [];
-  for (const order of orders) {
-    const status = (order?.status || '').toLowerCase();
-    if (ORDER_HISTORY_STATUSES.has(status)) past.push(order);
-    else active.push(order);
-  }
-  return {
-    active: sortOrdersByPlacedAt(active),
-    past: sortOrdersByPlacedAt(past),
-  };
+    const active = [];
+    const past = [];
+    for (const order of orders) {
+        const status = (order?.status || '').toLowerCase();
+        if (ORDER_HISTORY_STATUSES.has(status)) past.push(order);
+        else active.push(order);
+    }
+    return {
+        active: sortOrdersByPlacedAt(active),
+        past: sortOrdersByPlacedAt(past),
+    };
 };
 
 
@@ -267,7 +397,9 @@ export const AppContextProvider = ({ children }) => {
     const [ordersLoading, setOrdersLoading] = useState(false);
     const [notifications, setNotifications] = useState(notificationFeed);
     const [addresses, setAddresses] = useState([]);
+
     const [bankAccounts, setBankAccounts] = useState([]);
+
     const [selectedAddressId, setSelectedAddressId] = useState(null);
     const selectedAddress = useMemo(
         () => addresses.find(address => address.id === selectedAddressId) || null,
@@ -409,25 +541,28 @@ export const AppContextProvider = ({ children }) => {
         return account;
     }, [authProfileId]);
 
+
     const refreshOrders = useCallback(async () => {
         if (!authToken) {
-            setOrdersLoading(false);
             setActiveOrders([]);
             setPastOrders([]);
             return { cancelled: true };
         }
+
         setOrdersLoading(true);
         try {
             const data = await ordersService.list();
-            const adapted = Array.isArray(data) ? data.map(adaptOrderFromApi).filter(Boolean) : [];
+            const adapted = Array.isArray(data)
+                ? data.map(adaptOrderFromApi).filter(Boolean)
+                : [];
             const { active, past } = splitOrdersByStatus(adapted);
             setActiveOrders(active);
             setPastOrders(past);
             return { success: true, active, past };
         } catch (error) {
             console.error('Failed to load orders from order-service', error);
-            setActiveOrders(prev => (prev.length ? prev : FALLBACK_ACTIVE_ORDERS));
-            setPastOrders(prev => (prev.length ? prev : FALLBACK_ORDER_HISTORY));
+            setActiveOrders([]);
+            setPastOrders([]);
             return { success: false, error };
         } finally {
             setOrdersLoading(false);
@@ -466,7 +601,51 @@ export const AppContextProvider = ({ children }) => {
     }, [method, bankAccounts.length]);
 
     // --- Unified user object ---
-    const user = authProfile ||  null;
+
+    const user = authProfile || null;
+
+    const userFullName = useMemo(() => {
+        if (!user) return null;
+        if (user.fullName) return user.fullName;
+        const nameParts = [user.first_name, user.last_name].filter(Boolean);
+        if (nameParts.length) return nameParts.join(' ');
+        if (user.name) return user.name;
+        if (user.given_name || user.family_name) {
+            return [user.given_name, user.family_name].filter(Boolean).join(' ');
+        }
+        if (user.username) return user.username;
+        return null;
+    }, [user]);
+
+    const userPhoneNumber = useMemo(() => {
+        return (
+            user?.phone ||
+            user?.phone_number ||
+            user?.primaryPhone?.number ||
+            ''
+        );
+    }, [user]);
+
+    const normalizeAddressFromApi = useCallback((address) => {
+        if (!address) return null;
+        return {
+            id: address.id,
+            label: address.label || 'Home',
+            recipient: address.recipient || userFullName || 'FoodFast Customer',
+            phone: address.phone || userPhoneNumber || '',
+            street: address.street || '',
+            ward: address.ward || '',
+            district: address.district || '',
+            city: address.city || '',
+            instructions: address.instructions || '',
+            isDefault: Boolean(
+                address.is_default ??
+                address.isDefault ??
+                address.is_primary ??
+                address.isPrimary
+            ),
+        };
+    }, [userFullName, userPhoneNumber]);
 
     // --- Cart Functions ---
     const addToCart = (itemId, size, quantity = 1) => {
@@ -559,14 +738,15 @@ export const AppContextProvider = ({ children }) => {
 
     const placeOrder = useCallback(async ({ paymentMethod: paymentMethodOverride, address: addressOverride, notes } = {}) => {
         if (!authToken) {
-            throw new Error('You need to sign in before placing an order.');
+            throw new Error('Please sign in to place an order.');
         }
         if (!user?.id) {
-            throw new Error('We could not verify your customer profile. Please sign out and sign in again.');
+            throw new Error('Unable to verify your account. Please sign in again.');
         }
 
         const orderItems = [];
-        const restaurantIds = new Set();
+        const restaurantStats = new Map();
+
         for (const itemId in cartItems) {
             const product = products.find((item) => item._id === itemId);
             if (!product) continue;
@@ -576,6 +756,44 @@ export const AppContextProvider = ({ children }) => {
                 if (quantity <= 0) continue;
                 const unitPrice = product.price?.[sizeKey] ?? product.basePrice ?? 0;
                 const totalPrice = unitPrice * quantity;
+                const restaurantId = product.restaurantId || null;
+
+                if (!restaurantId) {
+                    throw new Error('One or more dishes are missing restaurant information. Please try again.');
+                }
+
+                const restaurantRecord =
+                    restaurants.find((entry) => entry.id === restaurantId) ||
+                    FALLBACK_RESTAURANTS.find((entry) => entry.id === restaurantId) ||
+                    null;
+                const resolvedRestaurantImage =
+                    restaurantRecord?.heroImage ||
+                    restaurantRecord?.coverImage ||
+                    (Array.isArray(restaurantRecord?.images) ? restaurantRecord.images[0] : null) ||
+                    restaurantPlaceholderImage;
+
+                const existingStats = restaurantStats.get(restaurantId) || {
+                    subtotal: 0,
+                    itemCount: 0,
+                    snapshot: restaurantRecord
+                        ? {
+                            id: restaurantRecord.id,
+                            name: restaurantRecord.name,
+                            heroImage: restaurantRecord.heroImage || restaurantRecord.coverImage || resolvedRestaurantImage,
+                            image: resolvedRestaurantImage,
+                        }
+                        : {
+                            id: restaurantId,
+                            name: 'Restaurant',
+                            heroImage: restaurantPlaceholderImage,
+                            image: restaurantPlaceholderImage,
+                        },
+                };
+
+                existingStats.subtotal += totalPrice;
+                existingStats.itemCount += quantity;
+                restaurantStats.set(restaurantId, existingStats);
+
                 orderItems.push({
                     product_id: product._id,
                     variant_id: sizeKey !== 'Standard' ? sizeKey : null,
@@ -586,12 +804,10 @@ export const AppContextProvider = ({ children }) => {
                         title: product.title,
                         size: sizeKey,
                         image: product.images?.[0],
-                        restaurant_id: product.restaurantId,
+                        restaurant_id: restaurantId,
+                        restaurant_name: existingStats.snapshot?.name || restaurantRecord?.name || null,
                     },
                 });
-                if (product.restaurantId) {
-                    restaurantIds.add(product.restaurantId);
-                }
             }
         }
 
@@ -599,14 +815,9 @@ export const AppContextProvider = ({ children }) => {
             throw new Error('Your cart is currently empty.');
         }
 
-        if (restaurantIds.size > 1) {
-            throw new Error('Please create separate orders for each restaurant.');
-        }
-
-        const fallbackRestaurantId = orderItems[0]?.product_snapshot?.restaurant_id || null;
-        const restaurantId = Array.from(restaurantIds)[0] || fallbackRestaurantId;
-        if (!restaurantId) {
-            throw new Error('Unable to determine the restaurant for this order.');
+        const restaurantIds = Array.from(restaurantStats.keys());
+        if (!restaurantIds.length) {
+            throw new Error('Unable to determine restaurant information for this order.');
         }
 
         const subtotal = orderItems.reduce((sum, item) => sum + item.total_price, 0);
@@ -616,22 +827,61 @@ export const AppContextProvider = ({ children }) => {
         const currencyCode = (currency || 'VND').trim() || 'VND';
         const paymentMethod = (paymentMethodOverride || method || 'cod').toLowerCase();
         const deliveryAddressSource = addressOverride || selectedAddress || null;
-        const deliveryAddressSnapshot = deliveryAddressSource
-            ? {
-                id: deliveryAddressSource.id,
-                label: deliveryAddressSource.label,
-                recipient: deliveryAddressSource.recipient,
-                phone: deliveryAddressSource.phone,
-                street: deliveryAddressSource.street,
-                ward: deliveryAddressSource.ward,
-                district: deliveryAddressSource.district,
-                city: deliveryAddressSource.city,
-                instructions: deliveryAddressSource.instructions,
+        if (!deliveryAddressSource || !deliveryAddressSource.id) {
+            throw new Error('Bạn cần chọn hoặc tạo địa chỉ giao hàng trước khi đặt đơn.');
+        }
+        const normalizeAddressField = (value) => {
+            if (typeof value === 'string') {
+                const trimmed = value.trim();
+                return trimmed.length ? trimmed : null;
             }
-            : null;
+            return value ?? null;
+        };
+        const deliveryAddressSnapshot = {
+            id: deliveryAddressSource.id,
+            label: normalizeAddressField(deliveryAddressSource.label) || 'Home',
+            recipient: normalizeAddressField(deliveryAddressSource.recipient),
+            phone: normalizeAddressField(deliveryAddressSource.phone),
+            street: normalizeAddressField(deliveryAddressSource.street),
+            ward: normalizeAddressField(deliveryAddressSource.ward),
+            district: normalizeAddressField(deliveryAddressSource.district),
+            city: normalizeAddressField(deliveryAddressSource.city),
+            instructions: normalizeAddressField(deliveryAddressSource.instructions),
+        };
+        if (!deliveryAddressSnapshot.street) {
+            throw new Error('Địa chỉ giao hàng chưa đầy đủ. Vui lòng cập nhật lại.');
+        }
+        const deliveryAddressId = deliveryAddressSnapshot.id;
+
+        const restaurantSnapshots = {};
+        const pricingBreakdown = {};
+        restaurantIds.forEach((restaurantId) => {
+            const stats = restaurantStats.get(restaurantId);
+            if (!stats) return;
+            restaurantSnapshots[restaurantId] = stats.snapshot;
+            pricingBreakdown[restaurantId] = {
+                subtotal: stats.subtotal,
+                item_count: stats.itemCount,
+            };
+        });
+
+        const metadata = {
+            source: 'web-app',
+            discount_code: appliedDiscountCode?.code || null,
+            restaurant_ids: restaurantIds,
+            restaurant_snapshots: restaurantSnapshots,
+            pricing_breakdown: pricingBreakdown,
+            delivery_address_id: deliveryAddressId,
+            delivery_address: deliveryAddressSnapshot,
+        };
+        if (restaurantIds.length === 1) {
+            metadata.restaurant_snapshot = restaurantSnapshots[restaurantIds[0]];
+        }
+        if (notes) {
+            metadata.notes = notes;
+        }
 
         const payload = {
-            restaurant_id: restaurantId,
             items: orderItems,
             shipping_fee: shippingFee,
             discount,
@@ -639,41 +889,73 @@ export const AppContextProvider = ({ children }) => {
             currency: currencyCode,
             payment_method: paymentMethod,
             delivery_address: deliveryAddressSnapshot,
-            metadata: {
-                source: 'web-app',
-                discount_code: appliedDiscountCode?.code || null,
-            },
+            delivery_address_id: deliveryAddressId,
+            metadata,
         };
-        if (notes) {
-            payload.metadata.notes = notes;
+        if (restaurantIds.length === 1) {
+            payload.restaurant_id = restaurantIds[0];
         }
 
         try {
             const createdOrder = await ordersService.createOrder(payload);
-            const adapted = adaptOrderFromApi(createdOrder);
-            if (!adapted) {
+            const createdList = Array.isArray(createdOrder) ? createdOrder : [createdOrder];
+            if (!createdList.length) {
                 throw new Error('The server responded without order data.');
             }
-            try {
-                await paymentsService.createPayment({
-                    order_id: createdOrder.id,
-                    user_id: user.id,
-                    amount: totalAmount,
-                    currency: currencyCode,
-                    idempotency_key: `order-${createdOrder.id}`,
-                });
-            } catch (paymentError) {
-                console.error('Failed to persist payment for order', paymentError);
-                throw new Error(
-                    paymentError?.response?.data?.error ||
-                    'We created the order but could not record the payment. Please try again.'
-                );
+            const adaptedList = createdList.map(adaptOrderFromApi).filter(Boolean);
+            if (!adaptedList.length) {
+                throw new Error('Unable to parse order data from server response.');
             }
+
+            const recordPaymentsInBackground = async () => {
+                const tasks = createdList.map(async (orderRecord, index) => {
+                    try {
+                        const paymentAmount = Number(orderRecord.total_amount) || adaptedList[index]?.totalAmount || 0;
+                        const paymentPayload = {
+                            order_id: orderRecord.id,
+                            user_id: user.id,
+                            amount: paymentAmount,
+                            currency: currencyCode,
+                            payment_method: paymentMethod,
+                            idempotency_key: `order-${orderRecord.id}`,
+                        };
+                        const paymentRecord = await paymentsService.createPayment(paymentPayload);
+                        if (paymentRecord?.status && adaptedList[index]) {
+                            adaptedList[index].paymentStatus = paymentRecord.status;
+                        }
+                    } catch (paymentErr) {
+                        const errorMsg =
+                            paymentErr?.response?.data?.error ||
+                            paymentErr?.message ||
+                            'Không thể ghi nhận thanh toán cho đơn hàng.';
+                        console.error('Failed to persist payment for order', paymentErr);
+                        toast.error(errorMsg);
+                    }
+                });
+
+                await Promise.allSettled(tasks);
+                refreshOrders();
+            };
+
+            recordPaymentsInBackground().catch((err) => {
+                console.error('Unexpected payment background error', err);
+                toast.error('Không thể đồng bộ thanh toán. Vui lòng kiểm tra lại đơn hàng.');
+            });
+
             clearCart();
             setAppliedDiscountCode(null);
-            await refreshOrders();
-            return adapted;
+            refreshOrders().catch((err) => {
+                console.error('Failed to refresh orders after checkout', err);
+            });
+            return adaptedList.length === 1 ? adaptedList[0] : adaptedList;
         } catch (error) {
+            const statusCode = error?.response?.status;
+            if (statusCode === 401) {
+                throw new Error('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
+            }
+            if (error?.code === 'ECONNABORTED') {
+                throw new Error('Máy chủ phản hồi chậm. Vui lòng thử lại sau ít phút.');
+            }
             const message =
                 error?.response?.data?.error ||
                 error?.message ||
@@ -682,15 +964,16 @@ export const AppContextProvider = ({ children }) => {
         }
     }, [
         authToken,
+        user,
         cartItems,
         products,
         delivery_charges,
         getDiscountAmount,
         currency,
-        user,
         method,
         selectedAddress,
         appliedDiscountCode,
+        restaurants,
         clearCart,
         refreshOrders,
     ]);
@@ -720,17 +1003,22 @@ export const AppContextProvider = ({ children }) => {
     useEffect(() => {
         if (authToken) localStorage.setItem('auth_token', authToken); else localStorage.removeItem('auth_token');
     }, [authToken]);
+
+
     useEffect(() => {
         try {
             if (authProfile) localStorage.setItem('auth_profile', JSON.stringify(authProfile));
             else localStorage.removeItem('auth_profile');
-        } catch {}
+        } catch { }
     }, [authProfile]);
+
+
 
     // --- Local auth actions ---
     const loginWithCredentials = async (email, password) => {
         try {
             const res = await authService.login(email, password);
+
             let sanitizedUser = null;
             if (res?.token) {
                 setAuthToken(res.token);
@@ -760,7 +1048,7 @@ export const AppContextProvider = ({ children }) => {
                     await refreshAddresses();
                     toast.success('Saved your pending address.');
                 }
-            } catch {}
+            } catch { }
             return res;
         } catch (error) {
             const message = error?.response?.data?.message || error.message || 'Login failed';
@@ -836,7 +1124,7 @@ export const AppContextProvider = ({ children }) => {
                     await refreshAddresses();
                     toast.success('Saved your pending address.');
                 }
-            } catch {}
+            } catch { }
             return res;
         } catch (error) {
             const message = error?.response?.data?.message || error.message || 'Verification failed';
@@ -850,6 +1138,41 @@ export const AppContextProvider = ({ children }) => {
     const getDishById = (dishId) => products.find(item => item._id === dishId);
     const getDishesByRestaurant = (restaurantId) =>
         products.filter(item => item.restaurantId === restaurantId);
+
+    const getOrderById = useCallback(
+        (orderId) => {
+            if (!orderId) return null;
+            const combined = [...activeOrders, ...pastOrders];
+            return combined.find((order) => order.id === orderId) || null;
+        },
+        [activeOrders, pastOrders],
+    );
+
+    const fetchOrderById = useCallback(
+        async (orderId) => {
+            if (!authToken) {
+                throw new Error('Please sign in to view order details.');
+            }
+            if (!orderId) {
+                throw new Error('Order identifier is required.');
+            }
+            try {
+                const data = await ordersService.get(orderId);
+                const adapted = adaptOrderFromApi(data);
+                if (!adapted) {
+                    throw new Error('Order not found.');
+                }
+                return adapted;
+            } catch (error) {
+                const message =
+                    error?.response?.data?.error ||
+                    error?.message ||
+                    'Failed to load order details.';
+                throw new Error(message);
+            }
+        },
+        [authToken],
+    );
 
     const applyDiscountCode = (code) => {
         const trimmed = code.trim();
@@ -879,6 +1202,7 @@ export const AppContextProvider = ({ children }) => {
         );
     };
 
+
     const addNewAddress = async (address) => {
         const resolvedUserId = address.user_id || authProfileId;
         if (!resolvedUserId) {
@@ -888,6 +1212,7 @@ export const AppContextProvider = ({ children }) => {
             label: address.label,
             recipient: address.recipient,
             phone: address.phone,
+
             street: address.street,
             ward: address.ward,
             district: address.district,
@@ -914,6 +1239,7 @@ export const AppContextProvider = ({ children }) => {
         await authService.deleteAddress(addressId, { userId: authProfileId || undefined });
         await refreshAddresses();
     };
+
 
     const updateLocalProfile = (updates) => {
         setAuthProfile(prev => {
@@ -992,6 +1318,8 @@ export const AppContextProvider = ({ children }) => {
         setPastOrders,
         ordersLoading,
         refreshOrders,
+        getOrderById,
+        fetchOrderById,
         placeOrder,
         addresses,
         selectedAddress,
@@ -1032,4 +1360,6 @@ export const AppContextProvider = ({ children }) => {
 };
 
 export const useAppContext = () => useContext(AppContext);
+
+
 

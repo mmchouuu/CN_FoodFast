@@ -7,13 +7,20 @@ const seedRoutes = require('./routes/seed.routes');
 
 const app = express();
 
+app.use(express.json({ limit: '25mb' }));
+
+
 app.use(express.json({ limit: '10mb' }));
 app.use(cors({ origin: '*' }));
-app.use(morgan('dev'));
+app.use(
+  morgan('dev', {
+    skip: (req) => req.path === '/health',
+  }),
+);
 
 app.get('/health', (_req, res) => res.json({ ok: true, service: 'product-service' }));
 app.use('/api/products', productRoutes);
-app.use('/api/catalog/restaurants', restaurantRoutes);
+app.use('/api/restaurants', restaurantRoutes);
 app.use('/api/seed', seedRoutes);
 
 module.exports = app;

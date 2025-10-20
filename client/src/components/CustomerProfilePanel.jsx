@@ -220,6 +220,7 @@ const CustomerProfilePanel = ({ open, onClose, onLogout }) => {
         error?.response?.data?.error ||
         error?.message ||
         "Unable to save address.";
+
       toast.error(message);
     }
   };
@@ -452,6 +453,7 @@ const CustomerProfilePanel = ({ open, onClose, onLogout }) => {
                 ) : null}
                 <button
                   onClick={() => handleRemoveAddress(address.id)}
+
                   className="rounded-full border border-orange-100 px-3 py-1 text-xs font-semibold text-gray-500 transition hover:border-red-200 hover:text-red-500"
                 >
                   Xoa

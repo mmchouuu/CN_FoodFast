@@ -1,1069 +1,573 @@
 const pool = require('../db');
-const { geocodeAddress } = require('../utils/geocoding');
-const { publishSocketEvent } = require('../utils/rabbitmq');
 
-const USER_SERVICE_URL = (process.env.USER_SERVICE_URL || 'http://user-service:3001').replace(/\/+$/, '');
+function toNumber(value, fallback = 0) {
+  if (value === null || value === undefined) return fallback;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+}
 
-async function httpGetJson(url) {
-  try {
-    const res = await (typeof fetch === 'function'
-      ? fetch(url)
-      : (await import('node-fetch')).default(url));
-    if (!res.ok) {
-      if (res.status === 404) {
-        return null;
-      }
-      throw new Error(`Request failed with status ${res.status}`);
-    }
-    return await res.json();
-  } catch (err) {
-    console.error('[product-service] Failed to fetch', url, err.message);
-    return null;
+function toBoolean(value, fallback = false) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    const token = value.trim().toLowerCase();
+    if (['true', '1', 'yes', 'y', 'on'].includes(token)) return true;
+    if (['false', '0', 'no', 'n', 'off'].includes(token)) return false;
   }
-}
-
-const SELECT_RESTAURANT_BASE = `
-  SELECT id,
-         owner_id,
-         name,
-         description,
-         about,
-         cuisine,
-         phone,
-         email,
-         logo,
-         images,
-         is_active,
-         avg_branch_rating,
-         total_branch_ratings,
-         created_at,
-         updated_at
-  FROM restaurants
-`;
-
-function normaliseImages(images) {
-  if (!images) return null;
-  if (Array.isArray(images)) {
-    return images.length ? images : null;
+  if (typeof value === 'number') {
+    if (value === 1) return true;
+    if (value === 0) return false;
   }
-  if (typeof images === 'string') {
-    return images.trim() ? [images.trim()] : null;
+  return fallback;
+}
+
+function toArray(value) {
+  if (!value) return [];
+  if (Array.isArray(value)) {
+    return value.filter((item) => typeof item === 'string' && item.trim());
   }
-  return null;
+  if (typeof value === 'string' && value.trim()) {
+    return [value.trim()];
+  }
+  return [];
 }
 
-function sanitiseText(value) {
-  if (value === undefined || value === null) return null;
-  const trimmed = String(value).trim();
-  return trimmed.length ? trimmed : null;
-}
-
-function parseCoordinate(value) {
-  if (value === undefined || value === null || value === '') return null;
-  const numeric = Number.parseFloat(value);
-  return Number.isFinite(numeric) ? numeric : null;
-}
-
-function mapOpeningHours(rows) {
-  return rows.map((row) => ({
-    id: row.id,
-    branchId: row.branch_id,
-    dayOfWeek: row.day_of_week,
-    openTime: row.open_time,
-    closeTime: row.close_time,
-    isClosed: row.is_closed,
-    overnight: row.overnight,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  }));
-}
-
-function mapSpecialHours(rows) {
-  return rows.map((row) => ({
-    id: row.id,
-    branchId: row.branch_id,
-    date: row.on_date,
-    openTime: row.open_time,
-    closeTime: row.close_time,
-    isClosed: row.is_closed,
-    overnight: row.overnight,
-    note: row.note,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  }));
-}
-
-function mapBranchRatings(rows) {
-  return rows.map((row) => ({
-    id: row.id,
-    branchId: row.branch_id,
-    userId: row.user_id,
-    orderId: row.order_id,
-    ratingValue: row.rating_value !== null && row.rating_value !== undefined
-      ? Number(row.rating_value)
-      : null,
-    comment: row.comment,
-    imageUrl: row.image_url,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  }));
-}
-
-function mapRatingSummaryRows(rows) {
-  return rows.reduce((acc, row) => {
-    acc[row.branch_id] = {
-      branchId: row.branch_id,
-      avgRating: row.avg_rating !== null && row.avg_rating !== undefined
-        ? Number(row.avg_rating)
-        : null,
-      totalRatings: row.total_ratings ?? 0,
-      lastUpdated: row.last_updated || null,
-    };
-    return acc;
-  }, {});
-}
-
-const ADMIN_RESTAURANT_ROOM = 'admin:restaurants';
-
-function uniqueRooms(...lists) {
-  const acc = new Set();
-  lists.forEach((list) => {
-    if (!list) return;
-    const items = Array.isArray(list) ? list : [list];
-    items.filter(Boolean).forEach((item) => acc.add(item));
-  });
-  return Array.from(acc);
-}
-
-function roomsForRestaurantEntity(restaurant) {
-  if (!restaurant) return [ADMIN_RESTAURANT_ROOM];
-  return uniqueRooms(
-    ADMIN_RESTAURANT_ROOM,
-    'catalog:restaurants',
-    restaurant.id ? `restaurant:${restaurant.id}` : null,
-    restaurant.owner_id ? `restaurant-owner:${restaurant.owner_id}` : null,
-  );
-}
-
-function roomsForBranchEntity(restaurant, branch) {
-  return uniqueRooms(
-    roomsForRestaurantEntity(restaurant),
-    branch?.id ? `restaurant-branch:${branch.id}` : null,
-  );
-}
-
-async function fetchOwnerAccount(ownerId) {
-  if (!ownerId) return null;
-  const url = `${USER_SERVICE_URL}/api/restaurants/owners/${ownerId}`;
-  return httpGetJson(url);
-}
-
-function mapOwnerAccount(account) {
-  if (!account) return null;
+function mapRestaurantRow(row) {
+  if (!row) return null;
   return {
-    id: account.id || null,
-    email: account.email || null,
-    phone: account.phone || null,
-    managerName: account.managerName || null,
-    restaurantName: account.restaurantName || null,
-    companyAddress: account.companyAddress || null,
-    taxCode: account.taxCode || null,
-    restaurantStatus: account.restaurantStatus || null,
-    isApproved: account.isApproved ?? null,
-    isActive: account.isActive ?? null,
-    isVerified: account.isVerified ?? null,
+    ...row,
+    images: toArray(row.images),
+    logo: toArray(row.logo),
+    is_active: row.is_active !== false,
+    avg_branch_rating: toNumber(row.avg_branch_rating, 0),
+    total_branch_ratings: toNumber(row.total_branch_ratings, 0),
   };
 }
 
-async function hydrateBranches(client, restaurantId) {
-  const branchesRes = await client.query(
-    `SELECT id,
-            restaurant_id,
-            branch_number,
-            name,
-            branch_phone,
-            branch_email,
-            images,
-            street,
-            ward,
-            district,
-            city,
-            latitude,
-            longitude,
-            is_primary,
-            is_open,
-            rating,
-            created_at,
-            updated_at
-     FROM restaurant_branches
-     WHERE restaurant_id = $1
-     ORDER BY branch_number ASC`,
-    [restaurantId],
-  );
+function mapBranchRow(row) {
+  if (!row) return null;
+  return {
+    ...row,
+    images: toArray(row.images),
+    is_primary: row.is_primary === true,
+    is_open: row.is_open === true,
+    rating: row.rating !== null && row.rating !== undefined ? Number(row.rating) : null,
+    ratingSummary: row.avg_rating || row.total_ratings
+      ? {
+          avgRating: row.avg_rating !== null && row.avg_rating !== undefined
+            ? Number(row.avg_rating)
+            : null,
+          totalRatings: row.total_ratings !== null && row.total_ratings !== undefined
+            ? Number(row.total_ratings)
+            : null,
+        }
+      : undefined,
+  };
+}
 
-  const branches = branchesRes.rows;
-  if (!branches.length) return [];
-
-  const branchIds = branches.map((branch) => branch.id);
-  const openingRes = await client.query(
-    `SELECT *
-     FROM branch_opening_hours
-     WHERE branch_id = ANY($1::uuid[])
-     ORDER BY day_of_week ASC`,
-    [branchIds],
-  );
-  const specialRes = await client.query(
-    `SELECT *
-     FROM branch_special_hours
-     WHERE branch_id = ANY($1::uuid[])
-     ORDER BY on_date ASC`,
-    [branchIds],
-  );
-  const ratingsRes = await client.query(
-    `SELECT id,
-            branch_id,
-            user_id,
-            order_id,
-            rating_value,
-            comment,
-            image_url,
-            created_at,
-            updated_at
-     FROM branch_rating
-     WHERE branch_id = ANY($1::uuid[])
-     ORDER BY created_at DESC`,
-    [branchIds],
-  );
-  const ratingSummaryRes = await client.query(
-    `SELECT branch_id,
-            avg_rating,
-            total_ratings,
-            last_updated
-     FROM branch_rating_avg
-     WHERE branch_id = ANY($1::uuid[])`,
-    [branchIds],
-  );
-
-  const openingMap = openingRes.rows.reduce((acc, row) => {
-    acc[row.branch_id] = acc[row.branch_id] || [];
-    acc[row.branch_id].push(row);
-    return acc;
-  }, {});
-
-  const specialMap = specialRes.rows.reduce((acc, row) => {
-    acc[row.branch_id] = acc[row.branch_id] || [];
-    acc[row.branch_id].push(row);
-    return acc;
-  }, {});
-
-  const ratingsMap = ratingsRes.rows.reduce((acc, row) => {
-    acc[row.branch_id] = acc[row.branch_id] || [];
-    acc[row.branch_id].push(row);
-    return acc;
-  }, {});
-
-  const ratingSummaryMap = mapRatingSummaryRows(ratingSummaryRes.rows);
-
-  return branches.map((branch) => ({
-    id: branch.id,
-    restaurantId: branch.restaurant_id,
-    branchNumber: branch.branch_number,
-    name: branch.name,
-    branchPhone: branch.branch_phone,
-    branchEmail: branch.branch_email,
-    brandPhone: branch.branch_phone,
-    brandEmail: branch.branch_email,
-    images: branch.images,
-    street: branch.street,
-    ward: branch.ward,
-    district: branch.district,
-    city: branch.city,
-    latitude: branch.latitude !== null && branch.latitude !== undefined
-      ? Number(branch.latitude)
+function mapProductRow(row) {
+  if (!row) return null;
+  const basePrice = toNumber(row.base_price, 0);
+  return {
+    ...row,
+    images: toArray(row.images),
+    base_price: basePrice,
+    tax_rate: row.tax_rate !== null && row.tax_rate !== undefined
+      ? Number(row.tax_rate)
       : null,
-    longitude: branch.longitude !== null && branch.longitude !== undefined
-      ? Number(branch.longitude)
+    tax_amount: row.tax_amount !== null && row.tax_amount !== undefined
+      ? Number(row.tax_amount)
       : null,
-    isPrimary: branch.is_primary,
-    ratingSummary: ratingSummaryMap[branch.id] || {
-      branchId: branch.id,
-      avgRating: branch.rating !== null && branch.rating !== undefined
-        ? Number(branch.rating)
+    price_with_tax: row.price_with_tax !== null && row.price_with_tax !== undefined
+      ? Number(row.price_with_tax)
+      : basePrice,
+    popular: toBoolean(row.popular, false),
+    available: toBoolean(row.available, true),
+    is_visible: toBoolean(row.is_visible, true),
+    category: row.category_name || row.category || null,
+    inventory_summary: {
+      quantity: row.total_quantity !== undefined && row.total_quantity !== null
+        ? Number(row.total_quantity)
         : null,
-      totalRatings: (ratingsMap[branch.id] || []).length,
-      lastUpdated: null,
+      reserved_qty: row.total_reserved !== undefined && row.total_reserved !== null
+        ? Number(row.total_reserved)
+        : null,
     },
-    ratings: mapBranchRatings(ratingsMap[branch.id] || []),
-    isOpen: branch.is_open,
-    rating: branch.rating !== null && branch.rating !== undefined
-      ? Number(branch.rating)
-      : null,
-    createdAt: branch.created_at,
-    updatedAt: branch.updated_at,
-    openingHours: mapOpeningHours(openingMap[branch.id] || []),
-    specialHours: mapSpecialHours(specialMap[branch.id] || []),
-  }));
-}
-
-async function getAllRestaurants() {
-  const { rows } = await pool.query(`${SELECT_RESTAURANT_BASE} ORDER BY created_at DESC`);
-  return rows;
-}
-
-async function getRestaurantsByOwner(ownerId) {
-  const { rows } = await pool.query(
-    `${SELECT_RESTAURANT_BASE} WHERE owner_id = $1 ORDER BY created_at DESC`,
-    [ownerId],
-  );
-  if (!rows.length) {
-    return [];
-  }
-  const owner = mapOwnerAccount(await fetchOwnerAccount(ownerId));
-  return rows.map((restaurant) => ({
-    ...restaurant,
-    owner,
-  }));
-}
-
-async function getRestaurantById(id, { includeBranches = true } = {}) {
-  const client = await pool.connect();
-  let restaurant = null;
-  let branches = [];
-  try {
-    const res = await client.query(`${SELECT_RESTAURANT_BASE} WHERE id = $1`, [id]);
-    if (!res.rowCount) {
-      return null;
-    }
-    restaurant = res.rows[0];
-    if (includeBranches) {
-      branches = await hydrateBranches(client, id);
-    }
-  } finally {
-    client.release();
-  }
-
-  if (!restaurant) {
-    return null;
-  }
-
-  const ownerAccount = mapOwnerAccount(await fetchOwnerAccount(restaurant.owner_id));
-  const payload = { ...restaurant, owner: ownerAccount };
-  if (includeBranches) {
-    payload.branches = branches;
-  }
-  return payload;
-}
-
-async function getRestaurantByOwner(ownerId) {
-  const client = await pool.connect();
-  let restaurant = null;
-  let branches = [];
-  try {
-    const res = await client.query(
-      `${SELECT_RESTAURANT_BASE} WHERE owner_id = $1 ORDER BY created_at DESC LIMIT 1`,
-      [ownerId],
-    );
-    if (res.rowCount) {
-      restaurant = res.rows[0];
-      branches = await hydrateBranches(client, restaurant.id);
-    }
-  } finally {
-    client.release();
-  }
-
-  const account = await fetchOwnerAccount(ownerId);
-  const owner = mapOwnerAccount(account);
-
-  if (restaurant) {
-    return {
-      ...restaurant,
-      branches,
-      owner,
-    };
-  }
-
-  if (!account) return null;
-
-  return {
-    owner_id: ownerId,
-    name: account.restaurantName || null,
-    description: null,
-    about: null,
-    cuisine: null,
-    phone: account.phone || null,
-    email: account.email || null,
-    logo: null,
-    images: null,
-    is_active: account.isActive ?? false,
-    restaurant_status: account.restaurantStatus || null,
-    manager_name: account.managerName || null,
-    pending_profile: true,
-    branches: [],
-    owner,
   };
 }
 
-async function createRestaurant(data) {
+async function fetchRestaurants(options = {}) {
   const {
+    restaurantIds,
     ownerId,
-    name,
-    description = null,
-    about = null,
-    cuisine = null,
-    phone = null,
-    email = null,
-    logo = null,
-    images = null,
-    branches = [],
-  } = data;
+    includeBranches = false,
+    includeProducts = false,
+    includeBranchProducts = false,
+    limit,
+    offset,
+  } = options;
 
-  if (!ownerId) throw new Error('ownerId is required');
-  const trimmedName = sanitiseText(name);
-  if (!trimmedName) throw new Error('Restaurant name is required');
+  const filters = [];
+  const params = [];
+  let paramIndex = 1;
 
-  const ownerAccount = await fetchOwnerAccount(ownerId);
-  if (!ownerAccount) {
-    throw new Error('Owner account not found');
+  if (Array.isArray(restaurantIds) && restaurantIds.length) {
+    filters.push(`id = ANY($${paramIndex++})`);
+    params.push(restaurantIds);
+  }
+  if (ownerId) {
+    filters.push(`owner_id = $${paramIndex++}`);
+    params.push(ownerId);
   }
 
-  const imageArray = normaliseImages(images);
-  const logoArray = normaliseImages(logo);
-
-  const query = `
-    INSERT INTO restaurants (owner_id, name, description, about, cuisine, phone, email, logo, images)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-    RETURNING *;
+  let query = `
+    SELECT
+      id,
+      owner_id,
+      name,
+      description,
+      about,
+      cuisine,
+      phone,
+      email,
+      logo,
+      images,
+      is_active,
+      avg_branch_rating,
+      total_branch_ratings,
+      created_at,
+      updated_at
+    FROM restaurants
   `;
 
-  const values = [
-    ownerId,
-    trimmedName,
-    sanitiseText(description),
-    sanitiseText(about),
-    sanitiseText(cuisine),
-    sanitiseText(phone),
-    sanitiseText(email),
-    logoArray,
-    imageArray,
-  ];
+  if (filters.length) {
+    query += ` WHERE ${filters.join(' AND ')}`;
+  }
 
-  const { rows } = await pool.query(query, values);
-  const restaurantId = rows[0].id;
+  query += ' ORDER BY created_at DESC';
 
-  if (Array.isArray(branches) && branches.length) {
-    try {
-      for (const branchPayload of branches) {
-        await createRestaurantBranch(restaurantId, branchPayload);
+  if (typeof limit === 'number') {
+    query += ` LIMIT $${paramIndex++}`;
+    params.push(limit);
+  }
+  if (typeof offset === 'number') {
+    query += ` OFFSET $${paramIndex++}`;
+    params.push(offset);
+  }
+
+  const result = await pool.query(query, params);
+  const restaurants = result.rows.map(mapRestaurantRow);
+
+  if (!restaurants.length) {
+    return restaurants;
+  }
+
+  const restaurantMap = new Map();
+  const restaurantIdsList = [];
+  restaurants.forEach((restaurant) => {
+    restaurant.products = [];
+    restaurant.branches = [];
+    restaurantMap.set(restaurant.id, restaurant);
+    restaurantIdsList.push(restaurant.id);
+  });
+
+  const branchMap = new Map();
+
+  if (includeBranches) {
+    const branchRes = await pool.query(
+      `
+        SELECT
+          b.*,
+          avg.avg_rating,
+          avg.total_ratings
+        FROM restaurant_branches b
+        LEFT JOIN branch_rating_avg avg ON avg.branch_id = b.id
+        WHERE b.restaurant_id = ANY($1)
+        ORDER BY b.restaurant_id, b.branch_number, b.created_at
+      `,
+      [restaurantIdsList],
+    );
+
+    branchRes.rows.forEach((row) => {
+      const branch = mapBranchRow(row);
+      branch.products = [];
+      branchMap.set(branch.id, branch);
+      const parent = restaurantMap.get(branch.restaurant_id);
+      if (parent) {
+        parent.branches.push(branch);
       }
-    } catch (error) {
-      console.error('[product-service] Failed to create branch during restaurant onboarding:', error.message);
-      await pool.query('DELETE FROM restaurants WHERE id = $1', [restaurantId]);
-      throw error;
+    });
+  }
+
+  const productMap = new Map();
+
+  if (includeProducts) {
+    const productRes = await pool.query(
+      `
+        SELECT
+          p.*,
+          c.name AS category_name,
+          inv.total_quantity,
+          inv.total_reserved
+        FROM products p
+        LEFT JOIN categories c ON c.id = p.category_id
+        LEFT JOIN (
+          SELECT
+            product_id,
+            SUM(quantity) AS total_quantity,
+            SUM(reserved_qty) AS total_reserved
+          FROM inventory
+          GROUP BY product_id
+        ) inv ON inv.product_id = p.id
+        WHERE p.restaurant_id = ANY($1)
+        ORDER BY p.created_at DESC
+      `,
+      [restaurantIdsList],
+    );
+
+    productRes.rows.forEach((row) => {
+      const product = mapProductRow(row);
+      productMap.set(product.id, product);
+      const parent = restaurantMap.get(product.restaurant_id);
+      if (parent) {
+        parent.products.push(product);
+      }
+    });
+
+    if (includeBranchProducts && branchMap.size && productMap.size) {
+      const branchIds = Array.from(branchMap.keys());
+      const productIds = Array.from(productMap.keys());
+
+      const inventoryRes = await pool.query(
+        `
+          SELECT
+            branch_id,
+            product_id,
+            quantity,
+            reserved_qty
+          FROM inventory
+          WHERE branch_id = ANY($1) AND product_id = ANY($2)
+        `,
+        [branchIds, productIds],
+      );
+
+      inventoryRes.rows.forEach((row) => {
+        const branch = branchMap.get(row.branch_id);
+        const product = productMap.get(row.product_id);
+        if (!branch || !product) return;
+        branch.products.push({
+          ...product,
+          inventory: {
+            branch_id: row.branch_id,
+            branchId: row.branch_id,
+            quantity: row.quantity !== null && row.quantity !== undefined
+              ? Number(row.quantity)
+              : null,
+            reserved_qty: row.reserved_qty !== null && row.reserved_qty !== undefined
+              ? Number(row.reserved_qty)
+              : null,
+          },
+        });
+      });
     }
   }
 
-  const restaurant = await getRestaurantById(restaurantId);
-  publishSocketEvent('restaurant.created', { restaurantId, restaurant }, roomsForRestaurantEntity(restaurant));
-  return restaurant;
+  return restaurants;
 }
 
-async function updateRestaurant(id, data) {
+async function getAllRestaurants(options = {}) {
+  return fetchRestaurants(options);
+}
+
+async function getRestaurantById(id, options = {}) {
+  const rows = await fetchRestaurants({
+    ...options,
+    restaurantIds: [id],
+  });
+  return rows[0] || null;
+}
+
+async function getRestaurantsByOwner(ownerId, options = {}) {
+  return fetchRestaurants({
+    ...options,
+    ownerId,
+  });
+}
+
+async function getRestaurantByOwner(ownerId, options = {}) {
+  const rows = await fetchRestaurants({
+    ...options,
+    ownerId,
+  });
+  return rows[0] || null;
+}
+
+async function createRestaurant(payload = {}) {
+  const images = toArray(payload.images);
+  const logo = toArray(payload.logo);
+
+  const res = await pool.query(
+    `
+      INSERT INTO restaurants (
+        owner_id,
+        name,
+        description,
+        about,
+        cuisine,
+        phone,
+        email,
+        logo,
+        images,
+        is_active
+      ) VALUES (
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10
+      )
+      RETURNING *
+    `,
+    [
+      payload.owner_id || payload.ownerId,
+      payload.name,
+      payload.description || null,
+      payload.about || null,
+      payload.cuisine || null,
+      payload.phone || null,
+      payload.email || null,
+      logo,
+      images,
+      payload.is_active !== undefined ? toBoolean(payload.is_active, true) : true,
+    ],
+  );
+
+  return mapRestaurantRow(res.rows[0]);
+}
+
+async function updateRestaurant(id, payload = {}) {
   const fields = [];
   const values = [];
-  let index = 1;
+  let idx = 1;
 
-  if (Object.prototype.hasOwnProperty.call(data, 'name')) {
-    fields.push(`name = $${index++}`);
-    values.push(sanitiseText(data.name));
-  }
-  if (Object.prototype.hasOwnProperty.call(data, 'description')) {
-    fields.push(`description = $${index++}`);
-    values.push(sanitiseText(data.description));
-  }
-  if (Object.prototype.hasOwnProperty.call(data, 'about')) {
-    fields.push(`about = $${index++}`);
-    values.push(sanitiseText(data.about));
-  }
-  if (Object.prototype.hasOwnProperty.call(data, 'cuisine')) {
-    fields.push(`cuisine = $${index++}`);
-    values.push(sanitiseText(data.cuisine));
-  }
-  if (Object.prototype.hasOwnProperty.call(data, 'phone')) {
-    fields.push(`phone = $${index++}`);
-    values.push(sanitiseText(data.phone));
-  }
-  if (Object.prototype.hasOwnProperty.call(data, 'email')) {
-    fields.push(`email = $${index++}`);
-    values.push(sanitiseText(data.email));
-  }
-  if (Object.prototype.hasOwnProperty.call(data, 'logo')) {
-    fields.push(`logo = $${index++}`);
-    values.push(normaliseImages(data.logo));
-  }
-  if (Object.prototype.hasOwnProperty.call(data, 'images')) {
-    fields.push(`images = $${index++}`);
-    values.push(normaliseImages(data.images));
-  }
-  if (Object.prototype.hasOwnProperty.call(data, 'is_active')) {
-    fields.push(`is_active = $${index++}`);
-    values.push(data.is_active);
+  const mapping = {
+    owner_id: payload.owner_id ?? payload.ownerId,
+    name: payload.name,
+    description: Object.prototype.hasOwnProperty.call(payload, 'description')
+      ? payload.description
+      : undefined,
+    about: Object.prototype.hasOwnProperty.call(payload, 'about')
+      ? payload.about
+      : undefined,
+    cuisine: payload.cuisine,
+    phone: payload.phone,
+    email: payload.email,
+    logo: Object.prototype.hasOwnProperty.call(payload, 'logo')
+      ? toArray(payload.logo)
+      : undefined,
+    images: Object.prototype.hasOwnProperty.call(payload, 'images')
+      ? toArray(payload.images)
+      : undefined,
+    is_active: Object.prototype.hasOwnProperty.call(payload, 'is_active')
+      ? toBoolean(payload.is_active, true)
+      : undefined,
+  };
+
+  for (const [column, value] of Object.entries(mapping)) {
+    if (typeof value === 'undefined') continue;
+    fields.push(`${column} = $${idx++}`);
+    values.push(value);
   }
 
   if (!fields.length) {
     return getRestaurantById(id);
   }
 
-  fields.push('updated_at = now()');
-  values.push(id);
+  fields.push(`updated_at = now()`);
 
-  const query = `UPDATE restaurants SET ${fields.join(', ')} WHERE id = $${index} RETURNING *`;
-  const { rows } = await pool.query(query, values);
-  if (!rows.length) {
-    return null;
-  }
-  const restaurant = await getRestaurantById(rows[0].id);
-  if (restaurant) {
-    publishSocketEvent(
-      'restaurant.updated',
-      { restaurantId: restaurant.id, restaurant },
-      roomsForRestaurantEntity(restaurant),
-    );
-  }
-  return restaurant;
+  const res = await pool.query(
+    `UPDATE restaurants SET ${fields.join(', ')} WHERE id = $${idx} RETURNING *`,
+    [...values, id],
+  );
+
+  return mapRestaurantRow(res.rows[0] || null);
 }
 
 async function deleteRestaurant(id) {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-
-    const restaurantRes = await client.query(
-      `${SELECT_RESTAURANT_BASE} WHERE id = $1`,
-      [id],
-    );
-    if (!restaurantRes.rowCount) {
-      await client.query('ROLLBACK');
-      return null;
-    }
-    const restaurant = restaurantRes.rows[0];
-
-    await client.query('DELETE FROM branch_special_hours WHERE branch_id IN (SELECT id FROM restaurant_branches WHERE restaurant_id = $1)', [id]);
-    await client.query('DELETE FROM branch_opening_hours WHERE branch_id IN (SELECT id FROM restaurant_branches WHERE restaurant_id = $1)', [id]);
-    await client.query('DELETE FROM branch_rating WHERE branch_id IN (SELECT id FROM restaurant_branches WHERE restaurant_id = $1)', [id]);
-    await client.query('DELETE FROM branch_rating_avg WHERE branch_id IN (SELECT id FROM restaurant_branches WHERE restaurant_id = $1)', [id]);
-    await client.query('DELETE FROM restaurant_branches WHERE restaurant_id = $1', [id]);
-    await client.query('DELETE FROM restaurants WHERE id = $1', [id]);
-
-    await client.query('COMMIT');
-
-    publishSocketEvent(
-      'restaurant.deleted',
-      { restaurantId: id, ownerId: restaurant.owner_id },
-      roomsForRestaurantEntity(restaurant),
-    );
-
-    return { message: 'Restaurant deleted successfully' };
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
-  }
+  const res = await pool.query('DELETE FROM restaurants WHERE id = $1 RETURNING id', [id]);
+  return res.rows[0] || null;
 }
 
 async function getBranchesForRestaurant(restaurantId) {
-  const client = await pool.connect();
-  try {
-    return await hydrateBranches(client, restaurantId);
-  } finally {
-    client.release();
-  }
+  const res = await pool.query(
+    `
+      SELECT
+        b.*,
+        avg.avg_rating,
+        avg.total_ratings
+      FROM restaurant_branches b
+      LEFT JOIN branch_rating_avg avg ON avg.branch_id = b.id
+      WHERE b.restaurant_id = $1
+      ORDER BY b.branch_number, b.created_at
+    `,
+    [restaurantId],
+  );
+
+  return res.rows.map((row) => {
+    const branch = mapBranchRow(row);
+    branch.products = [];
+    return branch;
+  });
 }
 
-async function createRestaurantBranch(restaurantId, payload) {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-
-    const restaurantCheck = await client.query(
-      'SELECT id, owner_id FROM restaurants WHERE id = $1',
-      [restaurantId],
-    );
-    if (!restaurantCheck.rowCount) {
-      throw new Error('Restaurant not found');
-    }
-    const restaurantRecord = restaurantCheck.rows[0];
-
-    const branchName = sanitiseText(payload.name);
-    if (!branchName) {
-      throw new Error('Branch name is required');
-    }
-
-    const street = sanitiseText(payload.street);
-    const ward = sanitiseText(payload.ward);
-    const district = sanitiseText(payload.district);
-    const city = sanitiseText(payload.city);
-
-    const maxRes = await client.query(
-      'SELECT COALESCE(MAX(branch_number), 0) AS max_number, COUNT(*) AS total FROM restaurant_branches WHERE restaurant_id = $1',
-      [restaurantId],
-    );
-
-    const nextNumber = parseInt(maxRes.rows[0].max_number, 10) + 1;
-    const totalExisting = parseInt(maxRes.rows[0].total, 10);
-
-    let isPrimary = payload.isPrimary;
-    if (totalExisting === 0) {
-      isPrimary = true;
-    } else if (isPrimary) {
-      await client.query('UPDATE restaurant_branches SET is_primary = FALSE WHERE restaurant_id = $1', [restaurantId]);
-    }
-
-    let branchNumber = Number.isInteger(payload.branchNumber)
-      ? payload.branchNumber
-      : Number.parseInt(payload.branchNumber, 10);
-    if (Number.isNaN(branchNumber) || branchNumber <= 0) {
-      branchNumber = nextNumber;
-    } else {
-      const exists = await client.query(
-        'SELECT 1 FROM restaurant_branches WHERE restaurant_id = $1 AND branch_number = $2',
-        [restaurantId, branchNumber],
-      );
-      if (exists.rowCount) {
-        throw new Error('Branch number already exists for this restaurant');
-      }
-    }
-
-    const branchImages = normaliseImages(payload.images);
-    const branchPhoneValue = sanitiseText(
-      Object.prototype.hasOwnProperty.call(payload, 'branchPhone')
-        ? payload.branchPhone
-        : payload.brandPhone,
-    );
-    const branchEmailValue = sanitiseText(
-      Object.prototype.hasOwnProperty.call(payload, 'branchEmail')
-        ? payload.branchEmail
-        : payload.brandEmail,
-    );
-    const branchIsOpen = payload.isOpen === true;
-
-    let latitude = parseCoordinate(payload.latitude);
-    let longitude = parseCoordinate(payload.longitude);
-    if ((latitude === null || longitude === null) && (street || ward || district || city)) {
-      const geocoded = await geocodeAddress({ street, ward, district, city });
-      if (geocoded) {
-        latitude = geocoded.latitude;
-        longitude = geocoded.longitude;
-      }
-    }
-
-    const branchInsert = await client.query(
-      `INSERT INTO restaurant_branches (
+async function createRestaurantBranch(restaurantId, payload = {}) {
+  const images = toArray(payload.images || payload.imageUrl);
+  const res = await pool.query(
+    `
+      INSERT INTO restaurant_branches (
         restaurant_id,
         branch_number,
         name,
         branch_phone,
         branch_email,
-        images,
         street,
         ward,
         district,
         city,
         latitude,
         longitude,
+        images,
         is_primary,
         is_open
+      ) VALUES (
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, COALESCE($14, FALSE))
-      RETURNING *`,
-      [
-        restaurantId,
-        branchNumber,
-        branchName,
-        branchPhoneValue,
-        branchEmailValue,
-        branchImages,
-        street,
-        ward,
-        district,
-        city,
-        latitude,
-        longitude,
-        isPrimary === true,
-        branchIsOpen,
-      ],
-    );
+      RETURNING *
+    `,
+    [
+      restaurantId,
+      Number(payload.branch_number ?? payload.branchNumber ?? 1),
+      payload.name || null,
+      payload.branch_phone || payload.branchPhone || null,
+      payload.branch_email || payload.branchEmail || null,
+      payload.street || null,
+      payload.ward || null,
+      payload.district || null,
+      payload.city || null,
+      payload.latitude !== undefined && payload.latitude !== null ? Number(payload.latitude) : null,
+      payload.longitude !== undefined && payload.longitude !== null ? Number(payload.longitude) : null,
+      images,
+      toBoolean(payload.is_primary ?? payload.isPrimary, false),
+      toBoolean(payload.is_open ?? payload.isOpen, false),
+    ],
+  );
 
-    const branch = branchInsert.rows[0];
-
-    const openingHours = Array.isArray(payload.openingHours) ? payload.openingHours : [];
-    for (const hour of openingHours) {
-      const day = Number(hour.dayOfWeek);
-      if (Number.isNaN(day)) continue;
-      await client.query(
-        `INSERT INTO branch_opening_hours (branch_id, day_of_week, open_time, close_time, is_closed, overnight)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
-        [
-          branch.id,
-          day,
-          hour.openTime || null,
-          hour.closeTime || null,
-          hour.isClosed === true,
-          hour.overnight === true,
-        ],
-      );
-    }
-
-    const specialHours = Array.isArray(payload.specialHours) ? payload.specialHours : [];
-    for (const special of specialHours) {
-      if (!special.date) continue;
-      await client.query(
-        `INSERT INTO branch_special_hours (branch_id, on_date, open_time, close_time, is_closed, overnight, note)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [
-          branch.id,
-          special.date,
-          special.openTime || null,
-          special.closeTime || null,
-          special.isClosed === true,
-          special.overnight === true,
-          sanitiseText(special.note),
-        ],
-      );
-    }
-
-    await client.query('COMMIT');
-
-    const branches = await hydrateBranches(client, restaurantId);
-    const resultBranch = branches.find((item) => item.id === branch.id);
-
-    publishSocketEvent(
-      'restaurant.branch.created',
-      { restaurantId, branch: resultBranch },
-      roomsForBranchEntity(restaurantRecord, branch),
-    );
-
-    return resultBranch;
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
-  }
+  return mapBranchRow(res.rows[0]);
 }
 
-async function updateRestaurantBranch(restaurantId, branchId, payload) {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
+async function updateRestaurantBranch(restaurantId, branchId, payload = {}) {
+  const fields = [];
+  const values = [];
+  let idx = 1;
 
-    const existingRes = await client.query(
-      'SELECT * FROM restaurant_branches WHERE id = $1 AND restaurant_id = $2',
-      [branchId, restaurantId],
-    );
-    if (!existingRes.rowCount) {
-      throw new Error('Branch not found for this restaurant');
-    }
-    const existing = existingRes.rows[0];
+  const mapping = {
+    branch_number: payload.branch_number ?? payload.branchNumber,
+    name: payload.name,
+    branch_phone: payload.branch_phone ?? payload.branchPhone,
+    branch_email: payload.branch_email ?? payload.branchEmail,
+    street: payload.street,
+    ward: payload.ward,
+    district: payload.district,
+    city: payload.city,
+    latitude: payload.latitude !== undefined ? Number(payload.latitude) : undefined,
+    longitude: payload.longitude !== undefined ? Number(payload.longitude) : undefined,
+    images: Object.prototype.hasOwnProperty.call(payload, 'images') || Object.prototype.hasOwnProperty.call(payload, 'imageUrl')
+      ? toArray(payload.images || payload.imageUrl)
+      : undefined,
+    is_primary: Object.prototype.hasOwnProperty.call(payload, 'is_primary') || Object.prototype.hasOwnProperty.call(payload, 'isPrimary')
+      ? toBoolean(payload.is_primary ?? payload.isPrimary, false)
+      : undefined,
+    is_open: Object.prototype.hasOwnProperty.call(payload, 'is_open') || Object.prototype.hasOwnProperty.call(payload, 'isOpen')
+      ? toBoolean(payload.is_open ?? payload.isOpen, false)
+      : undefined,
+  };
 
-    const restaurantRes = await client.query(
-      'SELECT id, owner_id FROM restaurants WHERE id = $1',
-      [restaurantId],
-    );
-    const restaurantRecord = restaurantRes.rowCount ? restaurantRes.rows[0] : { id: restaurantId };
-
-    let branchNumber = existing.branch_number;
-    if (Object.prototype.hasOwnProperty.call(payload, 'branchNumber')) {
-      const candidate = Number.isInteger(payload.branchNumber)
-        ? payload.branchNumber
-        : Number.parseInt(payload.branchNumber, 10);
-      if (!Number.isNaN(candidate) && candidate > 0 && candidate !== branchNumber) {
-        const numberExists = await client.query(
-          'SELECT 1 FROM restaurant_branches WHERE restaurant_id = $1 AND branch_number = $2 AND id <> $3',
-          [restaurantId, candidate, branchId],
-        );
-        if (numberExists.rowCount) {
-          throw new Error('Branch number already exists for this restaurant');
-        }
-        branchNumber = candidate;
-      }
-    }
-
-    if (payload.isPrimary === true) {
-      await client.query(
-        'UPDATE restaurant_branches SET is_primary = FALSE WHERE restaurant_id = $1 AND id <> $2',
-        [restaurantId, branchId],
-      );
-    }
-
-    const streetValue = Object.prototype.hasOwnProperty.call(payload, 'street')
-      ? sanitiseText(payload.street)
-      : undefined;
-    const wardValue = Object.prototype.hasOwnProperty.call(payload, 'ward')
-      ? sanitiseText(payload.ward)
-      : undefined;
-    const districtValue = Object.prototype.hasOwnProperty.call(payload, 'district')
-      ? sanitiseText(payload.district)
-      : undefined;
-    const cityValue = Object.prototype.hasOwnProperty.call(payload, 'city')
-      ? sanitiseText(payload.city)
-      : undefined;
-
-    const finalStreet = streetValue !== undefined ? streetValue : existing.street;
-    const finalWard = wardValue !== undefined ? wardValue : existing.ward;
-    const finalDistrict = districtValue !== undefined ? districtValue : existing.district;
-    const finalCity = cityValue !== undefined ? cityValue : existing.city;
-    const addressChanged = streetValue !== undefined
-      || wardValue !== undefined
-      || districtValue !== undefined
-      || cityValue !== undefined;
-
-    const hasLatitude = Object.prototype.hasOwnProperty.call(payload, 'latitude');
-    const hasLongitude = Object.prototype.hasOwnProperty.call(payload, 'longitude');
-
-    const existingLatitude = existing.latitude !== null && existing.latitude !== undefined
-      ? Number.parseFloat(existing.latitude)
-      : null;
-    const existingLongitude = existing.longitude !== null && existing.longitude !== undefined
-      ? Number.parseFloat(existing.longitude)
-      : null;
-
-    let latitude = hasLatitude ? parseCoordinate(payload.latitude) : existingLatitude;
-    let longitude = hasLongitude ? parseCoordinate(payload.longitude) : existingLongitude;
-
-    if (addressChanged && !hasLatitude && !hasLongitude) {
-      if (finalStreet || finalWard || finalDistrict || finalCity) {
-        const geocoded = await geocodeAddress({
-          street: finalStreet,
-          ward: finalWard,
-          district: finalDistrict,
-          city: finalCity,
-        });
-        if (geocoded) {
-          latitude = geocoded.latitude;
-          longitude = geocoded.longitude;
-        }
-      }
-    }
-
-    const branchPhoneInput = Object.prototype.hasOwnProperty.call(payload, 'branchPhone')
-      ? payload.branchPhone
-      : (Object.prototype.hasOwnProperty.call(payload, 'brandPhone') ? payload.brandPhone : undefined);
-    const branchEmailInput = Object.prototype.hasOwnProperty.call(payload, 'branchEmail')
-      ? payload.branchEmail
-      : (Object.prototype.hasOwnProperty.call(payload, 'brandEmail') ? payload.brandEmail : undefined);
-
-    const updates = [];
-    const values = [];
-    let index = 1;
-
-    if (Object.prototype.hasOwnProperty.call(payload, 'name')) {
-      updates.push(`name = $${index++}`);
-      values.push(sanitiseText(payload.name));
-    }
-    if (branchPhoneInput !== undefined) {
-      updates.push(`branch_phone = $${index++}`);
-      values.push(sanitiseText(branchPhoneInput));
-    }
-    if (branchEmailInput !== undefined) {
-      updates.push(`branch_email = $${index++}`);
-      values.push(sanitiseText(branchEmailInput));
-    }
-    if (Object.prototype.hasOwnProperty.call(payload, 'images')) {
-      updates.push(`images = $${index++}`);
-      values.push(normaliseImages(payload.images));
-    }
-    if (streetValue !== undefined) {
-      updates.push(`street = $${index++}`);
-      values.push(streetValue);
-    }
-    if (wardValue !== undefined) {
-      updates.push(`ward = $${index++}`);
-      values.push(wardValue);
-    }
-    if (districtValue !== undefined) {
-      updates.push(`district = $${index++}`);
-      values.push(districtValue);
-    }
-    if (cityValue !== undefined) {
-      updates.push(`city = $${index++}`);
-      values.push(cityValue);
-    }
-    const coordinatesChanged = latitude !== existingLatitude || longitude !== existingLongitude;
-    if (hasLatitude || coordinatesChanged) {
-      updates.push(`latitude = $${index++}`);
-      values.push(latitude ?? null);
-    }
-    if (hasLongitude || coordinatesChanged) {
-      updates.push(`longitude = $${index++}`);
-      values.push(longitude ?? null);
-    }
-    if (Object.prototype.hasOwnProperty.call(payload, 'isPrimary')) {
-      updates.push(`is_primary = $${index++}`);
-      values.push(payload.isPrimary === true);
-    }
-    if (Object.prototype.hasOwnProperty.call(payload, 'isOpen')) {
-      updates.push(`is_open = $${index++}`);
-      values.push(payload.isOpen === true);
-    }
-    if (branchNumber !== existing.branch_number) {
-      updates.push(`branch_number = $${index++}`);
-      values.push(branchNumber);
-    }
-
-    if (updates.length) {
-      updates.push('updated_at = now()');
-      values.push(branchId);
-      await client.query(
-        `UPDATE restaurant_branches SET ${updates.join(', ')} WHERE id = $${index}`,
-        values,
-      );
-    } else {
-      await client.query('UPDATE restaurant_branches SET updated_at = now() WHERE id = $1', [branchId]);
-    }
-
-    if (Array.isArray(payload.openingHours)) {
-      await client.query('DELETE FROM branch_opening_hours WHERE branch_id = $1', [branchId]);
-      for (const hour of payload.openingHours) {
-        const day = Number(hour.dayOfWeek);
-        if (Number.isNaN(day)) continue;
-        await client.query(
-          `INSERT INTO branch_opening_hours (branch_id, day_of_week, open_time, close_time, is_closed, overnight)
-           VALUES ($1, $2, $3, $4, $5, $6)`,
-          [
-            branchId,
-            day,
-            hour.openTime || null,
-            hour.closeTime || null,
-            hour.isClosed === true,
-            hour.overnight === true,
-          ],
-        );
-      }
-    }
-
-    if (Array.isArray(payload.specialHours)) {
-      await client.query('DELETE FROM branch_special_hours WHERE branch_id = $1', [branchId]);
-      for (const special of payload.specialHours) {
-        if (!special.date) continue;
-        await client.query(
-          `INSERT INTO branch_special_hours (branch_id, on_date, open_time, close_time, is_closed, overnight, note)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-          [
-            branchId,
-            special.date,
-            special.openTime || null,
-            special.closeTime || null,
-            special.isClosed === true,
-            special.overnight === true,
-            sanitiseText(special.note),
-          ],
-        );
-      }
-    }
-
-    await client.query('COMMIT');
-
-    const branches = await hydrateBranches(client, restaurantId);
-    const resultBranch = branches.find((item) => item.id === branchId) || null;
-
-    publishSocketEvent(
-      'restaurant.branch.updated',
-      { restaurantId, branchId, branch: resultBranch },
-      roomsForBranchEntity(restaurantRecord, resultBranch || existing),
-    );
-
-    return resultBranch;
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
+  for (const [column, value] of Object.entries(mapping)) {
+    if (typeof value === 'undefined') continue;
+    fields.push(`${column} = $${idx++}`);
+    values.push(value);
   }
+
+  if (!fields.length) {
+    const res = await pool.query(
+      'SELECT b.*, avg.avg_rating, avg.total_ratings FROM restaurant_branches b LEFT JOIN branch_rating_avg avg ON avg.branch_id = b.id WHERE b.restaurant_id = $1 AND b.id = $2',
+      [restaurantId, branchId],
+    );
+    return res.rows[0] ? mapBranchRow(res.rows[0]) : null;
+  }
+
+  fields.push('updated_at = now()');
+
+  const res = await pool.query(
+    `
+      UPDATE restaurant_branches
+      SET ${fields.join(', ')}
+      WHERE restaurant_id = $${idx} AND id = $${idx + 1}
+      RETURNING *
+    `,
+    [...values, restaurantId, branchId],
+  );
+
+  return res.rows[0] ? mapBranchRow(res.rows[0]) : null;
 }
 
 async function deleteRestaurantBranch(restaurantId, branchId) {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-
-    const branchRes = await client.query(
-      'SELECT * FROM restaurant_branches WHERE id = $1 AND restaurant_id = $2',
-      [branchId, restaurantId],
-    );
-    if (!branchRes.rowCount) {
-      await client.query('ROLLBACK');
-      return null;
-    }
-    const branch = branchRes.rows[0];
-
-    const restaurantRes = await client.query(
-      `${SELECT_RESTAURANT_BASE} WHERE id = $1`,
-      [restaurantId],
-    );
-    const restaurant = restaurantRes.rowCount ? restaurantRes.rows[0] : null;
-
-    await client.query('DELETE FROM branch_special_hours WHERE branch_id = $1', [branchId]);
-    await client.query('DELETE FROM branch_opening_hours WHERE branch_id = $1', [branchId]);
-    await client.query('DELETE FROM branch_rating WHERE branch_id = $1', [branchId]);
-    await client.query('DELETE FROM branch_rating_avg WHERE branch_id = $1', [branchId]);
-    await client.query('DELETE FROM restaurant_branches WHERE id = $1', [branchId]);
-
-    await client.query('COMMIT');
-
-    publishSocketEvent(
-      'restaurant.branch.deleted',
-      { restaurantId, branchId },
-      roomsForBranchEntity(restaurant, branch),
-    );
-
-    return { message: 'Branch deleted successfully' };
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
-  }
+  const res = await pool.query(
+    'DELETE FROM restaurant_branches WHERE restaurant_id = $1 AND id = $2 RETURNING id',
+    [restaurantId, branchId],
+  );
+  return res.rows[0] || null;
 }
 
-const model = require('../models/restaurant.model');
-
-async function create(payload){
-  return model.createRestaurant(payload);
+async function create(payload = {}) {
+  return createRestaurant(payload);
 }
 
-async function list(params = {}){
-  return model.listRestaurants(params);
+async function list(params = {}) {
+  const limit = params.limit !== undefined ? Number(params.limit) : undefined;
+  const offset = params.offset !== undefined ? Number(params.offset) : undefined;
+  return fetchRestaurants({
+    ownerId: params.ownerId || params.owner_id,
+    includeBranches: params.includeBranches ?? false,
+    includeProducts: params.includeProducts ?? false,
+    includeBranchProducts: params.includeBranchProducts ?? false,
+    limit,
+    offset,
+  });
 }
 
-async function get(id){
-  return model.getRestaurantById(id);
+async function get(id, options = {}) {
+  return getRestaurantById(id, options);
 }
 
-async function update(id, payload){
-  return model.updateRestaurant(id, payload);
+async function remove(id) {
+  return deleteRestaurant(id);
 }
 
-async function remove(id){
-  return model.deleteRestaurant(id);
+async function update(id, payload = {}) {
+  return updateRestaurant(id, payload);
 }
 
 module.exports = {
+  createRestaurant,
+  createRestaurantBranch,
+  deleteRestaurant,
+  deleteRestaurantBranch,
   getAllRestaurants,
-  getRestaurantsByOwner,
+  getBranchesForRestaurant,
   getRestaurantById,
   getRestaurantByOwner,
-  createRestaurant,
+  getRestaurantsByOwner,
   updateRestaurant,
-  deleteRestaurant,
-  getBranchesForRestaurant,
-  createRestaurantBranch,
   updateRestaurantBranch,
-  deleteRestaurantBranch,
   create,
   list,
   get,
   update,
   remove,
 };
-

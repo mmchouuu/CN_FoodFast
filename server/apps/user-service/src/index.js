@@ -6,6 +6,7 @@ const config = require('./config');
 
 // Routes
 const customerRoutes = require('./routes/customer.routes');
+const customerAddressRoutes = require('./routes/customer.address.routes');
 const restaurantRoutes = require('./routes/restaurant.routes');
 const adminRoutes = require('./routes/admin.routes');
 const userRoutes = require('./routes/user.routes');
@@ -32,12 +33,15 @@ app.use(bodyParser.json());
 app.use(morgan('dev'));
 
 // Health check
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', service: 'user-service' });
+app.use((req, res, next) => {
+  if (req.path === '/health') return res.status(200).send({ status: 'ok' });
+  next();
 });
+
 
 // Routes
 app.use('/api/users', userRoutes);
+app.use('/api/customers/me/addresses', customerAddressRoutes);
 app.use('/api/customers', customerRoutes);
 app.use('/api/restaurants', restaurantRoutes);
 app.use('/api/admin', adminRoutes);
