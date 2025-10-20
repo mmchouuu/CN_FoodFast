@@ -3,7 +3,7 @@ const { createAxiosInstance } = require('../utils/httpClient');
 const config = require('../config');
 
 const client = createAxiosInstance({
-  baseURL: `${config.userServiceUrl}/api/customers`, 
+  baseURL: `${config.userServiceUrl}/api/customers`,
   timeout: config.requestTimeout,
 });
 
@@ -22,6 +22,21 @@ async function login(payload, opts = {}) {
   return res.data;
 }
 
+async function listAddresses(opts = {}) {
+  const res = await client.get('/addresses', { headers: opts.headers });
+  return res.data;
+}
+
+async function createAddress(payload, opts = {}) {
+  const res = await client.post('/addresses', payload, { headers: opts.headers });
+  return res.data;
+}
+
+async function deleteAddress(id, opts = {}) {
+  const res = await client.delete(`/addresses/${id}`, { headers: opts.headers });
+  return res.data;
+}
+
 async function requestPasswordReset(payload, opts = {}) {
   const res = await client.post('/forgot-password', payload, { headers: opts.headers });
   return res.data;
@@ -32,4 +47,4 @@ async function resetPassword(payload, opts = {}) {
   return res.data;
 }
 
-module.exports = { register, verify, login, requestPasswordReset, resetPassword };
+module.exports = { register, verify, login, listAddresses, createAddress, deleteAddress, requestPasswordReset, resetPassword };

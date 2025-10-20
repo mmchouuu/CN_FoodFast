@@ -130,7 +130,7 @@ const PROVIDER_HANDLERS = {
   mapsco: queryMapsCo,
 };
 
-export async function geocodeAddress(payload = {}, { signal } = {}) {
+async function geocodeAddress(payload = {}, { signal } = {}) {
   const query = buildAddress(payload);
   if (!query) return null;
 
@@ -143,4 +143,7 @@ export async function geocodeAddress(payload = {}, { signal } = {}) {
   return null;
 }
 
-export default geocodeAddress;
+module.exports = {
+  geocodeAddress,
+  default: geocodeAddress,
+};

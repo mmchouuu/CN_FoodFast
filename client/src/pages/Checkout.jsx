@@ -12,6 +12,7 @@ const Checkout = () => {
     applyDiscountCode,
     appliedDiscountCode,
     paymentOptions,
+    bankAccounts,
     method,
     setMethod,
     addresses,
@@ -82,13 +83,12 @@ const Checkout = () => {
     }
   };
 
-  const handleAddAddress = (event) => {
+  const handleAddAddress = async (event) => {
     event.preventDefault();
     if (!newAddress.street || !newAddress.ward || !newAddress.district) {
       toast.error("Please complete the street, ward, and district fields.");
       return;
     }
-    const id = `addr-${Date.now()}`;
     const matchedLabel = addressLabels.find(
       (item) => item.id === newAddress.label
     );
@@ -96,35 +96,42 @@ const Checkout = () => {
       newAddress.label === "custom"
         ? newAddress.customLabel?.trim() || "Other"
         : matchedLabel?.label || "Home";
-    addNewAddress({
-      id,
-      label,
-      recipient: newAddress.recipient || "Customer",
-      phone: newAddress.phone || "",
-      street: newAddress.street,
-      ward: newAddress.ward,
-      district: newAddress.district,
-      city: newAddress.city,
-      instructions: newAddress.instructions,
-      isDefault: newAddress.isDefault,
-    });
-    if (newAddress.isDefault) {
-      setSelectedAddressId(id);
+    try {
+      const created = await addNewAddress({
+        label,
+        recipient: newAddress.recipient || "Customer",
+        phone: newAddress.phone || "",
+        street: newAddress.street,
+        ward: newAddress.ward,
+        district: newAddress.district,
+        city: newAddress.city,
+        instructions: newAddress.instructions,
+        isDefault: newAddress.isDefault,
+      });
+      if (newAddress.isDefault && created?.id) {
+        setSelectedAddressId(created.id);
+      }
+      toast.success("New address added.");
+      setShowAddressForm(false);
+      setNewAddress({
+        label: "home",
+        customLabel: "",
+        recipient: "",
+        phone: "",
+        street: "",
+        ward: "",
+        district: "",
+        city: "TP. Ho Chi Minh",
+        instructions: "",
+        isDefault: false,
+      });
+    } catch (error) {
+      const message =
+        error?.response?.data?.error ||
+        error?.message ||
+        "Unable to save address.";
+      toast.error(message);
     }
-    toast.success("New address added.");
-    setShowAddressForm(false);
-    setNewAddress({
-      label: "home",
-      customLabel: "",
-      recipient: "",
-      phone: "",
-      street: "",
-      ward: "",
-      district: "",
-      city: "TP. Ho Chi Minh",
-      instructions: "",
-      isDefault: false,
-    });
   };
 
   return (
@@ -353,24 +360,53 @@ const Checkout = () => {
             Choose how you'd like to pay for this order.
           </p>
           <div className="mt-6 grid gap-4 md:grid-cols-3">
-            {paymentOptions.map((option) => (
-              <button
-                key={option.id}
-                onClick={() => setMethod(option.id)}
-                className={`flex h-full flex-col rounded-2xl border p-4 text-left transition ${
-                  method === option.id
-                    ? "border-orange-500 bg-orange-50"
-                    : "border-gray-200 hover:border-orange-300"
-                }`}
-              >
-                <span className="text-sm font-semibold text-gray-900">
-                  {option.label}
-                </span>
-                <p className="mt-2 text-xs text-gray-500">
-                  {option.description}
-                </p>
-              </button>
-            ))}
+            {paymentOptions.map((option) => {
+              const isBank = option.id === "bank";
+              const disabled = isBank && bankAccounts.length === 0;
+              const isSelected = method === option.id;
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  onClick={() => {
+                    if (!disabled) {
+                      setMethod(option.id);
+                    } else {
+                      toast.error(
+                        "Link a bank account from your profile before choosing this method."
+                      );
+                    }
+                  }}
+                  disabled={disabled}
+                  className={`flex h-full flex-col rounded-2xl border p-4 text-left transition ${
+                    isSelected
+                      ? "border-orange-500 bg-orange-50"
+                      : "border-gray-200 hover:border-orange-300"
+                  } ${disabled ? "cursor-not-allowed opacity-60" : ""}`}
+                >
+                  <span className="text-sm font-semibold text-gray-900">
+                    {option.label}
+                  </span>
+                  <p className="mt-2 text-xs text-gray-500">
+                    {option.description}
+                  </p>
+                  {isBank ? (
+                    <p className="mt-2 text-xs">
+                      {disabled ? (
+                        <span className="text-orange-500">
+                          Link a bank account in your profile panel.
+                        </span>
+                      ) : (
+                        <span className="text-emerald-600">
+                          {bankAccounts.length} linked account
+                          {bankAccounts.length > 1 ? "s" : ""} ready to use.
+                        </span>
+                      )}
+                    </p>
+                  ) : null}
+                </button>
+              );
+            })}
           </div>
         </div>
 

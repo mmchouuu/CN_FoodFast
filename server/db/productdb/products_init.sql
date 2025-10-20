@@ -24,7 +24,6 @@ CREATE TABLE IF NOT EXISTS restaurants (
   updated_at           TIMESTAMP WITH TIME ZONE DEFAULT now()
 );
 
-<<<<<<< HEAD
 CREATE INDEX IF NOT EXISTS idx_restaurants_name     ON restaurants(name);
 CREATE INDEX IF NOT EXISTS idx_restaurants_cuisine  ON restaurants(cuisine);
 CREATE INDEX IF NOT EXISTS idx_restaurants_owner    ON restaurants(owner_id);
@@ -167,7 +166,6 @@ CREATE TABLE IF NOT EXISTS inventory (
   product_id    UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
   quantity      INT DEFAULT 0,
   sold_quantity INT DEFAULT 0,
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
   updated_at    TIMESTAMP WITH TIME ZONE DEFAULT now(),
   CONSTRAINT uq_inventory_branch_product UNIQUE (branch_id, product_id)
 );

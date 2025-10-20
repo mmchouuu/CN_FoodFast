@@ -12,9 +12,21 @@ export async function getPayment(paymentId) {
   return data;
 }
 
+export async function listBankAccounts() {
+  const { data } = await api.get(`${basePath}/payment-methods/bank-accounts`);
+  return data;
+}
+
+export async function linkBankAccount(payload) {
+  const { data } = await api.post(`${basePath}/payment-methods/bank-accounts`, payload);
+  return data;
+}
+
 const paymentsService = {
   createPayment,
   get: getPayment,
+  listBankAccounts,
+  linkBankAccount,
 };
 
 export default paymentsService;

@@ -19,7 +19,6 @@ import {
   currentOrders as liveOrders,
   orderHistory as historyOrders,
   notificationFeed,
-  customerAddresses,
   paymentOptions as paymentOptionList,
   restaurantReviews as initialRestaurantReviews,
 } from '../data/customerData';
@@ -58,6 +57,7 @@ const FALLBACK_PRODUCTS = menuDishes;
 const FALLBACK_RESTAURANTS = restaurantList;
 const FALLBACK_ACTIVE_ORDERS = liveOrders;
 const FALLBACK_ORDER_HISTORY = historyOrders;
+const DEFAULT_PAYMENT_METHOD = paymentOptionList[0]?.id || 'wallet';
 
 const ORDER_HISTORY_STATUSES = new Set(['delivered', 'completed', 'cancelled']);
 const ORDER_REVIEWABLE_STATUSES = new Set(['delivered', 'completed']);
@@ -129,6 +129,30 @@ const adaptProductFromApi = (product) => {
     },
     createdAt,
     updatedAt,
+  };
+};
+
+const adaptAddressFromApi = (address) => {
+  if (!address) return null;
+  const primaryFlag =
+    address.isDefault ??
+    address.is_default ??
+    address.is_primary ??
+    false;
+
+  return {
+    id: address.id,
+    label: address.label || 'Address',
+    recipient: address.recipient || '',
+    phone: address.phone || '',
+    street: address.street || '',
+    ward: address.ward || '',
+    district: address.district || '',
+    city: address.city || '',
+    instructions: address.instructions || '',
+    isDefault: Boolean(primaryFlag),
+    createdAt: address.createdAt || address.created_at || null,
+    updatedAt: address.updatedAt || address.updated_at || null,
   };
 };
 
@@ -242,15 +266,16 @@ export const AppContextProvider = ({ children }) => {
     const [pastOrders, setPastOrders] = useState([]);
     const [ordersLoading, setOrdersLoading] = useState(false);
     const [notifications, setNotifications] = useState(notificationFeed);
-    const [addresses, setAddresses] = useState(customerAddresses);
-    const [selectedAddressId, setSelectedAddressId] = useState(customerAddresses[0]?.id ?? null);
+    const [addresses, setAddresses] = useState([]);
+    const [bankAccounts, setBankAccounts] = useState([]);
+    const [selectedAddressId, setSelectedAddressId] = useState(null);
     const selectedAddress = useMemo(
         () => addresses.find(address => address.id === selectedAddressId) || null,
         [addresses, selectedAddressId]
     );
     const [restaurantReviews, setRestaurantReviews] = useState(initialRestaurantReviews);
     const [appliedDiscountCode, setAppliedDiscountCode] = useState(null);
-    const [method, setMethod] = useState("COD");
+    const [method, setMethod] = useState(DEFAULT_PAYMENT_METHOD);
     const [isOwner, setIsOwner] = useState(() => {
         try {
             const saved = localStorage.getItem("isOwner");
@@ -325,9 +350,60 @@ export const AppContextProvider = ({ children }) => {
             return null;
         }
     });
+    const authProfileId = authProfile?.id || null;
     const [restaurantProfile, setRestaurantProfile] = useState(() => {
         try { return JSON.parse(localStorage.getItem('restaurant_profile') || 'null'); } catch { return null; }
     });
+
+    const refreshAddresses = useCallback(async () => {
+        if (!authToken && !authProfileId) {
+            setAddresses([]);
+            setSelectedAddressId(null);
+            return [];
+        }
+        try {
+            const data = await authService.listAddresses({ userId: authProfileId || undefined });
+            const adapted = Array.isArray(data)
+                ? data.map((item) => adaptAddressFromApi(item)).filter(Boolean)
+                : [];
+            setAddresses(adapted);
+            if (adapted.length) {
+                const defaultAddress = adapted.find((addr) => addr.isDefault) || adapted[0];
+                setSelectedAddressId(defaultAddress.id);
+            } else {
+                setSelectedAddressId(null);
+            }
+            return adapted;
+        } catch (error) {
+            console.error('Failed to load addresses', error);
+            setAddresses([]);
+            setSelectedAddressId(null);
+            return [];
+        }
+    }, [authToken, authProfileId]);
+
+    const refreshBankAccounts = useCallback(async () => {
+        if (!authToken) {
+            setBankAccounts([]);
+            return [];
+        }
+        try {
+            const data = await paymentsService.listBankAccounts();
+            const accounts = Array.isArray(data) ? data : [];
+            setBankAccounts(accounts);
+            return accounts;
+        } catch (error) {
+            console.error('Failed to load bank accounts', error);
+            setBankAccounts([]);
+            return [];
+        }
+    }, [authToken]);
+
+    const linkBankAccount = useCallback(async (payload) => {
+        const account = await paymentsService.linkBankAccount(payload);
+        setBankAccounts(prev => [account, ...prev.filter(item => item.id !== account.id)]);
+        return account;
+    }, []);
 
     const refreshOrders = useCallback(async () => {
         if (!authToken) {
@@ -357,6 +433,33 @@ export const AppContextProvider = ({ children }) => {
     useEffect(() => {
         refreshOrders();
     }, [refreshOrders]);
+
+    useEffect(() => {
+        if (!authToken && !authProfileId) {
+            setAddresses([]);
+            setSelectedAddressId(null);
+            return;
+        }
+        refreshAddresses();
+    }, [authToken, authProfileId, refreshAddresses]);
+
+    useEffect(() => {
+        if (!authToken) {
+            setBankAccounts([]);
+            return;
+        }
+        refreshBankAccounts();
+    }, [authToken, refreshBankAccounts]);
+
+    useEffect(() => {
+        if (method === 'bank' && bankAccounts.length === 0) {
+            const fallbackMethod =
+                paymentOptionList.find(option => option.id !== 'bank')?.id || DEFAULT_PAYMENT_METHOD;
+            if (fallbackMethod !== method) {
+                setMethod(fallbackMethod);
+            }
+        }
+    }, [method, bankAccounts.length]);
 
     // --- Unified user object ---
     const user = authProfile ||  null;
@@ -624,9 +727,36 @@ export const AppContextProvider = ({ children }) => {
     const loginWithCredentials = async (email, password) => {
         try {
             const res = await authService.login(email, password);
-            if (res?.token) setAuthToken(res.token);
-            if (res?.user) setAuthProfile(sanitizeUser(res.user));
+            let sanitizedUser = null;
+            if (res?.token) {
+                setAuthToken(res.token);
+                localStorage.setItem('auth_token', res.token);
+            }
+            if (res?.user) {
+                sanitizedUser = sanitizeUser(res.user);
+                setAuthProfile(sanitizedUser);
+                localStorage.setItem('auth_profile', JSON.stringify(sanitizedUser));
+            }
             toast.success(res?.message || 'Logged in successfully');
+            try {
+                const pendingRaw = localStorage.getItem('pending_address');
+                if (pendingRaw) {
+                    const addr = JSON.parse(pendingRaw);
+                    const resolvedUserId =
+                        addr?.user_id ||
+                        res?.user?.id ||
+                        sanitizedUser?.id ||
+                        authProfileId;
+                    if (resolvedUserId) {
+                        addr.user_id = resolvedUserId;
+                    }
+                    localStorage.removeItem('pending_address');
+                    localStorage.removeItem('pending_user_id');
+                    await authService.createAddress(addr);
+                    await refreshAddresses();
+                    toast.success('Saved your pending address.');
+                }
+            } catch {}
             return res;
         } catch (error) {
             const message = error?.response?.data?.message || error.message || 'Login failed';
@@ -661,13 +791,48 @@ export const AppContextProvider = ({ children }) => {
     const logoutLocal = () => {
         setAuthToken(null);
         setAuthProfile(null);
+        setAddresses([]);
+        setSelectedAddressId(null);
+        setBankAccounts([]);
+        localStorage.removeItem('auth_token');
+        localStorage.removeItem('auth_profile');
+        localStorage.removeItem('pending_user_id');
         toast('Logged out');
     };
 
     const verifyOtp = async (email, otp) => {
         try {
             const res = await authService.verify(email, otp);
+            let sanitizedUser = null;
+            if (res?.token) {
+                setAuthToken(res.token);
+                localStorage.setItem('auth_token', res.token);
+            }
+            if (res?.user) {
+                sanitizedUser = sanitizeUser(res.user);
+                setAuthProfile(sanitizedUser);
+                localStorage.setItem('auth_profile', JSON.stringify(sanitizedUser));
+            }
             toast.success(res?.message || 'Verification successful.');
+            try {
+                const pending = localStorage.getItem('pending_address');
+                if (pending) {
+                    const addr = JSON.parse(pending);
+                    const resolvedUserId =
+                        addr?.user_id ||
+                        res?.user?.id ||
+                        sanitizedUser?.id ||
+                        authProfileId;
+                    if (resolvedUserId) {
+                        addr.user_id = resolvedUserId;
+                    }
+                    localStorage.removeItem('pending_address');
+                    localStorage.removeItem('pending_user_id');
+                    await authService.createAddress(addr);
+                    await refreshAddresses();
+                    toast.success('Saved your pending address.');
+                }
+            } catch {}
             return res;
         } catch (error) {
             const message = error?.response?.data?.message || error.message || 'Verification failed';
@@ -710,19 +875,27 @@ export const AppContextProvider = ({ children }) => {
         );
     };
 
-    const addNewAddress = (address) => {
-        setAddresses(prev => {
-            const updated = [...prev, address];
-            if (address.isDefault) {
-                updated.forEach(item => {
-                    if (item.id !== address.id) {
-                        item.isDefault = false;
-                    }
-                });
-                setSelectedAddressId(address.id);
-            }
-            return updated;
-        });
+    const addNewAddress = async (address) => {
+        const resolvedUserId = address.user_id || authProfileId;
+        if (!resolvedUserId) {
+            throw new Error('Missing user identifier for address creation');
+        }
+        const payload = {
+            label: address.label,
+            recipient: address.recipient,
+            phone: address.phone,
+            street: address.street,
+            ward: address.ward,
+            district: address.district,
+            city: address.city,
+            instructions: address.instructions,
+            isDefault: address.isDefault,
+            user_id: resolvedUserId,
+        };
+        const created = await authService.createAddress(payload);
+        const adapted = adaptAddressFromApi(created);
+        await refreshAddresses();
+        return adapted;
     };
 
     const updateAddress = (addressId, updates) => {
@@ -733,9 +906,9 @@ export const AppContextProvider = ({ children }) => {
         );
     };
 
-    const removeAddress = (addressId) => {
-        setAddresses(prev => prev.filter(address => address.id !== addressId));
-        setSelectedAddressId(prev => (prev === addressId ? null : prev));
+    const removeAddress = async (addressId) => {
+        await authService.deleteAddress(addressId, { userId: authProfileId || undefined });
+        await refreshAddresses();
     };
 
     const updateLocalProfile = (updates) => {
@@ -820,6 +993,7 @@ export const AppContextProvider = ({ children }) => {
         selectedAddress,
         selectedAddressId,
         setSelectedAddressId,
+        refreshAddresses,
         addNewAddress,
         updateAddress,
         removeAddress,
@@ -828,6 +1002,9 @@ export const AppContextProvider = ({ children }) => {
         notifications,
         markNotificationAsRead,
         clearCart,
+        bankAccounts,
+        refreshBankAccounts,
+        linkBankAccount,
         paymentOptions: paymentOptionList,
         restaurantReviews,
         addRestaurantReview,
@@ -851,3 +1028,4 @@ export const AppContextProvider = ({ children }) => {
 };
 
 export const useAppContext = () => useContext(AppContext);
+

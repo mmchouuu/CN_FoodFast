@@ -1,4 +1,4 @@
-import {
+const {
   createRestaurant,
   createRestaurantBranch,
   deleteRestaurant,
@@ -10,9 +10,9 @@ import {
   getRestaurantsByOwner,
   updateRestaurant,
   updateRestaurantBranch,
-} from '../services/restaurant.service.js';
+} = require('../services/restaurant.service');
 
-export async function getRestaurants(req, res) {
+async function getRestaurants(req, res) {
   try {
     const data = await getAllRestaurants();
     res.json(data);
@@ -21,7 +21,7 @@ export async function getRestaurants(req, res) {
   }
 }
 
-export async function getRestaurant(req, res) {
+async function getRestaurant(req, res) {
   try {
     const { id } = req.params;
     const restaurant = await getRestaurantById(id);
@@ -32,7 +32,7 @@ export async function getRestaurant(req, res) {
   }
 }
 
-export async function getOwnerRestaurants(req, res) {
+async function getOwnerRestaurants(req, res) {
   try {
     const { ownerId } = req.params;
     const data = await getRestaurantsByOwner(ownerId);
@@ -42,7 +42,7 @@ export async function getOwnerRestaurants(req, res) {
   }
 }
 
-export async function getOwnerRestaurantDetail(req, res) {
+async function getOwnerRestaurantDetail(req, res) {
   try {
     const { ownerId } = req.params;
     const restaurant = await getRestaurantByOwner(ownerId);
@@ -53,7 +53,7 @@ export async function getOwnerRestaurantDetail(req, res) {
   }
 }
 
-export async function addRestaurant(req, res) {
+async function addRestaurant(req, res) {
   try {
     if (!req.body?.ownerId) {
       return res.status(400).json({ error: 'ownerId is required' });
@@ -75,7 +75,7 @@ export async function addRestaurant(req, res) {
   }
 }
 
-export async function editRestaurant(req, res) {
+async function editRestaurant(req, res) {
   try {
     const { id } = req.params;
     const updated = await updateRestaurant(id, req.body);
@@ -85,7 +85,7 @@ export async function editRestaurant(req, res) {
   }
 }
 
-export async function removeRestaurant(req, res) {
+async function removeRestaurant(req, res) {
   try {
     const { id } = req.params;
     const result = await deleteRestaurant(id);
@@ -98,7 +98,7 @@ export async function removeRestaurant(req, res) {
   }
 }
 
-export async function listBranches(req, res) {
+async function listBranches(req, res) {
   try {
     const { id } = req.params;
     const branches = await getBranchesForRestaurant(id);
@@ -108,7 +108,7 @@ export async function listBranches(req, res) {
   }
 }
 
-export async function addBranch(req, res) {
+async function addBranch(req, res) {
   try {
     const { id } = req.params;
     if (!req.body?.name) {
@@ -131,7 +131,7 @@ export async function addBranch(req, res) {
   }
 }
 
-export async function editBranch(req, res) {
+async function editBranch(req, res) {
   try {
     const { id, branchId } = req.params;
     const branch = await updateRestaurantBranch(id, branchId, req.body);
@@ -151,7 +151,7 @@ export async function editBranch(req, res) {
   }
 }
 
-export async function removeBranch(req, res) {
+async function removeBranch(req, res) {
   try {
     const { id, branchId } = req.params;
     const result = await deleteRestaurantBranch(id, branchId);
@@ -241,5 +241,22 @@ async function remove(req, res, next){
   }catch(err){ next(err); }
 }
 
-module.exports = { create, list, get, update, remove };
+module.exports = {
+  getRestaurants,
+  getRestaurant,
+  getOwnerRestaurants,
+  getOwnerRestaurantDetail,
+  addRestaurant,
+  editRestaurant,
+  removeRestaurant,
+  listBranches,
+  addBranch,
+  editBranch,
+  removeBranch,
+  create,
+  list,
+  get,
+  update,
+  remove,
+};
 

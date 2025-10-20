@@ -26,14 +26,23 @@ const Signup = () => {
     setLoading(true);
     setError("");
     try {
-      await signupWithCredentials({
+      const result = await signupWithCredentials({
         firstName: firstName.trim(),
         lastName: lastName.trim(),
         email: email.trim(),
         password,
         phone: phone.trim(),
       });
-      navigate("/auth/verify", { state: { email: email.trim() } });
+      if (result?.userId) {
+        try {
+          localStorage.setItem("pending_user_id", result.userId);
+        } catch {
+          // ignore storage issues
+        }
+      }
+      navigate("/auth/verify", {
+        state: { email: email.trim(), userId: result?.userId || null },
+      });
     } catch (err) {
       setError(
         err?.response?.data?.message ||

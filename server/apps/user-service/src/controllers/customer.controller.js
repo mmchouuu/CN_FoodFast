@@ -2,6 +2,10 @@
 
 const customerService = require('../services/customer.service');
 
+function getUserId(req) {
+  return req.headers['x-user-id'] || (req.body && req.body.user_id) || null;
+}
+
 async function register(req, res, next) {
   try {
     const result = await customerService.registerCustomer(req.body);
@@ -29,4 +33,40 @@ async function login(req, res, next) {
   }
 }
 
-module.exports = { register, verify, login };
+async function listAddresses(req, res, next) {
+  try {
+    const userId = getUserId(req);
+    if (!userId) {
+      return res.status(401).json({ error: 'missing user context' });
+    }
+    const result = await customerService.listAddresses(userId);
+    res.json(result);
+  } catch (err) { next(err); }
+}
+
+async function createAddress(req, res, next) {
+  try {
+    const userId = getUserId(req);
+    if (!userId) {
+      return res.status(401).json({ error: 'missing user context' });
+    }
+    const created = await customerService.createAddress(userId, req.body || {});
+    res.status(201).json(created);
+  } catch (err) { next(err); }
+}
+
+async function deleteAddress(req, res, next) {
+  try {
+    const userId = getUserId(req);
+    if (!userId) {
+      return res.status(401).json({ error: 'missing user context' });
+    }
+    const deleted = await customerService.deleteAddress(userId, req.params.id);
+    if (!deleted) {
+      return res.status(404).json({ error: 'not found' });
+    }
+    res.status(204).end();
+  } catch (err) { next(err); }
+}
+
+module.exports = { register, verify, login, listAddresses, createAddress, deleteAddress };

@@ -25,6 +25,33 @@ export const authService = {
     return data;
   },
 
+  async listAddresses({ userId } = {}) {
+    const config = {};
+    if (userId) {
+      config.params = { user_id: userId };
+    }
+    const { data } = await api.get(`${basePath}/addresses`, config);
+    return data;
+  },
+
+  async createAddress(payload) {
+    const config = {};
+    if (payload?.user_id) {
+      config.params = { user_id: payload.user_id };
+    }
+    const { data } = await api.post(`${basePath}/addresses`, payload, config);
+    return data;
+  },
+
+  async deleteAddress(addressId, { userId } = {}) {
+    const config = {};
+    if (userId) {
+      config.params = { user_id: userId };
+    }
+    await api.delete(`${basePath}/addresses/${addressId}`, config);
+    return true;
+  },
+
   // async requestPasswordReset(email) {
   //   // Endpoint not yet implemented server-side; mock response for UX consistency
   //   // When available: return (await api.post(`${basePath}/forgot-password`, { email })).data;

@@ -23,6 +23,11 @@ router.use('/', authMiddleware, createProxyMiddleware({
   target: PAYMENT_SERVICE,
   changeOrigin: true,
   pathRewrite: { '^/api/payments': '/api/payments' },
+  onProxyReq(proxyReq, req) {
+    if (req.user?.userId) {
+      proxyReq.setHeader('x-user-id', req.user.userId);
+    }
+  },
   onError: (err, req, res) => res.status(502).json({ error: 'bad gateway', detail: err.message })
 }));
 

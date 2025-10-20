@@ -11,10 +11,27 @@ CREATE TABLE IF NOT EXISTS payment_methods (
   brand VARCHAR(50),
   exp_month INT,
   exp_year INT,
+  account_holder VARCHAR(150),
+  account_number VARCHAR(34),
+  bank_name VARCHAR(120),
+  bank_code VARCHAR(50),
+  is_default BOOLEAN DEFAULT FALSE,
+  verified_at TIMESTAMP WITH TIME ZONE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS idx_pm_user ON payment_methods(user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_pm_user_account
+  ON payment_methods(user_id, account_number)
+  WHERE account_number IS NOT NULL;
+
+ALTER TABLE payment_methods
+  ADD COLUMN IF NOT EXISTS account_holder VARCHAR(150),
+  ADD COLUMN IF NOT EXISTS account_number VARCHAR(34),
+  ADD COLUMN IF NOT EXISTS bank_name VARCHAR(120),
+  ADD COLUMN IF NOT EXISTS bank_code VARCHAR(50),
+  ADD COLUMN IF NOT EXISTS is_default BOOLEAN DEFAULT FALSE,
+  ADD COLUMN IF NOT EXISTS verified_at TIMESTAMP WITH TIME ZONE;
 
 -- payments
 CREATE TABLE IF NOT EXISTS payments (

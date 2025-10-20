@@ -4,34 +4,69 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-const PORT = process.env.PORT || 3005;
+const PORT = Number(process.env.PORT) || 3005;
 const RABBITMQ_URL = process.env.RABBITMQ_URL;
-const QUEUE = process.env.RABBITMQ_QUEUE;
+const QUEUE = process.env.RABBITMQ_QUEUE || 'email_queue';
+const EMAIL_HOST = process.env.EMAIL_HOST || 'smtp.gmail.com';
+const EMAIL_PORT = Number(process.env.EMAIL_PORT) || 587;
+const EMAIL_SECURE =
+  String(process.env.EMAIL_SECURE || '').toLowerCase() === 'true' ||
+  EMAIL_PORT === 465;
+const EMAIL_USER = process.env.EMAIL_USER;
+const EMAIL_PASS = process.env.EMAIL_PASS;
 
-// Config mail transporter
-const transporter = nodemailer.createTransport({
-  host: process.env.EMAIL_HOST,
-  port: process.env.EMAIL_PORT,
-  secure: false, // Gmail dùng TLS, không cần true
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-});
-
-// Kiểm tra gửi mail
-async function sendMail({ to, subject, text, html }) {
-  const info = await transporter.sendMail({
-    from: `"TastyQueen 🍔" <${process.env.EMAIL_USER}>`,
-    to,
-    subject,
-    text,
-    html,
+const createTransporter = () =>
+  nodemailer.createTransport({
+    host: EMAIL_HOST,
+    port: EMAIL_PORT,
+    secure: EMAIL_SECURE,
+    auth: {
+      user: EMAIL_USER,
+      pass: EMAIL_PASS,
+    },
+    tls: EMAIL_SECURE
+      ? undefined
+      : {
+          minVersion: 'TLSv1.2',
+        },
+    requireTLS: !EMAIL_SECURE,
   });
-  console.log('📧 Email sent:', info.messageId);
+
+let transporter = createTransporter();
+
+async function ensureTransporter() {
+  try {
+    await transporter.verify();
+    return transporter;
+  } catch (error) {
+    console.warn('SMTP verify failed, recreating transporter', error?.code || error?.message);
+    transporter = createTransporter();
+    await transporter.verify();
+    return transporter;
+  }
 }
 
-// Lắng nghe RabbitMQ queue
+async function sendMail({ to, subject, text, html }) {
+  const activeTransporter = await ensureTransporter();
+  try {
+    const info = await activeTransporter.sendMail({
+      from: `"FoodFast" <${EMAIL_USER}>`,
+      to,
+      subject,
+      text,
+      html,
+    });
+    console.log('📧 Email sent:', info.messageId);
+    return info;
+  } catch (error) {
+    console.error('❌ Failed to send email:', error);
+    if (error?.code === 'ESOCKET' || error?.code === 'ECONNECTION') {
+      transporter = createTransporter();
+    }
+    throw error;
+  }
+}
+
 async function start() {
   try {
     console.log('🚀 Starting Email Service...');
@@ -44,28 +79,28 @@ async function start() {
     channel.consume(
       QUEUE,
       async (msg) => {
-        if (msg !== null) {
-          const content = JSON.parse(msg.content.toString());
-          console.log('📨 Received message:', content);
-
-          await sendMail({
-            to: content.to,
-            subject: content.subject,
-            text: content.text,
-            html: content.html,
-          });
-
+        if (!msg) return;
+        const content = JSON.parse(msg.content.toString());
+        console.log('📨 Received message:', content);
+        try {
+          await sendMail(content);
           channel.ack(msg);
+        } catch (error) {
+          console.error('⚠️ Email send error, message requeued');
+          channel.nack(msg, false, true);
         }
       },
       { noAck: false }
     );
   } catch (err) {
-    console.error('❌ Email service error:', err);
+    console.error('💥 Email service error:', err);
     process.exit(1);
   }
 }
 
-start();
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled rejection in email service:', reason);
+});
 
+start();
 console.log(`📡 Email service is running on port ${PORT}`);
