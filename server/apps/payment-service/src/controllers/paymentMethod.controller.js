@@ -1,7 +1,7 @@
 const paymentMethodService = require('../services/paymentMethod.service');
 
 function getUserId(req) {
-  return req.headers['x-user-id'] || req.body?.user_id || null;
+  return req.headers['x-user-id'] || req.body?.user_id || req.query?.user_id || null;
 }
 
 async function listBankAccounts(req, res, next) {
