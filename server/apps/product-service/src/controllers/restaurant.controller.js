@@ -14,7 +14,33 @@ const {
 
 async function getRestaurants(req, res) {
   try {
-    const data = await getAllRestaurants();
+    const includeTokens = typeof req.query.include === 'string'
+      ? req.query.include
+          .split(',')
+          .map((item) => item.trim().toLowerCase())
+          .filter(Boolean)
+      : [];
+
+    const includeBranches =
+      includeTokens.includes('branches') ||
+      includeTokens.includes('branch');
+    const includeMenu =
+      includeTokens.includes('menu') ||
+      includeTokens.includes('products') ||
+      includeTokens.includes('dishes');
+
+    const limit = req.query.limit ? Number(req.query.limit) : undefined;
+    const offset = req.query.offset ? Number(req.query.offset) : undefined;
+    const ownerId = req.query.owner_id || req.query.ownerId || undefined;
+
+    const data = await getAllRestaurants({
+      includeBranches,
+      includeProducts: includeMenu,
+      includeBranchProducts: includeBranches && includeMenu,
+      limit: Number.isFinite(limit) ? limit : undefined,
+      offset: Number.isFinite(offset) ? offset : undefined,
+      ownerId,
+    });
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -24,7 +50,11 @@ async function getRestaurants(req, res) {
 async function getRestaurant(req, res) {
   try {
     const { id } = req.params;
-    const restaurant = await getRestaurantById(id);
+    const restaurant = await getRestaurantById(id, {
+      includeBranches: true,
+      includeProducts: true,
+      includeBranchProducts: true,
+    });
     if (!restaurant) return res.status(404).json({ error: 'Restaurant not found' });
     res.json(restaurant);
   } catch (err) {
@@ -259,4 +289,3 @@ module.exports = {
   update,
   remove,
 };
-

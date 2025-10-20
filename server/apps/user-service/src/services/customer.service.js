@@ -7,6 +7,12 @@ const { generateOTP } = require('../utils/otp');
 const { sendOtpEmail } = require('../utils/emailQueue');
 
 const OTP_TTL_MS = 5 * 60 * 1000; // 5 phút
+function createError(message, status = 400) {
+  const err = new Error(message);
+  err.status = status;
+  return err;
+}
+
 
 const adaptAddress = (record) => ({
   id: record.id,
@@ -23,10 +29,11 @@ const adaptAddress = (record) => ({
   updatedAt: record.updated_at,
 });
 
+
 // Customer register -> gửi OTP để verify email
 async function registerCustomer(payload) {
   const existing = await userModel.findByEmail(payload.email);
-  if (existing) throw new Error('Email already used');
+  if (existing) throw createError('Email already used', 409);
 
   const password_hash = await bcrypt.hash(payload.password);
   const otp = generateOTP();
@@ -55,11 +62,11 @@ async function registerCustomer(payload) {
 // Customer verify => set is_verified true
 async function verifyCustomer(email, otp_code) {
   const user = await userModel.findByEmail(email);
-  if (!user) throw new Error('User not found');
-  if (user.role !== 'customer') throw new Error('Not a customer account');
-  if (!user.otp_code || !user.otp_expires) throw new Error('No OTP found');
-  if (user.otp_code !== otp_code) throw new Error('Invalid OTP');
-  if (new Date(user.otp_expires) < new Date()) throw new Error('OTP expired');
+  if (!user) throw createError('User not found', 404);
+  if (user.role !== 'customer') throw createError('Not a customer account', 403);
+  if (!user.otp_code || !user.otp_expires) throw createError('No OTP found', 400);
+  if (user.otp_code !== otp_code) throw createError('Invalid OTP', 400);
+  if (new Date(user.otp_expires) < new Date()) throw createError('OTP expired', 400);
 
   const updated = await userModel.updateUser(user.id, { is_verified: true, otp_code: null, otp_expires: null });
   const token = jwt.sign({ userId: user.id, role: user.role }, { expiresIn: '15m' });

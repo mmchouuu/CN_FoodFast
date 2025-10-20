@@ -1,11 +1,49 @@
-const express = require('express');
-const router = express.Router();
-const ctrl = require('../controllers/product.controller');
+import express from 'express';
+import * as productController from '../controllers/product.controller.js';
+import {
+  listRestaurantInventory,
+  listProductInventory,
+  listBranchInventory,
+  upsertBranchInventory,
+} from '../controllers/inventory.controller.js';
 
-router.get('/', ctrl.list);
-router.post('/', ctrl.create);
-router.get('/:id', ctrl.get);
-router.patch('/:id', ctrl.update);
-router.delete('/:id', ctrl.remove);
+const productRouter = express.Router();
 
-module.exports = router;
+productRouter.get('/', productController.list);
+productRouter.post('/', productController.create);
+productRouter.get('/:id', productController.get);
+productRouter.patch('/:id', productController.update);
+productRouter.delete('/:id', productController.remove);
+
+const categoriesRouter = express.Router({ mergeParams: true });
+categoriesRouter.get('/', productController.listCategories);
+categoriesRouter.post('/', productController.createCategory);
+categoriesRouter.patch('/:categoryId', productController.updateCategory);
+categoriesRouter.delete('/:categoryId', productController.removeCategory);
+
+const restaurantProductsRouter = express.Router({ mergeParams: true });
+restaurantProductsRouter.get('/', productController.list);
+restaurantProductsRouter.post('/', productController.create);
+restaurantProductsRouter.get('/:id', productController.get);
+restaurantProductsRouter.patch('/:id', productController.update);
+restaurantProductsRouter.delete('/:id', productController.remove);
+
+const restaurantInventoryRouter = express.Router({ mergeParams: true });
+restaurantInventoryRouter.get('/', listRestaurantInventory);
+
+const productInventoryRouter = express.Router({ mergeParams: true });
+productInventoryRouter.get('/', listProductInventory);
+
+const branchInventoryRouter = express.Router({ mergeParams: true });
+branchInventoryRouter.get('/', listBranchInventory);
+branchInventoryRouter.put('/:productId', upsertBranchInventory);
+
+export {
+  categoriesRouter,
+  restaurantProductsRouter,
+  restaurantInventoryRouter,
+  productInventoryRouter,
+  branchInventoryRouter,
+};
+
+export default productRouter;

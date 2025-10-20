@@ -11,7 +11,9 @@ const LABEL_OPTIONS = [
 ];
 
 const AddAddress = () => {
+
   const { addNewAddress, setSelectedAddressId, isAuthenticated, user } = useAppContext();
+
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -53,10 +55,12 @@ const AddAddress = () => {
       label === "custom"
         ? customLabel.trim() || "Other"
         : LABEL_OPTIONS.find((item) => item.id === label)?.label || "Home";
+
     if (!effectiveUserId) {
       toast.error("Missing account information. Please verify your email again.");
       return;
     }
+
     const payload = {
       label: computedLabel,
       recipient: "",
@@ -68,6 +72,7 @@ const AddAddress = () => {
       instructions,
       isDefault,
       user_id: effectiveUserId,
+
     };
 
     if (!isAuthenticated) {

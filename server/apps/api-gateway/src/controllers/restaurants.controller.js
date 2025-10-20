@@ -46,6 +46,13 @@ async function status(req, res, next) {
   } catch (err) { next(err); }
 }
 
+async function listRestaurants(req, res, next) {
+  try {
+    const result = await restaurantClient.listRestaurants(req.query, req);
+    return res.json(result);
+  } catch (err) { return sendCatalogError(err, res, next); }
+}
+
 async function ownerAccount(req, res, next) {
   try {
     const { id } = req.params;
@@ -137,6 +144,112 @@ async function deleteBranch(req, res, next) {
   } catch (err) { return sendCatalogError(err, res, next); }
 }
 
+async function listRestaurantProducts(req, res, next) {
+  try {
+    const result = await restaurantClient.listRestaurantProducts(req.params.id, req.query, req);
+    return res.json(result);
+  } catch (err) { return sendCatalogError(err, res, next); }
+}
+
+async function createRestaurantProduct(req, res, next) {
+  try {
+    const result = await restaurantClient.createRestaurantProduct(req.params.id, req.body, req);
+    return res.status(201).json(result);
+  } catch (err) { return sendCatalogError(err, res, next); }
+}
+
+async function updateRestaurantProduct(req, res, next) {
+  try {
+    const result = await restaurantClient.updateRestaurantProduct(
+      req.params.id,
+      req.params.productId,
+      req.body,
+      req,
+    );
+    return res.json(result);
+  } catch (err) { return sendCatalogError(err, res, next); }
+}
+
+async function deleteRestaurantProduct(req, res, next) {
+  try {
+    await restaurantClient.deleteRestaurantProduct(req.params.id, req.params.productId, req);
+    return res.status(204).end();
+  } catch (err) { return sendCatalogError(err, res, next); }
+}
+
+async function listRestaurantInventory(req, res, next) {
+  try {
+    const result = await restaurantClient.listRestaurantInventory(req.params.id, req);
+    return res.json(result);
+  } catch (err) { return sendCatalogError(err, res, next); }
+}
+
+async function listProductInventory(req, res, next) {
+  try {
+    const result = await restaurantClient.listProductInventory(
+      req.params.id,
+      req.params.productId,
+      req,
+    );
+    return res.json(result);
+  } catch (err) { return sendCatalogError(err, res, next); }
+}
+
+async function listBranchInventory(req, res, next) {
+  try {
+    const result = await restaurantClient.listBranchInventory(
+      req.params.id,
+      req.params.branchId,
+      req,
+    );
+    return res.json(result);
+  } catch (err) { return sendCatalogError(err, res, next); }
+}
+
+async function upsertBranchInventory(req, res, next) {
+  try {
+    const result = await restaurantClient.upsertBranchInventory(
+      req.params.id,
+      req.params.branchId,
+      req.params.productId,
+      req.body,
+      req,
+    );
+    return res.json(result);
+  } catch (err) { return sendCatalogError(err, res, next); }
+}
+
+async function listCategories(req, res, next) {
+  try {
+    const result = await restaurantClient.listCategories(
+      { ...req.query, restaurant_id: req.params.id || req.query?.restaurant_id },
+      req,
+    );
+    return res.json(result);
+  } catch (err) { return sendCatalogError(err, res, next); }
+}
+
+async function createCategory(req, res, next) {
+  try {
+    const result = await restaurantClient.createCategory(req.body, req);
+    return res.status(201).json(result);
+  } catch (err) { return sendCatalogError(err, res, next); }
+}
+
+async function updateCategory(req, res, next) {
+  try {
+    const result = await restaurantClient.updateCategory(req.params.categoryId || req.params.id, req.body, req);
+    return res.json(result);
+  } catch (err) { return sendCatalogError(err, res, next); }
+}
+
+async function deleteCategory(req, res, next) {
+  try {
+    await restaurantClient.deleteCategory(req.params.categoryId || req.params.id, req);
+    return res.status(204).end();
+  } catch (err) { return sendCatalogError(err, res, next); }
+}
+
 module.exports = {
   register,
   verify,
@@ -146,6 +259,7 @@ module.exports = {
   createRestaurant,
   updateRestaurant,
   deleteRestaurant,
+  listRestaurants,
   getRestaurant,
   getOwnerRestaurants,
   getOwnerRestaurantDetail,
@@ -153,4 +267,16 @@ module.exports = {
   createBranch,
   updateBranch,
   deleteBranch,
+  listRestaurantProducts,
+  createRestaurantProduct,
+  updateRestaurantProduct,
+  deleteRestaurantProduct,
+  listRestaurantInventory,
+  listProductInventory,
+  listBranchInventory,
+  upsertBranchInventory,
+  listCategories,
+  createCategory,
+  updateCategory,
+  deleteCategory,
 };

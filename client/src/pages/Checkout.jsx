@@ -5,7 +5,6 @@ import { useAppContext } from "../context/AppContext";
 
 const Checkout = () => {
   const {
-    cartItems,
     getCartAmount,
     delivery_charges,
     getDiscountAmount,
@@ -108,7 +107,9 @@ const Checkout = () => {
         instructions: newAddress.instructions,
         isDefault: newAddress.isDefault,
       });
+
       if (newAddress.isDefault && created?.id) {
+
         setSelectedAddressId(created.id);
       }
       toast.success("New address added.");
