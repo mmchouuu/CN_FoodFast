@@ -1,16 +1,16 @@
-import express from "express";
-import dotenv from "dotenv";
-import orderRoutes from "./routes/order.routes.js";
-
-dotenv.config();
+const express = require('express');
+const morgan = require('morgan');
+const ordersRouter = require('./routes/orders.routes');
 
 const app = express();
-app.use(express.json());
 
-app.get("/health", (req, res) => {
-  res.status(200).json({ status: "ok" });
-});app.use("/api/orders", orderRoutes);
+app.use(express.json({ limit: '2mb' }));
+app.use(morgan('dev'));
 
-export default app;
+app.get('/health', (_req, res) => {
+  res.json({ ok: true, service: 'order-service' });
+});
 
+app.use('/api/orders', ordersRouter);
 
+module.exports = app;

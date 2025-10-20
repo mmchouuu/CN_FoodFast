@@ -32,18 +32,25 @@ CREATE INDEX IF NOT EXISTS idx_users_created_at ON users(created_at);
 CREATE TABLE IF NOT EXISTS user_addresses (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  label VARCHAR(50),
   street VARCHAR(200) NOT NULL,
   ward VARCHAR(100),
   district VARCHAR(100),
   city VARCHAR(100),
   is_primary BOOLEAN DEFAULT FALSE,
-  label VARCHAR(50),
+  instructions TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS idx_user_addresses_user ON user_addresses(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_addresses_primary ON user_addresses(user_id, is_primary);
+
+ALTER TABLE user_addresses
+  ADD COLUMN IF NOT EXISTS label VARCHAR(50),
+  ADD COLUMN IF NOT EXISTS recipient VARCHAR(150),
+  ADD COLUMN IF NOT EXISTS phone VARCHAR(30),
+  ADD COLUMN IF NOT EXISTS instructions TEXT;
 
 -- refresh tokens
 CREATE TABLE IF NOT EXISTS refresh_tokens (

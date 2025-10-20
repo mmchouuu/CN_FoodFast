@@ -1,12 +1,19 @@
-import express from 'express';
-import productRoutes from './routes/product.routes.js';
-import restaurantRoutes from './routes/restaurant.routes.js';
+const express = require('express');
+const cors = require('cors');
+const morgan = require('morgan');
+const productRoutes = require('./routes/product.routes');
+const restaurantRoutes = require('./routes/restaurant.routes');
+const seedRoutes = require('./routes/seed.routes');
 
 const app = express();
-app.use(express.json({ limit: '10mb' }));
 
-app.get('/health', (_, res) => res.send('OK'));
+app.use(express.json({ limit: '10mb' }));
+app.use(cors({ origin: '*' }));
+app.use(morgan('dev'));
+
+app.get('/health', (_req, res) => res.json({ ok: true, service: 'product-service' }));
 app.use('/api/products', productRoutes);
 app.use('/api/catalog/restaurants', restaurantRoutes);
+app.use('/api/seed', seedRoutes);
 
-export default app;
+module.exports = app;

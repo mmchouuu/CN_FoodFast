@@ -1,5 +1,5 @@
-import express from 'express';
-import {
+const express = require('express');
+const {
   addBranch,
   addRestaurant,
   editRestaurant,
@@ -11,7 +11,7 @@ import {
   removeRestaurant,
   editBranch,
   removeBranch,
-} from '../controllers/restaurant.controller.js';
+} = require('../controllers/restaurant.controller');
 
 const router = express.Router();
 

@@ -8,6 +8,21 @@ const { sendOtpEmail } = require('../utils/emailQueue');
 
 const OTP_TTL_MS = 5 * 60 * 1000; // 5 phút
 
+const adaptAddress = (record) => ({
+  id: record.id,
+  label: record.label || (record.is_primary ? 'Primary' : 'Address'),
+  recipient: record.recipient || null,
+  phone: record.phone || null,
+  street: record.street,
+  ward: record.ward || null,
+  district: record.district || null,
+  city: record.city || null,
+  instructions: record.instructions || null,
+  isDefault: record.is_primary === true,
+  createdAt: record.created_at,
+  updatedAt: record.updated_at,
+});
+
 // Customer register -> gửi OTP để verify email
 async function registerCustomer(payload) {
   const existing = await userModel.findByEmail(payload.email);
@@ -27,11 +42,14 @@ async function registerCustomer(payload) {
     otp_code: otp,
     otp_expires: expiresAt,
     is_verified: false,
-    is_approved: true // customers không cần admin approve
+    is_approved: true, // customers không cần admin approve
   });
 
   await sendOtpEmail(user.email, user.first_name || user.email, otp, 'VERIFY');
-  return { message: 'Customer registered. OTP sent to email for verification.' };
+  return {
+    message: 'Customer registered. OTP sent to email for verification.',
+    userId: user.id,
+  };
 }
 
 // Customer verify => set is_verified true
@@ -43,8 +61,14 @@ async function verifyCustomer(email, otp_code) {
   if (user.otp_code !== otp_code) throw new Error('Invalid OTP');
   if (new Date(user.otp_expires) < new Date()) throw new Error('OTP expired');
 
-  await userModel.updateUser(user.id, { is_verified: true, otp_code: null, otp_expires: null });
-  return { message: 'Email verified. You can now login.' };
+  const updated = await userModel.updateUser(user.id, { is_verified: true, otp_code: null, otp_expires: null });
+  const token = jwt.sign({ userId: user.id, role: user.role }, { expiresIn: '15m' });
+  const { password_hash, otp_code: _, otp_expires: __, ...publicUser } = updated;
+  return {
+    message: 'Email verified. Welcome back!',
+    user: publicUser,
+    token,
+  };
 }
 
 // Customer login (email + password)
@@ -77,4 +101,36 @@ async function loginCustomer({ email, password }) {
   return { message: 'Login successful', user, token };
 }
 
-module.exports = { registerCustomer, verifyCustomer, loginCustomer };
+async function listAddresses(userId) {
+  const rows = await userModel.getAddressesByUserId(userId);
+  return rows.map(adaptAddress);
+}
+
+async function createAddress(userId, payload) {
+  const record = await userModel.createAddress(userId, {
+    label: payload.label,
+    recipient: payload.recipient,
+    phone: payload.phone,
+    street: payload.street,
+    ward: payload.ward,
+    district: payload.district,
+    city: payload.city,
+    instructions: payload.instructions,
+    isDefault: payload.isDefault === true,
+  });
+  return adaptAddress(record);
+}
+
+async function deleteAddress(userId, addressId) {
+  const deleted = await userModel.deleteAddress(userId, addressId);
+  return deleted;
+}
+
+module.exports = {
+  registerCustomer,
+  verifyCustomer,
+  loginCustomer,
+  listAddresses,
+  createAddress,
+  deleteAddress,
+};

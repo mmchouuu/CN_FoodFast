@@ -1,6 +1,6 @@
-import pool from '../db/index.js';
-import { geocodeAddress } from '../utils/geocoding.js';
-import { publishSocketEvent } from '../utils/rabbitmq.js';
+const pool = require('../db');
+const { geocodeAddress } = require('../utils/geocoding');
+const { publishSocketEvent } = require('../utils/rabbitmq');
 
 const USER_SERVICE_URL = (process.env.USER_SERVICE_URL || 'http://user-service:3001').replace(/\/+$/, '');
 
@@ -305,12 +305,12 @@ async function hydrateBranches(client, restaurantId) {
   }));
 }
 
-export async function getAllRestaurants() {
+async function getAllRestaurants() {
   const { rows } = await pool.query(`${SELECT_RESTAURANT_BASE} ORDER BY created_at DESC`);
   return rows;
 }
 
-export async function getRestaurantsByOwner(ownerId) {
+async function getRestaurantsByOwner(ownerId) {
   const { rows } = await pool.query(
     `${SELECT_RESTAURANT_BASE} WHERE owner_id = $1 ORDER BY created_at DESC`,
     [ownerId],
@@ -325,7 +325,7 @@ export async function getRestaurantsByOwner(ownerId) {
   }));
 }
 
-export async function getRestaurantById(id, { includeBranches = true } = {}) {
+async function getRestaurantById(id, { includeBranches = true } = {}) {
   const client = await pool.connect();
   let restaurant = null;
   let branches = [];
@@ -354,7 +354,7 @@ export async function getRestaurantById(id, { includeBranches = true } = {}) {
   return payload;
 }
 
-export async function getRestaurantByOwner(ownerId) {
+async function getRestaurantByOwner(ownerId) {
   const client = await pool.connect();
   let restaurant = null;
   let branches = [];
@@ -403,7 +403,7 @@ export async function getRestaurantByOwner(ownerId) {
   };
 }
 
-export async function createRestaurant(data) {
+async function createRestaurant(data) {
   const {
     ownerId,
     name,
@@ -467,7 +467,7 @@ export async function createRestaurant(data) {
   return restaurant;
 }
 
-export async function updateRestaurant(id, data) {
+async function updateRestaurant(id, data) {
   const fields = [];
   const values = [];
   let index = 1;
@@ -532,7 +532,7 @@ export async function updateRestaurant(id, data) {
   return restaurant;
 }
 
-export async function deleteRestaurant(id) {
+async function deleteRestaurant(id) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -571,7 +571,7 @@ export async function deleteRestaurant(id) {
   }
 }
 
-export async function getBranchesForRestaurant(restaurantId) {
+async function getBranchesForRestaurant(restaurantId) {
   const client = await pool.connect();
   try {
     return await hydrateBranches(client, restaurantId);
@@ -580,7 +580,7 @@ export async function getBranchesForRestaurant(restaurantId) {
   }
 }
 
-export async function createRestaurantBranch(restaurantId, payload) {
+async function createRestaurantBranch(restaurantId, payload) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -752,7 +752,7 @@ export async function createRestaurantBranch(restaurantId, payload) {
   }
 }
 
-export async function updateRestaurantBranch(restaurantId, branchId, payload) {
+async function updateRestaurantBranch(restaurantId, branchId, payload) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -982,7 +982,7 @@ export async function updateRestaurantBranch(restaurantId, branchId, payload) {
   }
 }
 
-export async function deleteRestaurantBranch(restaurantId, branchId) {
+async function deleteRestaurantBranch(restaurantId, branchId) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -1048,5 +1048,22 @@ async function remove(id){
   return model.deleteRestaurant(id);
 }
 
-module.exports = { create, list, get, update, remove };
+module.exports = {
+  getAllRestaurants,
+  getRestaurantsByOwner,
+  getRestaurantById,
+  getRestaurantByOwner,
+  createRestaurant,
+  updateRestaurant,
+  deleteRestaurant,
+  getBranchesForRestaurant,
+  createRestaurantBranch,
+  updateRestaurantBranch,
+  deleteRestaurantBranch,
+  create,
+  list,
+  get,
+  update,
+  remove,
+};
 
