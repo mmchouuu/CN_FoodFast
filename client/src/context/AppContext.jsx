@@ -383,12 +383,13 @@ export const AppContextProvider = ({ children }) => {
     }, [authToken, authProfileId]);
 
     const refreshBankAccounts = useCallback(async () => {
-        if (!authToken) {
+        const userId = authProfileId || undefined;
+        if (!authToken && !userId) {
             setBankAccounts([]);
             return [];
         }
         try {
-            const data = await paymentsService.listBankAccounts();
+            const data = await paymentsService.listBankAccounts({ userId });
             const accounts = Array.isArray(data) ? data : [];
             setBankAccounts(accounts);
             return accounts;
@@ -397,13 +398,16 @@ export const AppContextProvider = ({ children }) => {
             setBankAccounts([]);
             return [];
         }
-    }, [authToken]);
+    }, [authToken, authProfileId]);
 
     const linkBankAccount = useCallback(async (payload) => {
-        const account = await paymentsService.linkBankAccount(payload);
+        const account = await paymentsService.linkBankAccount({
+            ...payload,
+            user_id: payload?.user_id || authProfileId || undefined,
+        });
         setBankAccounts(prev => [account, ...prev.filter(item => item.id !== account.id)]);
         return account;
-    }, []);
+    }, [authProfileId]);
 
     const refreshOrders = useCallback(async () => {
         if (!authToken) {
@@ -444,12 +448,12 @@ export const AppContextProvider = ({ children }) => {
     }, [authToken, authProfileId, refreshAddresses]);
 
     useEffect(() => {
-        if (!authToken) {
+        if (!authToken && !authProfileId) {
             setBankAccounts([]);
             return;
         }
         refreshBankAccounts();
-    }, [authToken, refreshBankAccounts]);
+    }, [authToken, authProfileId, refreshBankAccounts]);
 
     useEffect(() => {
         if (method === 'bank' && bankAccounts.length === 0) {

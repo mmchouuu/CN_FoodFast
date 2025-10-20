@@ -21,7 +21,6 @@ const CustomerProfilePanel = ({ open, onClose, onLogout }) => {
     addNewAddress,
     updateLocalProfile,
     removeAddress,
-    paymentOptions,
     bankAccounts,
     refreshBankAccounts,
     linkBankAccount,
@@ -34,7 +33,6 @@ const CustomerProfilePanel = ({ open, onClose, onLogout }) => {
   const [activeSection, setActiveSection] = useState("profile");
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [showAddressForm, setShowAddressForm] = useState(false);
-  const [linkedPayments, setLinkedPayments] = useState(() => new Set());
   const [addressLabel, setAddressLabel] = useState(ADDRESS_LABELS[0].id);
   const [customLabel, setCustomLabel] = useState("");
   const defaultFullName =
@@ -122,25 +120,6 @@ const CustomerProfilePanel = ({ open, onClose, onLogout }) => {
       cancelled = true;
     };
   }, [open, refreshBankAccounts]);
-
-  useEffect(() => {
-    setLinkedPayments((prev) => {
-      const hasBank = prev.has("bank");
-      if (bankAccounts.length > 0 && hasBank) {
-        return prev;
-      }
-      if (bankAccounts.length === 0 && !hasBank) {
-        return prev;
-      }
-      const next = new Set(prev);
-      if (bankAccounts.length > 0) {
-        next.add("bank");
-      } else {
-        next.delete("bank");
-      }
-      return next;
-    });
-  }, [bankAccounts.length]);
 
   const normalize = (value) =>
     value
@@ -245,24 +224,6 @@ const CustomerProfilePanel = ({ open, onClose, onLogout }) => {
     }
   };
 
-  const handleLinkPayment = (optionId) => {
-    if (optionId === "bank") {
-      setShowBankForm(true);
-      return;
-    }
-    setLinkedPayments((prev) => {
-      const next = new Set(prev);
-      if (next.has(optionId)) {
-        next.delete(optionId);
-        toast("Payment method unlinked.");
-      } else {
-        next.add(optionId);
-        toast.success("Linked successfully.");
-      }
-      return next;
-    });
-  };
-
   const handleBankFieldChange = (event) => {
     const { name, value, type, checked } = event.target;
     setBankForm((prev) => ({
@@ -306,6 +267,7 @@ const CustomerProfilePanel = ({ open, onClose, onLogout }) => {
         accountHolder: bankForm.accountHolder,
         accountNumber: bankForm.accountNumber,
         isDefault: bankForm.isDefault,
+        user_id: user?.id,
       });
       toast.success("Bank account linked successfully.");
       setShowBankForm(false);
@@ -675,51 +637,8 @@ const CustomerProfilePanel = ({ open, onClose, onLogout }) => {
     return (
       <div className="space-y-4 rounded-3xl bg-white p-6 shadow">
         <p className="text-sm text-gray-500">
-          Link payment methods to skip manual entry and unlock offers.
+          Manage saved payment methods for faster checkout.
         </p>
-        <div className="grid gap-3 sm:grid-cols-2">
-          {paymentOptions.map((option) => {
-            const isBank = option.id === "bank";
-            const isLinked = isBank
-              ? hasLinkedBank
-              : linkedPayments.has(option.id);
-            return (
-              <button
-                key={option.id}
-                type="button"
-                onClick={() => handleLinkPayment(option.id)}
-                className={`flex h-full flex-col justify-between rounded-2xl border p-4 text-left transition focus:outline-none focus:ring-2 focus:ring-orange-200 ${
-                  isLinked
-                    ? "border-orange-400 bg-orange-50"
-                    : "border-orange-100 hover:border-orange-200"
-                }`}
-              >
-                <div className="space-y-2">
-                  <p className="text-sm font-semibold text-gray-900">
-                    {option.label}
-                  </p>
-                  <p className="text-xs text-gray-500">
-                    {option.description}
-                  </p>
-                  {isBank && hasLinkedBank ? (
-                    <p className="text-xs text-emerald-600">
-                      {bankAccounts.length} linked account
-                      {bankAccounts.length > 1 ? "s" : ""}.
-                    </p>
-                  ) : null}
-                </div>
-                <span
-                  className={`mt-3 text-xs font-semibold uppercase tracking-wide ${
-                    isLinked ? "text-emerald-600" : "text-orange-500"
-                  }`}
-                >
-                  {isLinked ? "Linked" : "Link"}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-
         <div className="rounded-2xl border border-orange-100 bg-orange-50/40 p-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
@@ -776,6 +695,29 @@ const CustomerProfilePanel = ({ open, onClose, onLogout }) => {
                 No bank accounts linked yet.
               </p>
             )}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-orange-100 bg-orange-50/40 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-gray-900">
+                Connected debit / credit cards
+              </p>
+              <p className="text-xs text-gray-500">
+                Securely store your cards to speed up future orders.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => toast("Card linking is coming soon.")}
+              className="rounded-full border border-orange-300 px-3 py-1 text-xs font-semibold text-orange-500 transition hover:bg-orange-100"
+            >
+              + Add card
+            </button>
+          </div>
+          <div className="mt-3 space-y-2">
+            <p className="text-xs text-gray-500">No cards linked yet.</p>
           </div>
         </div>
 
