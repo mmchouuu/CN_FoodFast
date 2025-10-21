@@ -21,6 +21,6 @@ app.use(
 app.get('/health', (_req, res) => res.json({ ok: true, service: 'product-service' }));
 app.use('/api/products', productRoutes);
 app.use('/api/restaurants', restaurantRoutes);
-app.use('/api/seed', seedRoutes);
+// app.use('/api/seed', seedRoutes);
 
 module.exports = app;
