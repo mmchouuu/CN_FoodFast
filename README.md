@@ -373,6 +373,7 @@ npm run preview    # xem trước bản build
 
 ### Toàn hệ thống
 
+![Sơ đồ kiến trúc hệ thống](./assets/images/component.jpg)
 
 ---
 
