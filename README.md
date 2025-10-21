@@ -216,11 +216,11 @@ JWT_SECRET=change_me_super_secret
 
 **2) `server/apps/.env` (API Gateway / BFF)**
 ```env
-PORT=5000
-USER_SVC_URL=http://localhost:5001
-PRODUCT_SVC_URL=http://localhost:5002
-ORDER_SVC_URL=http://localhost:5003
-PAYMENT_SVC_URL=http://localhost:5004
+PORT=8080
+USER_SVC_URL=http://localhost:3001
+PRODUCT_SVC_URL=http://localhost:3002
+ORDER_SVC_URL=http://localhost:3003
+PAYMENT_SVC_URL=http://localhost:3004
 
 JWT_SECRET=change_me_super_secret
 RABBITMQ_URL=amqp://guest:guest@localhost:5672
@@ -228,28 +228,28 @@ RABBITMQ_URL=amqp://guest:guest@localhost:5672
 
 **3) `server/user-service/.env`**
 ```env
-PORT=5001
+PORT=3001
 USER_DB_URL=postgresql://postgres:postgres@localhost:5432/userdb
 JWT_SECRET=change_me_super_secret
 ```
 
 **4) `server/product-service/.env`**
 ```env
-PORT=5002
+PORT=3002
 PRODUCT_DB_URL=postgresql://postgres:postgres@localhost:5432/productdb
 RABBITMQ_URL=amqp://guest:guest@localhost:5672
 ```
 
 **5) `server/order-service/.env`**
 ```env
-PORT=5003
+PORT=3003
 ORDER_DB_URL=postgresql://postgres:postgres@localhost:5432/orderdb
 RABBITMQ_URL=amqp://guest:guest@localhost:5672
 ```
 
 **6) `server/payment-service/.env`**
 ```env
-PORT=5004
+PORT=3004
 PAYMENT_DB_URL=postgresql://postgres:postgres@localhost:5432/paymentdb
 RABBITMQ_URL=amqp://guest:guest@localhost:5672
 INTEGRATIONS_BASE_URL=http://localhost:5010  # nếu có service tích hợp 3rd party
@@ -257,7 +257,7 @@ INTEGRATIONS_BASE_URL=http://localhost:5010  # nếu có service tích hợp 3rd
 
 **7) `server/email-service/.env`**
 ```env
-PORT=5005
+PORT=3005
 RABBITMQ_URL=amqp://guest:guest@localhost:5672
 
 SMTP_HOST=email-smtp.us-east-1.amazonaws.com
@@ -279,7 +279,7 @@ JWT_SECRET=change_me_super_secret
 
 **9) `client/.env`**
 ```env
-VITE_API_BASE_URL=http://localhost:5000
+VITE_API_BASE_URL=http://localhost:8080
 ```
 
 > **Database:** tạo 4 DB local: `userdb`, `productdb`, `orderdb`, `paymentdb` và chạy các script `db/*/*_init.sql` (nếu có migration riêng thì dùng migration tool của bạn).
@@ -324,7 +324,7 @@ npm run dev
 
 **Truy cập**
 - Frontend: http://localhost:5173  
-- API Gateway: http://localhost:5000  
+- API Gateway: http://localhost:8080  
 - Các service khác theo PORT trong `.env`.
 
 ### Chạy bằng Docker Compose (Tuỳ chọn)
