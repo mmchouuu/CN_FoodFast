@@ -24,7 +24,6 @@
   - [Socket Gateway](#socket-gateway-component-level)
   - [Integrations-3rd](#integrations-3rd-component-level)
 - [Ghi chú triển khai](#ghi-chú-triển-khai)
-- [Giấy phép](#giấy-phép)
 
 ---
 
@@ -80,7 +79,7 @@ server/
 │       │   ├── products.js
 │       │   ├── orders.js
 │       │   └── payments.js
-│       └── services/              # HTTP client gọi xuống các microservices
+│       └── services/              
 │           ├── users.client.js
 │           ├── products.client.js
 │           ├── orders.client.js
@@ -505,6 +504,3 @@ flowchart TB
 - Gợi ý: thêm **rate limit** ở Gateway, **idempotency-key** cho API tạo đơn, **retry + DLQ** cho consumer.
 
 ---
-
-## Giấy phép
-MIT (hoặc cập nhật theo giấy phép bạn chọn).
