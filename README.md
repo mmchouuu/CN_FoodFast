@@ -1,80 +1,44 @@
 # CN_FoodFast
 
-**Tasty – experience colorful and flavorful fast food. From savory dishes to sweet treats, from noodles to desserts, we bring joy to your belly and smiles to your face. Order now, eat deliciously!**  
-— Mô tả từ kho lưu trữ. :contentReference[oaicite:1]{index=1}
+> **Tasty** – experience colorful and flavorful fast food.  
+> From savory dishes to sweet treats, from noodles to desserts, we bring joy to your belly and smiles to your face. **Order now, eat deliciously!**
 
-## Mục lục  
-- [Giới thiệu](#giới-thiệu)  
-- [Tính năng](#tính-năng)  
-- [Kiến trúc & Công nghệ](#kiến-trúc--công-nghệ)  
-- [Cài đặt & Chạy thử](#cài-đặt--chạy-thử)  
-- [Hướng dẫn sử dụng](#hướng-dẫn-sử-dụng)  
+---
 
-## Giới thiệu  
-CN_FoodFast là một ứng dụng đặt/giao/quản lý món ăn nhanh, cho phép người dùng duyệt menu đa dạng (từ món mặn tới món ngọt, từ mì tới tráng miệng) và đặt món dễ dàng. Dự án được xây dựng với mục đích tạo ra trải nghiệm ăn nhanh (fast food) đa màu sắc và đầy hương vị.
+## Mục lục
+- [Giới thiệu](#giới-thiệu)
+- [Tính năng](#tính-năng)
+- [Kiến trúc & Công nghệ](#kiến-trúc--công-nghệ)
+- [Cấu trúc thư mục](#cấu-trúc-thư-mục)
+- [Bắt đầu nhanh](#bắt-đầu-nhanh)
+  - [Yêu cầu môi trường](#yêu-cầu-môi-trường)
+  - [Clone & cài đặt](#clone--cài-đặt)
+  - [Thiết lập biến môi trường](#thiết-lập-biến-môi-trường)
+  - [Chạy ứng dụng](#chạy-ứng-dụng)
+- [Sử dụng nhanh](#sử-dụng-nhanh)
+- [Scripts tiện ích](#scripts-tiện-ích)
+- [Ghi chú triển khai](#ghi-chú-triển-khai)
+- [Giấy phép](#giấy-phép)
 
-## Tính năng  
-- Người dùng có thể đăng ký / đăng nhập
-- Duyệt menu theo danh mục món ăn
-- Thêm món vào giỏ hàng và thực hiện đặt hàng  
-- Quản lý đơn hàng cho người dùng (xem trạng thái)
-- Nhà hàng có thể thêm/sửa/xoá món ăn, quản lý đơn hàng  
-- Hệ thống quản trị (Admin) xác nhận cấp tài khoản cho nhà hàng, xem đơn hàng, người dùng
-- Responsive và thích hợp cho web (desktop & mobile)
+---
 
-## Kiến trúc & Công nghệ  
-- Frontend: thư mục `client` — sử dụng React.Js 
-- Backend: thư mục `server` — sử dụng Node.js (Express) 
-- Cơ sở dữ liệu: PostgreSQL
-- RESTful API: Backend cung cấp các endpoint để frontend gọi  
+## Giới thiệu
+**CN_FoodFast** là ứng dụng đặt/giao/quản lý món ăn nhanh. Người dùng có thể duyệt thực đơn, thêm món vào giỏ và đặt hàng; nhà hàng quản lý món & đơn; admin duyệt và giám sát hệ thống.
 
-## Cài đặt & Chạy thử  
-1. Clone repository  
-   ```bash
-   git clone https://github.com/mmchouuu/CN_FoodFast.git
-   cd CN_FoodFast
+## Tính năng
+- Đăng ký / đăng nhập người dùng.
+- Duyệt menu theo danh mục, xem chi tiết món.
+- Giỏ hàng, đặt hàng, theo dõi trạng thái đơn.
+- Nhà hàng quản lý món ăn (thêm/sửa/xoá), quản lý đơn.
+- Admin phê duyệt tài khoản nhà hàng, xem thống kê cơ bản.
+- Giao diện thân thiện, hỗ trợ desktop & mobile.
 
-## Cài đặt dependencies cho backend
-  ```bash
-  cd server
-  npm install
+## Kiến trúc & Công nghệ
+- **Frontend**: `client/` – React (Vite).
+- **Backend**: `server/` – Node.js (Express).
+- **Database**: PostgreSQL.
+- **API**: RESTful endpoints giữa frontend ↔ backend.
 
-## Cài đặt dependencies cho frontend
- ```bash
-cd ../client
-npm install
+> Lưu ý: repo này cung cấp môi trường **dev** tách 2 app *client* và *server*. Các dịch vụ khác (email, socket, v.v.) có thể bổ sung sau.
 
-
-## Thiết lập biến môi trường (ví dụ .env) cho backend:
- ```bash
-PORT=5000  
-DB_URI=your_database_uri  
-JWT_SECRET=your_jwt_secret  
-
-
-## Chạy backend
- ```bash
-cd ../server
-npm run dev
-
-
-## Chạy frontend
- ```bash
-cd ../client
-npm run dev
-
-
-### Mở trình duyệt tại http://localhost:5173 để sử dụng ứng dụng.
-
-## Hướng dẫn sử dụng
-
-Sau khi đăng nhập, bạn sẽ thấy giao diện menu.
-
-Chọn món ăn muốn đặt → thêm vào giỏ hàng → đi tới thanh toán.
-
-Xem lịch sử đơn hàng tại phần “Đơn hàng của tôi”.
-
-Admin (nếu có quyền) truy cập vào /admin để quản lý món & đơn hàng.
-
-### Lưu ý: README này là bản mẫu và bạn nên cập nhật chi tiết thực tế về công nghệ, cài đặt, môi trường, các API endpoint, cách triển khai… phù hợp với dự án thực của bạn.
-
+## Cấu trúc thư mục
