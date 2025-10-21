@@ -57,14 +57,14 @@ Người dùng duyệt thực đơn, thêm món vào giỏ và đặt hàng; nh�
 
 ```
 server/
-├── apps/                          # API Gateway / BFF (điểm vào HTTP cho client)
+├── apps/                          
 │   ├── Dockerfile
 │   ├── .env
 │   ├── entrypoint.sh
 │   ├── package.json
 │   └── src/
-│       ├── index.js               # khởi tạo app, mount routes
-│       ├── health.js              # /healthz
+│       ├── index.js              
+│       ├── health.js              
 │       ├── config/
 │       │   └── index.js
 │       ├── controllers/
