@@ -1,7 +1,5 @@
 import api from './api';
 
-const basePath = '/api/products';
-
 function normaliseListResponse(raw) {
   if (!raw) return [];
   if (Array.isArray(raw.data)) return raw.data;
@@ -14,24 +12,44 @@ function normaliseListResponse(raw) {
 
 const ownerProductService = {
   async listByRestaurant(restaurantId, params = {}) {
-    const query = { restaurant_id: restaurantId, limit: 200, ...params };
-    const { data } = await api.get(basePath, { params: query });
+    const query = { limit: 200, ...params };
+    const { data } = await api.get(`/api/restaurants/${restaurantId}/products`, {
+      params: query,
+    });
     return normaliseListResponse(data);
   },
 
-  async create(payload) {
-    const response = await api.post(basePath, payload);
+  async create(restaurantId, payload) {
+    const response = await api.post(`/api/restaurants/${restaurantId}/products`, payload);
     return response?.data;
   },
 
-  async update(id, payload) {
-    const response = await api.patch(`${basePath}/${id}`, payload);
+  async update(restaurantId, productId, payload) {
+    const response = await api.patch(
+      `/api/restaurants/${restaurantId}/products/${productId}`,
+      payload,
+    );
     return response?.data;
   },
 
-  async remove(id) {
-    await api.delete(`${basePath}/${id}`);
+  async remove(restaurantId, productId) {
+    await api.delete(`/api/restaurants/${restaurantId}/products/${productId}`);
     return true;
+  },
+
+  async fetchInventory(restaurantId, productId) {
+    const { data } = await api.get(
+      `/api/restaurants/${restaurantId}/products/${productId}/inventory`,
+    );
+    return normaliseListResponse(data);
+  },
+
+  async updateInventory(restaurantId, branchId, productId, payload) {
+    const response = await api.put(
+      `/api/restaurants/${restaurantId}/branches/${branchId}/inventory/${productId}`,
+      payload,
+    );
+    return response?.data;
   },
 };
 

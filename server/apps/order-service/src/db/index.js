@@ -1,12 +1,25 @@
-import pkg from 'pg';
-const { Pool } = pkg;
+const { Pool } = require('pg');
+const config = require('../config');
 
 const pool = new Pool({
-  host: process.env.DB_HOST || 'orderdb',
-  user: process.env.DB_USER || 'postgres',
-  password: process.env.DB_PASSWORD || '123',
-  port: Number(process.env.DB_PORT || 5432),
-  database: process.env.DB_NAME || 'orderdb',
+  host: config.DB.host,
+  port: config.DB.port,
+  database: config.DB.database,
+  user: config.DB.user,
+  password: config.DB.password,
+  ssl: config.DB.ssl,
+  max: config.DB.max,
+  idleTimeoutMillis: config.DB.idleTimeoutMillis,
+  connectionTimeoutMillis: config.DB.connectionTimeoutMillis,
 });
 
-export default pool;
+pool.on('error', (error) => {
+  console.error('[order-service] Unexpected database error:', error);
+});
+
+const query = (text, params) => pool.query(text, params);
+
+module.exports = {
+  pool,
+  query,
+};

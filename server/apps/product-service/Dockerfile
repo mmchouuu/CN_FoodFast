@@ -13,19 +13,23 @@
 # CMD ["node", "server.js"]
 
 # Stage 1: Base image
-FROM node:20-alpine
+FROM node:20-bullseye
 
 # Set working directory
 WORKDIR /app
 
 # Install PostgreSQL client
-RUN apk add --no-cache postgresql-client
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy package files
 COPY package*.json ./
 
 # Use npm install to avoid lock mismatch errors when package.json changes
 RUN npm install --only=production --no-audit --no-fund
+
 COPY . .
 COPY ./src ./src
 

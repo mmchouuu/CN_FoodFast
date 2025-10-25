@@ -21,7 +21,9 @@ const CustomerProfilePanel = ({ open, onClose, onLogout }) => {
     addNewAddress,
     updateLocalProfile,
     removeAddress,
-    paymentOptions,
+    bankAccounts,
+    refreshBankAccounts,
+    linkBankAccount,
     pastOrders,
     restaurantReviews,
     restaurants,
@@ -31,10 +33,8 @@ const CustomerProfilePanel = ({ open, onClose, onLogout }) => {
   const [activeSection, setActiveSection] = useState("profile");
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [showAddressForm, setShowAddressForm] = useState(false);
-  const [linkedPayments, setLinkedPayments] = useState(() => new Set());
   const [addressLabel, setAddressLabel] = useState(ADDRESS_LABELS[0].id);
   const [customLabel, setCustomLabel] = useState("");
-
   const defaultFullName =
     user?.fullName ||
     [user?.first_name, user?.last_name].filter(Boolean).join(" ") ||
@@ -46,6 +46,17 @@ const CustomerProfilePanel = ({ open, onClose, onLogout }) => {
     user?.emails?.[0]?.emailAddress ||
     "";
   const defaultPhone = user?.phone || addresses[0]?.phone || "";
+
+  const [showBankForm, setShowBankForm] = useState(false);
+  const [bankForm, setBankForm] = useState(() => ({
+    bankName: "",
+    bankCode: "",
+    accountHolder: defaultFullName,
+    accountNumber: "",
+    isDefault: bankAccounts.length === 0,
+  }));
+  const [savingBankAccount, setSavingBankAccount] = useState(false);
+  const [loadingBankAccounts, setLoadingBankAccounts] = useState(false);
 
   const [profileForm, setProfileForm] = useState({
     fullName: defaultFullName,
@@ -82,6 +93,33 @@ const CustomerProfilePanel = ({ open, onClose, onLogout }) => {
       phone: defaultPhone,
     });
   }, [defaultFullName, defaultEmail, defaultPhone, open]);
+
+  useEffect(() => {
+    setBankForm((prev) => ({
+      ...prev,
+      accountHolder: defaultFullName,
+      isDefault: bankAccounts.length === 0 ? true : prev.isDefault,
+    }));
+  }, [defaultFullName, bankAccounts.length]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    let cancelled = false;
+    const loadAccounts = async () => {
+      setLoadingBankAccounts(true);
+      try {
+        await refreshBankAccounts();
+      } finally {
+        if (!cancelled) {
+          setLoadingBankAccounts(false);
+        }
+      }
+    };
+    loadAccounts();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, refreshBankAccounts]);
 
   const normalize = (value) =>
     value
@@ -160,7 +198,7 @@ const CustomerProfilePanel = ({ open, onClose, onLogout }) => {
         instructions: newAddress.instructions,
         isDefault: newAddress.isDefault,
       });
-      if (created?.isDefault && created?.id) {
+      if (newAddress.isDefault && created?.id) {
         setSelectedAddressId(created.id);
       }
       toast.success("New address added.");
@@ -179,23 +217,87 @@ const CustomerProfilePanel = ({ open, onClose, onLogout }) => {
       setCustomLabel("");
     } catch (error) {
       const message =
+        error?.response?.data?.error ||
         error?.message ||
-        "We could not save this address. Please sign in and try again.";
+        "Unable to save address.";
+
       toast.error(message);
     }
   };
 
-  const handleLinkPayment = (optionId) => {
-    setLinkedPayments((prev) => {
-      const next = new Set(prev);
-      if (next.has(optionId)) {
-        next.delete(optionId);
-        toast("Payment method unlinked.");
-      } else {
-        next.add(optionId);
-        toast.success("Linked successfully.");
-      }
-      return next;
+  const handleBankFieldChange = (event) => {
+    const { name, value, type, checked } = event.target;
+    setBankForm((prev) => ({
+      ...prev,
+      [name]: type === "checkbox" ? checked : value,
+    }));
+  };
+
+  const handleRemoveAddress = async (addressId) => {
+    try {
+      await removeAddress(addressId);
+      toast.success("Address removed.");
+    } catch (error) {
+      const message =
+        error?.response?.data?.error ||
+        error?.message ||
+        "Unable to remove address.";
+      toast.error(message);
+    }
+  };
+
+  const handleBankSubmit = async (event) => {
+    event.preventDefault();
+    if (!bankForm.bankName.trim()) {
+      toast.error("Please enter the bank name.");
+      return;
+    }
+    if (!bankForm.accountHolder.trim()) {
+      toast.error("Please enter the account holder name.");
+      return;
+    }
+    if (!bankForm.accountNumber.trim()) {
+      toast.error("Please enter the account number.");
+      return;
+    }
+    setSavingBankAccount(true);
+    try {
+      await linkBankAccount({
+        bankName: bankForm.bankName,
+        bankCode: bankForm.bankCode,
+        accountHolder: bankForm.accountHolder,
+        accountNumber: bankForm.accountNumber,
+        isDefault: bankForm.isDefault,
+        user_id: user?.id,
+      });
+      toast.success("Bank account linked successfully.");
+      setShowBankForm(false);
+      setBankForm({
+        bankName: "",
+        bankCode: "",
+        accountHolder: defaultFullName,
+        accountNumber: "",
+        isDefault: false,
+      });
+    } catch (error) {
+      const message =
+        error?.response?.data?.error ||
+        error?.message ||
+        "Unable to link bank account.";
+      toast.error(message);
+    } finally {
+      setSavingBankAccount(false);
+    }
+  };
+
+  const handleCancelBankForm = () => {
+    setShowBankForm(false);
+    setBankForm({
+      bankName: "",
+      bankCode: "",
+      accountHolder: defaultFullName,
+      accountNumber: "",
+      isDefault: bankAccounts.length === 0,
     });
   };
 
@@ -350,18 +452,8 @@ const CustomerProfilePanel = ({ open, onClose, onLogout }) => {
                   </span>
                 ) : null}
                 <button
-                  type="button"
-                  onClick={async () => {
-                    try {
-                      await removeAddress(address.id);
-                      toast.success("Address removed.");
-                    } catch (error) {
-                      const message =
-                        error?.message ||
-                        "Unable to remove this address. Please try again.";
-                      toast.error(message);
-                    }
-                  }}
+                  onClick={() => handleRemoveAddress(address.id)}
+
                   className="rounded-full border border-orange-100 px-3 py-1 text-xs font-semibold text-gray-500 transition hover:border-red-200 hover:text-red-500"
                 >
                   Xoa
@@ -542,34 +634,184 @@ const CustomerProfilePanel = ({ open, onClose, onLogout }) => {
     </div>
   );
 
-  const renderPaymentSection = () => (
-    <div className="space-y-3 rounded-3xl bg-white p-6 shadow">
-      <p className="text-sm text-gray-500">
-        Link payment methods to skip manual entry and unlock offers.
-      </p>
-      {paymentOptions.map((option) => (
-        <button
-          key={option.id}
-          onClick={() => handleLinkPayment(option.id)}
-          className={`flex items-center justify-between rounded-2xl border px-4 py-3 text-left transition ${
-            linkedPayments.has(option.id)
-              ? "border-orange-400 bg-orange-50"
-              : "border-orange-100 hover:border-orange-200"
-          }`}
-        >
-          <div>
-            <p className="text-sm font-semibold text-gray-900">
-              {option.label}
-            </p>
-            <p className="text-xs text-gray-500">{option.description}</p>
+  const renderPaymentSection = () => {
+    const hasLinkedBank = bankAccounts.length > 0;
+    return (
+      <div className="space-y-4 rounded-3xl bg-white p-6 shadow">
+        <p className="text-sm text-gray-500">
+          Manage saved payment methods for faster checkout.
+        </p>
+        <div className="rounded-2xl border border-orange-100 bg-orange-50/40 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-gray-900">
+                Connected bank accounts
+              </p>
+              <p className="text-xs text-gray-500">
+                {hasLinkedBank
+                  ? "Manage your linked accounts below."
+                  : "Link a bank account to enable instant bank payments at checkout."}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowBankForm(true)}
+              className="rounded-full border border-orange-300 px-3 py-1 text-xs font-semibold text-orange-500 transition hover:bg-orange-100"
+            >
+              + Add bank
+            </button>
           </div>
-          <span className="text-xs font-semibold uppercase tracking-wide text-orange-500">
-            {linkedPayments.has(option.id) ? "Da lien ket" : "Lien ket"}
-          </span>
-        </button>
-      ))}
-    </div>
-  );
+          <div className="mt-3 space-y-2">
+            {loadingBankAccounts ? (
+              <p className="text-xs text-gray-500">
+                Loading linked accounts...
+              </p>
+            ) : hasLinkedBank ? (
+              bankAccounts.map((account) => (
+                <div
+                  key={account.id}
+                  className="flex items-center justify-between rounded-xl border border-orange-100 bg-white px-3 py-2 text-sm text-gray-700"
+                >
+                  <div>
+                    <p className="font-semibold text-gray-900">
+                      {account.bankName}
+                      {account.isDefault ? (
+                        <span className="ml-2 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-600">
+                          Default
+                        </span>
+                      ) : null}
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      {account.accountHolder} • {account.accountNumberMasked}
+                    </p>
+                  </div>
+                  {account.bankCode ? (
+                    <span className="text-[10px] uppercase tracking-wide text-orange-500">
+                      {account.bankCode}
+                    </span>
+                  ) : null}
+                </div>
+              ))
+            ) : (
+              <p className="text-xs text-gray-500">
+                No bank accounts linked yet.
+              </p>
+            )}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-orange-100 bg-orange-50/40 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-gray-900">
+                Connected debit / credit cards
+              </p>
+              <p className="text-xs text-gray-500">
+                Securely store your cards to speed up future orders.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => toast("Card linking is coming soon.")}
+              className="rounded-full border border-orange-300 px-3 py-1 text-xs font-semibold text-orange-500 transition hover:bg-orange-100"
+            >
+              + Add card
+            </button>
+          </div>
+          <div className="mt-3 space-y-2">
+            <p className="text-xs text-gray-500">No cards linked yet.</p>
+          </div>
+        </div>
+
+        {showBankForm ? (
+          <form
+            onSubmit={handleBankSubmit}
+            className="space-y-4 rounded-2xl border border-orange-100 bg-white p-4"
+          >
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="space-y-2">
+                <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                  Bank name
+                </label>
+                <input
+                  name="bankName"
+                  value={bankForm.bankName}
+                  onChange={handleBankFieldChange}
+                  placeholder="e.g. Vietcombank"
+                  className="w-full rounded-xl border border-orange-100 px-3 py-2 text-sm outline-none transition focus:border-orange-300 focus:ring-1 focus:ring-orange-200"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                  Bank code (optional)
+                </label>
+                <input
+                  name="bankCode"
+                  value={bankForm.bankCode}
+                  onChange={handleBankFieldChange}
+                  placeholder="VCB"
+                  className="w-full rounded-xl border border-orange-100 px-3 py-2 text-sm outline-none transition focus:border-orange-300 focus:ring-1 focus:ring-orange-200"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                  Account holder
+                </label>
+                <input
+                  name="accountHolder"
+                  value={bankForm.accountHolder}
+                  onChange={handleBankFieldChange}
+                  placeholder="Account holder name"
+                  className="w-full rounded-xl border border-orange-100 px-3 py-2 text-sm outline-none transition focus:border-orange-300 focus:ring-1 focus:ring-orange-200"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                  Account number
+                </label>
+                <input
+                  name="accountNumber"
+                  value={bankForm.accountNumber}
+                  onChange={handleBankFieldChange}
+                  placeholder="Enter digits only"
+                  className="w-full rounded-xl border border-orange-100 px-3 py-2 text-sm outline-none transition focus:border-orange-300 focus:ring-1 focus:ring-orange-200"
+                  required
+                />
+              </div>
+            </div>
+            <label className="flex items-center gap-2 text-xs text-gray-600">
+              <input
+                type="checkbox"
+                name="isDefault"
+                checked={bankForm.isDefault}
+                onChange={handleBankFieldChange}
+                className="h-4 w-4 rounded border-orange-200 text-orange-500 focus:ring-orange-300"
+              />
+              Set as default bank for checkout
+            </label>
+            <div className="flex flex-wrap gap-3">
+              <button
+                type="submit"
+                disabled={savingBankAccount}
+                className="rounded-full bg-orange-500 px-5 py-2 text-sm font-semibold text-white transition hover:bg-orange-600 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {savingBankAccount ? "Linking..." : "Link bank account"}
+              </button>
+              <button
+                type="button"
+                onClick={handleCancelBankForm}
+                className="rounded-full border border-orange-200 px-5 py-2 text-sm font-semibold text-orange-500 transition hover:bg-orange-100"
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        ) : null}
+      </div>
+    );
+  };
 
   const renderSupportSection = () => (
     <div className="space-y-3 rounded-3xl bg-white p-6 shadow">

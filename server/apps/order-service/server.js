@@ -11,25 +11,24 @@
 //   await connectRabbitMQ();
 // });
 
-// server.js
-import dotenv from "dotenv";
-import app from "./src/app.js";
-import { connectRabbitMQ } from "./src/utils/rabbitmq.js";
-import pool from "./src/db/index.js";
+const dotenv = require('dotenv');
+const app = require('./src/app');
+const { connectRabbitMQ } = require('./src/utils/rabbitmq');
+const { pool } = require('./src/db');
 
 dotenv.config();
 
-const PORT = process.env.PORT || 3003;
+const PORT = Number(process.env.PORT) || 3003;
 
 const waitForPostgres = async () => {
   let connected = false;
   while (!connected) {
     try {
-      await pool.query("SELECT 1");
-      console.log("Connected to Postgres");
+      await pool.query('SELECT 1');
+      console.log('[order-service] Connected to Postgres');
       connected = true;
     } catch (err) {
-      console.log("Waiting for Postgres at orderdb:5432...");
+      console.log('Waiting for Postgres at orderdb:5432...');
       await new Promise((resolve) => setTimeout(resolve, 2000));
     }
   }
@@ -40,9 +39,9 @@ const startServer = async () => {
 
   try {
     await connectRabbitMQ();
-    console.log("RabbitMQ connected");
+    console.log('[order-service] RabbitMQ connected');
   } catch (error) {
-    console.error("RabbitMQ not ready yet:", error.message);
+    console.error('[order-service] RabbitMQ connection issue:', error.message);
   }
 
   app.listen(PORT, () => {
@@ -50,4 +49,7 @@ const startServer = async () => {
   });
 };
 
-startServer();
+startServer().catch((error) => {
+  console.error('[order-service] Failed to start service:', error);
+  process.exit(1);
+});

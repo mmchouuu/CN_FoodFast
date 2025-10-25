@@ -1,9 +1,13 @@
-FROM node:20-alpine
+FROM node:20-bullseye
 
 WORKDIR /app
 
 # Cài các gói cần thiết để build (nếu có thư viện cần build native)
-RUN apk add --no-cache python3 make g++
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        python3 \
+        build-essential \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy file package.json
 COPY package*.json ./

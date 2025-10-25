@@ -44,8 +44,10 @@ const AddressForm = () => {
       navigate("/checkout");
     } catch (error) {
       const message =
+        error?.response?.data?.error ||
         error?.message ||
-        "We could not save this address. Please sign in and try again.";
+        "Unable to save address.";
+
       toast.error(message);
     }
   };

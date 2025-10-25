@@ -9,6 +9,13 @@ const Verify = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const defaultEmail = location?.state?.email || "";
+  const defaultUserId = location?.state?.userId || (() => {
+    try {
+      return localStorage.getItem("pending_user_id");
+    } catch {
+      return null;
+    }
+  })();
 
   const [email, setEmail] = useState(defaultEmail);
   const [otpDigits, setOtpDigits] = useState(Array(OTP_LENGTH).fill(""));
@@ -53,10 +60,21 @@ const Verify = () => {
     setLoading(true);
     setError("");
     try {
-      await verifyOtp(email.trim(), otpValue.trim());
+      const result = await verifyOtp(email.trim(), otpValue.trim());
+      const resolvedUserId =
+        result?.user?.id ||
+        defaultUserId ||
+        null;
+      if (resolvedUserId) {
+        try {
+          localStorage.setItem("pending_user_id", resolvedUserId);
+        } catch {
+          // ignore storage issues
+        }
+      }
       navigate("/auth/add-address", {
         replace: true,
-        state: { email: email.trim() },
+        state: { email: email.trim(), userId: resolvedUserId },
       });
     } catch (err) {
       setError(
