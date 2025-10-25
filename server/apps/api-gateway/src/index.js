@@ -14,6 +14,7 @@ const restaurantsRoutes = require('./routes/restaurants.routes');
 const adminRoutes = require('./routes/admin.routes');
 const usersRoutes = require('./routes/users.routes');
 const productsRoutes = require('./routes/products.routes');
+const categoriesRoutes = require('./routes/categories.routes');
 const ordersRoutes = require('./routes/orders.routes');
 const paymentsRoutes = require('./routes/payments.routes');
 
@@ -42,9 +43,11 @@ app.use('/api/customer', customersRoutes);
 app.use('/api/customer-addresses', customerAddressesRoutes);
 app.use('/api/restaurants', restaurantsRoutes);
 app.use('/api/products', productsRoutes);
+app.use('/api/categories', categoriesRoutes);
 app.use('/api/orders', ordersRoutes);
 app.use('/api/payments', paymentsRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/payments', paymentsRoutes);
 
 // health
 app.get('/health', health);

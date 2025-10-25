@@ -2,7 +2,6 @@ FROM node:20-alpine
 WORKDIR /app
 RUN apk add --no-cache postgresql-client
 COPY package*.json ./
-# Install production dependencies (shared tarball no longer required)
 RUN npm install --omit=dev
 COPY . .
 COPY ./src ./src

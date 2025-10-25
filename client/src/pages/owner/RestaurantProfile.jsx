@@ -31,24 +31,29 @@ const emptyRestaurantForm = {
   coverPhoto: "",
 };
 
-const buildBranchForm = (nextNumber, preset = {}) => ({
-  id: preset.id || null,
-  name: preset.name || "",
-  branchNumber: String(preset.branchNumber ?? nextNumber),
-  branchPhone: preset.branchPhone || preset.brandPhone || "",
-  branchEmail: preset.branchEmail || preset.brandEmail || "",
-  street: preset.street || "",
-  ward: preset.ward || "",
-  district: preset.district || "",
-  city: preset.city || "",
-  latitude:
-    preset.latitude !== undefined && preset.latitude !== null ? String(preset.latitude) : "",
-  longitude:
-    preset.longitude !== undefined && preset.longitude !== null ? String(preset.longitude) : "",
-  imageUrl: preset.imageUrl || "",
-  isPrimary: Boolean(preset.isPrimary),
-  isOpen: Boolean(preset.isOpen),
-});
+const buildBranchForm = (nextNumber, preset = {}) => {
+  const rawImage = preset.imageUrl || "";
+  const isDataUri = typeof rawImage === "string" && rawImage.startsWith("data:image");
+  return {
+    id: preset.id || null,
+    name: preset.name || "",
+    branchNumber: String(preset.branchNumber ?? nextNumber),
+    branchPhone: preset.branchPhone || preset.brandPhone || "",
+    branchEmail: preset.branchEmail || preset.brandEmail || "",
+    street: preset.street || "",
+    ward: preset.ward || "",
+    district: preset.district || "",
+    city: preset.city || "",
+    latitude:
+      preset.latitude !== undefined && preset.latitude !== null ? String(preset.latitude) : "",
+    longitude:
+      preset.longitude !== undefined && preset.longitude !== null ? String(preset.longitude) : "",
+    imageUrl: rawImage,
+    imageSource: rawImage ? (isDataUri ? "file" : "url") : "none",
+    isPrimary: Boolean(preset.isPrimary),
+    isOpen: Boolean(preset.isOpen),
+  };
+};
 
 const mapRestaurantData = (raw) => {
   if (!raw) return null;
@@ -146,6 +151,8 @@ const RestaurantProfile = () => {
   const [coverPreview, setCoverPreview] = useState("");
 
   const [branchForm, setBranchForm] = useState(() => buildBranchForm(1));
+  const [branchImagePreview, setBranchImagePreview] = useState("");
+  const [branchImageFileName, setBranchImageFileName] = useState("");
   const [openingHours, setOpeningHours] = useState(createDefaultHours);
   const [specialHours, setSpecialHours] = useState([]);
   const [specialEnabled, setSpecialEnabled] = useState(false);
@@ -299,6 +306,10 @@ const RestaurantProfile = () => {
       (branches.length
         ? Math.max(...branches.map((branch) => Number(branch.branchNumber) || 0)) + 1
         : 1);
+    const initialImage = normalised.imageUrl || "";
+    const isDataUri = typeof initialImage === "string" && initialImage.startsWith("data:image");
+    setBranchImagePreview(initialImage);
+    setBranchImageFileName(isDataUri ? "Existing uploaded image" : "");
     setBranchForm(buildBranchForm(nextNumber, normalised));
     setOpeningHours(
       normalised.openingHours && normalised.openingHours.length
@@ -330,10 +341,58 @@ const RestaurantProfile = () => {
   const handleBranchFieldChange = (event) => {
     const { name, type, value, checked } = event.target;
     setError("");
+    if (name === "imageUrl") {
+      const trimmed = value.trim();
+      setBranchForm((prev) => ({
+        ...prev,
+        imageUrl: trimmed,
+        imageSource: trimmed ? "url" : "none",
+      }));
+      setBranchImagePreview(trimmed || "");
+      setBranchImageFileName("");
+      return;
+    }
     setBranchForm((prev) => ({
       ...prev,
       [name]: type === "checkbox" ? checked : value,
     }));
+  };
+
+  const handleBranchImageFileChange = (event) => {
+    const file = event.target.files?.[0];
+    setError("");
+    if (!file) {
+      return;
+    }
+    if (file && file.type && !file.type.startsWith("image/")) {
+      setError("Please choose a valid image file.");
+      event.target.value = "";
+      return;
+    }
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const result = reader.result?.toString() || "";
+      setBranchForm((prev) => ({
+        ...prev,
+        imageUrl: result,
+        imageSource: result ? "file" : "none",
+      }));
+      setBranchImagePreview(result);
+      setBranchImageFileName(file.name || "Uploaded image");
+    };
+    reader.readAsDataURL(file);
+    event.target.value = "";
+  };
+
+  const handleBranchImageClear = () => {
+    setError("");
+    setBranchForm((prev) => ({
+      ...prev,
+      imageUrl: "",
+      imageSource: "none",
+    }));
+    setBranchImagePreview("");
+    setBranchImageFileName("");
   };
 
   const handleOpeningHourChange = (index, field, value) => {
@@ -421,6 +480,13 @@ const RestaurantProfile = () => {
       return;
     }
     const branchNumber = Number(branchForm.branchNumber) || branches.length + 1;
+    const imageValue =
+      branchForm.imageSource === "url"
+        ? branchForm.imageUrl.trim()
+        : branchForm.imageSource === "file"
+        ? branchForm.imageUrl
+        : "";
+
     const payload = {
       name: branchForm.name.trim() || `Branch #${branchNumber}`,
       branchNumber,
@@ -432,7 +498,7 @@ const RestaurantProfile = () => {
       city: branchForm.city.trim(),
       latitude: branchForm.latitude ? Number(branchForm.latitude) : null,
       longitude: branchForm.longitude ? Number(branchForm.longitude) : null,
-      images: branchForm.imageUrl ? [branchForm.imageUrl.trim()] : [],
+      images: imageValue ? [imageValue] : [],
       isPrimary: branchForm.isPrimary,
       isOpen: branchForm.isOpen,
       openingHours: openingHours.map((item) => ({ ...item })),
@@ -648,6 +714,10 @@ const RestaurantProfile = () => {
                 setEditingBranchId(null);
                 setViewMode("summary");
               }}
+              imagePreview={branchImagePreview}
+              imageFileName={branchImageFileName}
+              onImageFileChange={handleBranchImageFileChange}
+              onImageClear={handleBranchImageClear}
               onBranchFieldChange={handleBranchFieldChange}
               onOpeningHourChange={handleOpeningHourChange}
               onSpecialToggle={handleSpecialHoursToggle}
@@ -991,6 +1061,8 @@ const BranchManagement = ({
   openingHours,
   specialHours,
   specialEnabled,
+  imagePreview,
+  imageFileName,
   isSubmittingBranch,
   onSearchChange,
   onFilterChange,
@@ -999,6 +1071,8 @@ const BranchManagement = ({
   onCreateBranch,
   onEditBranch,
   onCancelForm,
+  onImageFileChange,
+  onImageClear,
   onBranchFieldChange,
   onOpeningHourChange,
   onSpecialToggle,
@@ -1062,7 +1136,11 @@ const BranchManagement = ({
         openingHours={openingHours}
         specialHours={specialHours}
         specialEnabled={specialEnabled}
+        imagePreview={imagePreview}
+        imageFileName={imageFileName}
         onFieldChange={onBranchFieldChange}
+        onImageFileChange={onImageFileChange}
+        onImageClear={onImageClear}
         onOpeningHourChange={onOpeningHourChange}
         onSpecialToggle={onSpecialToggle}
         onAddSpecialHour={onAddSpecialHour}
@@ -1227,14 +1305,18 @@ const BranchForm = ({
   openingHours,
   specialHours,
   specialEnabled,
-  isSubmitting,
+  imagePreview,
+  imageFileName,
   onFieldChange,
+  onImageFileChange,
+  onImageClear,
   onOpeningHourChange,
   onSpecialToggle,
   onAddSpecialHour,
   onUpdateSpecialHour,
   onRemoveSpecialHour,
   onSubmit,
+  isSubmitting,
   onCancel,
 }) => (
   <section className="rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
@@ -1288,13 +1370,62 @@ const BranchForm = ({
       </div>
 
       <div className="grid gap-4 md:grid-cols-2">
-        <FieldInput
-          name="imageUrl"
-          label="Branch image URL"
-          value={form.imageUrl}
-          onChange={onFieldChange}
-          placeholder="https://example.com/photo.jpg"
-        />
+        <div className="space-y-2">
+          <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Branch image
+          </label>
+          <div className="space-y-3 rounded-lg border border-slate-200 bg-white p-3">
+            <input
+              type="url"
+              name="imageUrl"
+              value={form.imageSource === "file" ? "" : form.imageUrl}
+              onChange={onFieldChange}
+              placeholder="Paste image link (https://...)"
+              className="w-full rounded-lg border border-slate-200 bg-white py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/60"
+            />
+            <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
+              <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-emerald-50 px-3 py-1 font-semibold text-emerald-600 hover:bg-emerald-100">
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={onImageFileChange}
+                  className="sr-only"
+                />
+                Upload from computer
+              </label>
+              <button
+                type="button"
+                onClick={onImageClear}
+                disabled={!imagePreview}
+                className="rounded-lg border border-slate-300 px-3 py-1 font-semibold text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Remove image
+              </button>
+              <span className="text-slate-400">or paste a link above</span>
+            </div>
+            {imagePreview ? (
+              <div className="flex items-center gap-3">
+                <div className="h-20 w-20 overflow-hidden rounded-lg border border-slate-200 bg-slate-100">
+                  <img src={imagePreview} alt="Branch preview" className="h-full w-full object-cover" />
+                </div>
+                <div className="min-w-0 text-xs text-slate-600">
+                  <p className="font-semibold">
+                    {form.imageSource === "file"
+                      ? imageFileName || "Uploaded image"
+                      : "Using image URL"}
+                  </p>
+                  {form.imageSource === "url" ? (
+                    <p className="mt-1 break-all text-slate-500">
+                      {form.imageUrl.length > 80 ? `${form.imageUrl.slice(0, 77)}...` : form.imageUrl}
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+            ) : (
+              <p className="text-xs text-slate-500">No image selected yet.</p>
+            )}
+          </div>
+        </div>
         <div className="flex flex-wrap gap-4 text-sm text-slate-600">
           <label className="flex items-center gap-2">
             <input

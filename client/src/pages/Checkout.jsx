@@ -5,13 +5,13 @@ import { useAppContext } from "../context/AppContext";
 
 const Checkout = () => {
   const {
-    cartItems,
     getCartAmount,
     delivery_charges,
     getDiscountAmount,
     applyDiscountCode,
     appliedDiscountCode,
     paymentOptions,
+    bankAccounts,
     method,
     setMethod,
     addresses,
@@ -107,7 +107,9 @@ const Checkout = () => {
         instructions: newAddress.instructions,
         isDefault: newAddress.isDefault,
       });
-      if (created?.id) {
+
+      if (newAddress.isDefault && created?.id) {
+
         setSelectedAddressId(created.id);
       }
       toast.success("New address added.");
@@ -120,14 +122,15 @@ const Checkout = () => {
         street: "",
         ward: "",
         district: "",
-        city: "Ho Chi Minh City",
+        city: "TP. Ho Chi Minh",
         instructions: "",
         isDefault: false,
       });
     } catch (error) {
       const message =
+        error?.response?.data?.error ||
         error?.message ||
-        "We could not save this address. Please sign in and try again.";
+        "Unable to save address.";
       toast.error(message);
     }
   };
@@ -358,24 +361,53 @@ const Checkout = () => {
             Choose how you'd like to pay for this order.
           </p>
           <div className="mt-6 grid gap-4 md:grid-cols-3">
-            {paymentOptions.map((option) => (
-              <button
-                key={option.id}
-                onClick={() => setMethod(option.id)}
-                className={`flex h-full flex-col rounded-2xl border p-4 text-left transition ${
-                  method === option.id
-                    ? "border-orange-500 bg-orange-50"
-                    : "border-gray-200 hover:border-orange-300"
-                }`}
-              >
-                <span className="text-sm font-semibold text-gray-900">
-                  {option.label}
-                </span>
-                <p className="mt-2 text-xs text-gray-500">
-                  {option.description}
-                </p>
-              </button>
-            ))}
+            {paymentOptions.map((option) => {
+              const isBank = option.id === "bank";
+              const disabled = isBank && bankAccounts.length === 0;
+              const isSelected = method === option.id;
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  onClick={() => {
+                    if (!disabled) {
+                      setMethod(option.id);
+                    } else {
+                      toast.error(
+                        "Link a bank account from your profile before choosing this method."
+                      );
+                    }
+                  }}
+                  disabled={disabled}
+                  className={`flex h-full flex-col rounded-2xl border p-4 text-left transition ${
+                    isSelected
+                      ? "border-orange-500 bg-orange-50"
+                      : "border-gray-200 hover:border-orange-300"
+                  } ${disabled ? "cursor-not-allowed opacity-60" : ""}`}
+                >
+                  <span className="text-sm font-semibold text-gray-900">
+                    {option.label}
+                  </span>
+                  <p className="mt-2 text-xs text-gray-500">
+                    {option.description}
+                  </p>
+                  {isBank ? (
+                    <p className="mt-2 text-xs">
+                      {disabled ? (
+                        <span className="text-orange-500">
+                          Link a bank account in your profile panel.
+                        </span>
+                      ) : (
+                        <span className="text-emerald-600">
+                          {bankAccounts.length} linked account
+                          {bankAccounts.length > 1 ? "s" : ""} ready to use.
+                        </span>
+                      )}
+                    </p>
+                  ) : null}
+                </button>
+              );
+            })}
           </div>
         </div>
 

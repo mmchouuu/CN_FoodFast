@@ -153,13 +153,146 @@ async function setActiveStatus(id, isActive) {
 
 async function getAddressesByUserId(userId) {
   const r = await pool.query(
-    `SELECT id, street, ward, district, city, is_primary, label, created_at, updated_at
-     FROM user_addresses
-     WHERE user_id = $1
-     ORDER BY created_at DESC`,
-    [userId]
+    `SELECT id,
+            label,
+            recipient,
+            phone,
+            street,
+            ward,
+            district,
+            city,
+            instructions,
+            is_primary,
+            created_at,
+            updated_at
+       FROM user_addresses
+      WHERE user_id = $1
+      ORDER BY is_primary DESC, created_at DESC`,
+    [userId],
   );
   return r.rows;
+}
+
+async function createAddress(userId, {
+  label,
+  recipient,
+  phone,
+  street,
+  ward,
+  district,
+  city,
+  instructions,
+  isDefault,
+}) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    let makeDefault = isDefault === true;
+    if (!makeDefault) {
+      const existing = await client.query(
+        'SELECT 1 FROM user_addresses WHERE user_id = $1 LIMIT 1',
+        [userId],
+      );
+      if (!existing.rowCount) {
+        makeDefault = true;
+      }
+    }
+
+    if (makeDefault) {
+      await client.query(
+        'UPDATE user_addresses SET is_primary = FALSE WHERE user_id = $1',
+        [userId],
+      );
+    }
+
+    const insert = await client.query(
+      `INSERT INTO user_addresses (
+          user_id,
+          label,
+          recipient,
+          phone,
+          street,
+          ward,
+          district,
+          city,
+          instructions,
+          is_primary
+        )
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+        RETURNING id,
+                  label,
+                  recipient,
+                  phone,
+                  street,
+                  ward,
+                  district,
+                  city,
+                  instructions,
+                  is_primary,
+                  created_at,
+                  updated_at`,
+      [
+        userId,
+        label || null,
+        recipient || null,
+        phone || null,
+        street,
+        ward || null,
+        district || null,
+        city || null,
+        instructions || null,
+        makeDefault,
+      ],
+    );
+
+    await client.query('COMMIT');
+    return insert.rows[0];
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function deleteAddress(userId, addressId) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const deleted = await client.query(
+      `DELETE FROM user_addresses
+        WHERE id = $1 AND user_id = $2
+        RETURNING id, is_primary`,
+      [addressId, userId],
+    );
+    if (!deleted.rowCount) {
+      await client.query('ROLLBACK');
+      return null;
+    }
+    if (deleted.rows[0].is_primary) {
+      await client.query(
+        `WITH next_addr AS (
+            SELECT id
+              FROM user_addresses
+             WHERE user_id = $1
+             ORDER BY created_at DESC
+             LIMIT 1
+          )
+          UPDATE user_addresses
+             SET is_primary = TRUE
+           WHERE id IN (SELECT id FROM next_addr)`,
+        [userId],
+      );
+    }
+    await client.query('COMMIT');
+    return deleted.rows[0];
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 module.exports = {
@@ -174,4 +307,6 @@ module.exports = {
   listByRole,
   setActiveStatus,
   getAddressesByUserId,
+  createAddress,
+  deleteAddress,
 };

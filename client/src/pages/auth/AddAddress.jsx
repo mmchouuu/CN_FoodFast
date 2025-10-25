@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import toast from "react-hot-toast";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAppContext } from "../../context/AppContext";
@@ -11,11 +11,34 @@ const LABEL_OPTIONS = [
 ];
 
 const AddAddress = () => {
-  const { addNewAddress, setSelectedAddressId, isAuthenticated } = useAppContext();
+
+  const { addNewAddress, setSelectedAddressId, isAuthenticated, user } = useAppContext();
+
   const navigate = useNavigate();
   const location = useLocation();
 
   const defaultEmail = location?.state?.email || "";
+  const stateUserId = location?.state?.userId || null;
+  const storedUserId = (() => {
+    try {
+      return localStorage.getItem("pending_user_id");
+    } catch {
+      return null;
+    }
+  })();
+  const effectiveUserId = user?.id || stateUserId || storedUserId || null;
+
+  useEffect(() => {
+    try {
+      if (effectiveUserId) {
+        localStorage.setItem("pending_user_id", effectiveUserId);
+      } else if (stateUserId) {
+        localStorage.setItem("pending_user_id", stateUserId);
+      }
+    } catch {
+      // ignore storage failure
+    }
+  }, [effectiveUserId, stateUserId]);
 
   const [label, setLabel] = useState(LABEL_OPTIONS[0].id);
   const [customLabel, setCustomLabel] = useState("");
@@ -33,6 +56,11 @@ const AddAddress = () => {
         ? customLabel.trim() || "Other"
         : LABEL_OPTIONS.find((item) => item.id === label)?.label || "Home";
 
+    if (!effectiveUserId) {
+      toast.error("Missing account information. Please verify your email again.");
+      return;
+    }
+
     const payload = {
       label: computedLabel,
       recipient: "",
@@ -43,41 +71,39 @@ const AddAddress = () => {
       city,
       instructions,
       isDefault,
+      user_id: effectiveUserId,
+
     };
 
     if (!isAuthenticated) {
       try {
-        localStorage.setItem(
-          "pending_address",
-          JSON.stringify({
-            ...payload,
-            isDefault,
-          })
-        );
+        localStorage.setItem("pending_user_id", effectiveUserId);
+        localStorage.setItem("pending_address", JSON.stringify(payload));
+        toast.success("Address saved. Log in to confirm it.");
       } catch {
-        /* no-op */
+        toast.error("Unable to store address locally. Please try again after logging in.");
       }
-      toast.success("Please log in to finish saving your address.");
-      const redirectTo = location?.state?.redirectTo || "/checkout";
       navigate("/auth/login", {
         replace: true,
-        state: { email: defaultEmail, redirectTo },
+        state: { email: defaultEmail },
       });
       return;
     }
 
     try {
       const created = await addNewAddress(payload);
-      if (created?.id) {
+      if (isDefault && created?.id) {
         setSelectedAddressId(created.id);
       }
-      toast.success("Address saved successfully.");
-      const redirectTo = location?.state?.redirectTo || "/checkout";
-      navigate(redirectTo, { replace: true });
+      navigate("/auth/login", {
+        replace: true,
+        state: { email: defaultEmail },
+      });
     } catch (error) {
       const message =
+        error?.response?.data?.error ||
         error?.message ||
-        "Unable to save address without signing in. Please log in to continue.";
+        "Unable to save address.";
       toast.error(message);
     }
   };

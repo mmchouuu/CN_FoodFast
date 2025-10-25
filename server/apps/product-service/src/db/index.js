@@ -1,4 +1,4 @@
-import pkg from 'pg';
+const pkg = require('pg');
 
 const { Pool } = pkg;
 
@@ -10,4 +10,10 @@ const pool = new Pool({
   database: process.env.DB_NAME || 'productdb',
 });
 
-export default pool;
+pool.on('error', (error) => {
+  console.error('[product-service] Unexpected database error:', error);
+});
+
+module.exports = pool;
+module.exports.default = pool;
+module.exports.pool = pool;

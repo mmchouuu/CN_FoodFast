@@ -25,17 +25,33 @@ export const authService = {
     return data;
   },
 
-  async requestPasswordReset(email) {
-    try {
-      const { data } = await api.post(`${basePath}/forgot-password`, { email });
-      return data;
-    } catch (error) {
-      if (error?.response?.status === 404 || error?.response?.status === 501) {
-        return { message: 'If this email exists, a reset link will be sent.' };
-      }
-      throw error;
+  async listAddresses({ userId } = {}) {
+    const config = {};
+    if (userId) {
+      config.params = { user_id: userId };
     }
+    const { data } = await api.get(`${basePath}/addresses`, config);
+    return data;
   },
+
+  async createAddress(payload) {
+    const config = {};
+    if (payload?.user_id) {
+      config.params = { user_id: payload.user_id };
+    }
+    const { data } = await api.post(`${basePath}/addresses`, payload, config);
+    return data;
+  },
+
+  async deleteAddress(addressId, { userId } = {}) {
+    const config = {};
+    if (userId) {
+      config.params = { user_id: userId };
+    }
+    await api.delete(`${basePath}/addresses/${addressId}`, config);
+    return true;
+  },
+
 };
 
 export default authService;

@@ -1,8 +1,13 @@
-FROM node:20-alpine
+FROM node:20-bullseye
 
 WORKDIR /app
 
-RUN apk add --no-cache postgresql-client python3 make g++
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        postgresql-client \
+        python3 \
+        build-essential \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY package*.json ./
 

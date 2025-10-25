@@ -746,7 +746,7 @@ export const promotionSlides = [
   ];
   
   export const paymentOptions = [
-    { id: "cod", label: "Cash on delivery", description: "Pay cash directly to the driver." },
     { id: "wallet", label: "FoodFast wallet", description: "Pay instantly using your FoodFast wallet balance." },
+    { id: "bank", label: "Bank account", description: "Link your bank account for secure, cashless payments." },
     { id: "card", label: "Debit/Credit card", description: "Save your card for quick, secure payments." },
   ];
