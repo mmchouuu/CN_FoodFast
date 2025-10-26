@@ -68,48 +68,48 @@ CREATE INDEX IF NOT EXISTS idx_refresh_user ON refresh_tokens(user_id);
 CREATE INDEX IF NOT EXISTS idx_refresh_expires_at ON refresh_tokens(expires_at);
 
 -- Seed default restaurant owner account
-DO $$
-DECLARE
-  v_owner_id UUID := 'd799adbe-6c5b-4b51-9832-9d364e9b9581';
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM users WHERE id = v_owner_id) THEN
-    INSERT INTO users (
-      id,
-      first_name,
-      last_name,
-      email,
-      password_hash,
-      phone,
-      role,
-      tier,
-      is_active,
-      is_verified,
-      is_approved,
-      email_verified,
-      restaurant_name,
-      company_address,
-      tax_code,
-      manager_name,
-      restaurant_status
-    )
-    VALUES (
-      v_owner_id,
-      'Huy',
-      'Nguyen',
-      'owner@tasteofsaigon.local',
-      crypt('Restaurant@123', gen_salt('bf')),
-      '0123456789',
-      'restaurant',
-      'Gold',
-      TRUE,
-      TRUE,
-      TRUE,
-      TRUE,
-      'Taste of Saigon',
-      '123 Nguyen Hue, District 1, Ho Chi Minh City',
-      'TX-123456789',
-      'Nguyen Huy',
-      'approved'
-    );
-  END IF;
-END $$;
+-- DO $$
+-- DECLARE
+--   v_owner_id UUID := 'd799adbe-6c5b-4b51-9832-9d364e9b9581';
+-- BEGIN
+--   IF NOT EXISTS (SELECT 1 FROM users WHERE id = v_owner_id) THEN
+--     INSERT INTO users (
+--       id,
+--       first_name,
+--       last_name,
+--       email,
+--       password_hash,
+--       phone,
+--       role,
+--       tier,
+--       is_active,
+--       is_verified,
+--       is_approved,
+--       email_verified,
+--       restaurant_name,
+--       company_address,
+--       tax_code,
+--       manager_name,
+--       restaurant_status
+--     )
+--     VALUES (
+--       v_owner_id,
+--       'Huy',
+--       'Nguyen',
+--       'owner@tasteofsaigon.local',
+--       crypt('Restaurant@123', gen_salt('bf')),
+--       '0123456789',
+--       'restaurant',
+--       'Gold',
+--       TRUE,
+--       TRUE,
+--       TRUE,
+--       TRUE,
+--       'Taste of Saigon',
+--       '123 Nguyen Hue, District 1, Ho Chi Minh City',
+--       'TX-123456789',
+--       'Nguyen Huy',
+--       'approved'
+--     );
+--   END IF;
+-- END $$;

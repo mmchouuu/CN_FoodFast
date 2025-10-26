@@ -5,8 +5,10 @@ import { useAppContext } from "../../context/AppContext";
 import restaurantManagerService from "../../services/restaurantManager";
 import ownerProductService from "../../services/ownerProducts";
 
-const containerClasses = "bg-white shadow-sm rounded-2xl border border-slate-100 p-6 space-y-6";
+const containerClasses =
+  "bg-white shadow-sm rounded-2xl border border-slate-100 p-6 space-y-6";
 const SYSTEM_TAX_RATE = 8;
+
 const SAMPLE_RESTAURANT = {
   id: "sample-restaurant",
   name: "Tasty Queen Demo",
@@ -58,6 +60,7 @@ const SAMPLE_CATEGORIES = ["Noodles", "Rice Dishes", "Drinks"];
 
 const isSampleId = (value) => typeof value === "string" && value.startsWith("sample-");
 const isSampleRestaurant = (restaurant) => !restaurant || isSampleId(restaurant.id);
+
 const formatCurrency = (value) => {
   const numeric = Number(value || 0);
   if (!Number.isFinite(numeric)) return "0 VND";
@@ -94,6 +97,7 @@ const emptyFormState = computePricing({
   branchInventory: {},
 });
 
+/** Chuẩn hoá form từ product (sửa từ buildFormFromDish → buildFormFromProduct) */
 const buildFormFromProduct = (product) => {
   const firstImage =
     (Array.isArray(product?.images) && product.images.find((img) => !!img)) ||
@@ -123,11 +127,12 @@ const buildFormFromProduct = (product) => {
   });
 };
 
+/** Modal tạo/sửa món ăn – đã loại bỏ form lồng nhau, đồng bộ field */
 const DishFormModal = ({
   open,
   mode,
   form,
-  categoryOptions,
+  categoryOptions = [],
   branches = [],
   branchInventory = {},
   inventoryReadonly = false,
@@ -146,16 +151,10 @@ const DishFormModal = ({
   const handleModeChange = (nextMode) => {
     if (nextMode === form.imageMode) return;
     if (nextMode === "upload") {
-      updateForm({
-        imageMode: "upload",
-        imageUrl: "",
-      });
+      updateForm({ imageMode: "upload", imageUrl: "" });
       return;
     }
-    updateForm({
-      imageMode: "url",
-      imagePreview: form.imageUrl?.trim() || "",
-    });
+    updateForm({ imageMode: "url", imagePreview: form.imageUrl?.trim() || "" });
   };
 
   const handleFileChange = (event) => {
@@ -168,26 +167,19 @@ const DishFormModal = ({
     const reader = new FileReader();
     reader.onload = () => {
       const result = reader.result?.toString() || "";
-      updateForm({
-        imageMode: "upload",
-        imagePreview: result,
-        imageUrl: "",
-      });
+      updateForm({ imageMode: "upload", imagePreview: result, imageUrl: "" });
     };
     reader.onerror = () => toast.error("Unable to read image file.");
     reader.readAsDataURL(file);
   };
 
   const handleUrlChange = (value) => {
-    updateForm({
-      imageMode: "url",
-      imageUrl: value,
-      imagePreview: value.trim(),
-    });
+    updateForm({ imageMode: "url", imageUrl: value, imagePreview: value.trim() });
   };
 
   const hasBranches = Array.isArray(branches) && branches.length > 0;
   const disableInventoryInputs = inventoryReadonly || saving;
+
   const changeBranchInventory = (branchId, field, value) => {
     if (typeof onInventoryChange === "function") {
       onInventoryChange(branchId, field, value);
@@ -195,298 +187,300 @@ const DishFormModal = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/40">
-      <div className="flex min-h-full items-center justify-center px-4 py-10">
-        <div className="w-full max-w-3xl max-h-[85vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-xl">
-          <div className="mb-6 flex items-start justify-between">
-            <div>
-              <h2 className="text-2xl font-semibold text-slate-900">
-                {mode === "edit" ? "Update Dish" : "Add New Dish"}
-              </h2>
-              <p className="text-sm text-slate-500">
-                Fill in the product fields. Pricing with tax is calculated automatically.
-              </p>
-            </div>
-            <button
-              type="button"
-              className="rounded-full p-2 text-slate-500 hover:bg-slate-100"
-              onClick={onClose}
-              aria-label="Close"
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4">
+      <div className="w-full max-w-2xl rounded-2xl bg-white p-6 shadow-xl">
+        <div className="mb-5 flex items-start justify-between">
+          <div>
+            <h2 className="text-xl font-semibold text-slate-900">
+              {mode === "edit" ? "Edit Dish" : "Add New Dish"}
+            </h2>
+            <p className="text-sm text-slate-500">
+              Provide the primary details for this menu item.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="rounded-full p-2 text-slate-500 hover:bg-slate-100"
+            onClick={onClose}
+            aria-label="Close modal"
+          >
+            ✕
+          </button>
+        </div>
+
+        {/* Single form (không còn form lồng nhau) */}
+        <form className="grid gap-5 md:grid-cols-2" onSubmit={onSubmit}>
+          <label className="flex flex-col gap-1">
+            <span className="text-sm font-semibold text-slate-700">Name*</span>
+            <input
+              type="text"
+              required
+              value={form.title}
+              onChange={(e) => updateForm({ title: e.target.value })}
+              placeholder="Dish name"
+              className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
+            />
+          </label>
+
+          <label className="flex flex-col gap-1">
+            <span className="text-sm font-semibold text-slate-700">Category</span>
+            <select
+              value={form.category}
+              onChange={(e) => updateForm({ category: e.target.value })}
+              className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
             >
-              X
-            </button>
+              <option value="">-- None --</option>
+              {categoryOptions.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+            <span className="text-xs text-slate-400">
+              Manage categories from the panel on the main screen.
+            </span>
+          </label>
+
+          <label className="md:col-span-2 flex flex-col gap-1">
+            <span className="text-sm font-semibold text-slate-700">Description</span>
+            <textarea
+              rows={3}
+              value={form.description}
+              onChange={(e) => updateForm({ description: e.target.value })}
+              placeholder="Short description"
+              className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
+            />
+          </label>
+
+          <label className="flex flex-col gap-1">
+            <span className="text-sm font-semibold text-slate-700">Type</span>
+            <input
+              type="text"
+              value={form.type}
+              onChange={(e) => updateForm({ type: e.target.value })}
+              placeholder="Standard"
+              className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
+            />
+          </label>
+
+          <label className="flex flex-col gap-1">
+            <span className="text-sm font-semibold text-slate-700">Base price*</span>
+            <input
+              type="number"
+              min="0"
+              step="1000"
+              required
+              value={form.basePrice}
+              onChange={(e) => updateForm({ basePrice: e.target.value })}
+              placeholder="68000"
+              className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
+            />
+          </label>
+
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 md:col-span-2">
+            <p className="text-sm font-semibold text-slate-700">Tax summary</p>
+            <div className="mt-3 grid gap-3 sm:grid-cols-3">
+              <div className="flex flex-col">
+                <span className="text-xs uppercase text-slate-500">Tax rate</span>
+                <div className="rounded-lg bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm">
+                  {form.taxRate}% (system default)
+                </div>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-xs uppercase text-slate-500">Tax amount</span>
+                <div className="rounded-lg bg-white px-3 py-2 text-sm font-semibold text-emerald-600 shadow-sm">
+                  {formatCurrency(form.taxAmount)}
+                </div>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-xs uppercase text-slate-500">Price with tax</span>
+                <div className="rounded-lg bg-white px-3 py-2 text-sm font-semibold text-emerald-700 shadow-sm">
+                  {formatCurrency(form.priceWithTax)}
+                </div>
+              </div>
+            </div>
           </div>
 
-          <form onSubmit={onSubmit} className="grid gap-5 md:grid-cols-2">
-            <label className="flex flex-col gap-1">
-              <span className="text-sm font-semibold text-slate-700">Name*</span>
-              <input
-                type="text"
-                required
-                value={form.title}
-                onChange={(event) => updateForm({ title: event.target.value })}
-                placeholder="Dish name"
-                className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
-              />
-            </label>
-
-            <label className="flex flex-col gap-1">
-              <span className="text-sm font-semibold text-slate-700">Category</span>
-              <select
-                value={form.category}
-                onChange={(event) => updateForm({ category: event.target.value })}
-                className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
-              >
-                <option value="">-- None --</option>
-                {categoryOptions.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
-                ))}
-              </select>
-              <span className="text-xs text-slate-400">
-                Manage categories from the panel on the main screen.
-              </span>
-            </label>
-
-            <label className="md:col-span-2 flex flex-col gap-1">
-              <span className="text-sm font-semibold text-slate-700">Description</span>
-              <textarea
-                rows={3}
-                value={form.description}
-                onChange={(event) => updateForm({ description: event.target.value })}
-                placeholder="Short description"
-                className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
-              />
-            </label>
-
-            <label className="flex flex-col gap-1">
-              <span className="text-sm font-semibold text-slate-700">Type</span>
-              <input
-                type="text"
-                value={form.type}
-                onChange={(event) => updateForm({ type: event.target.value })}
-                placeholder="Standard"
-                className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
-              />
-            </label>
-
-            <label className="flex flex-col gap-1">
-              <span className="text-sm font-semibold text-slate-700">Base price*</span>
-              <input
-                type="number"
-                min="0"
-                step="1000"
-                required
-                value={form.basePrice}
-                onChange={(event) => updateForm({ basePrice: event.target.value })}
-                placeholder="Base price"
-                className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
-              />
-            </label>
-
-            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 md:col-span-2">
-              <p className="text-sm font-semibold text-slate-700">Tax summary</p>
-              <div className="mt-3 grid gap-3 sm:grid-cols-3">
-                <div className="flex flex-col">
-                  <span className="text-xs uppercase text-slate-500">Tax rate</span>
-                  <div className="rounded-lg border border-transparent bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm">
-                    {form.taxRate}% (system default)
-                  </div>
-                </div>
-                <div className="flex flex-col">
-                  <span className="text-xs uppercase text-slate-500">Tax amount</span>
-                  <div className="rounded-lg border border-transparent bg-white px-3 py-2 text-sm font-semibold text-emerald-600 shadow-sm">
-                    {formatCurrency(form.taxAmount)}
-                  </div>
-                </div>
-                <div className="flex flex-col">
-                  <span className="text-xs uppercase text-slate-500">Price with tax</span>
-                  <div className="rounded-lg border border-transparent bg-white px-3 py-2 text-sm font-semibold text-emerald-700 shadow-sm">
-                    {formatCurrency(form.priceWithTax)}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="md:col-span-2 space-y-3">
-              <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  className={`rounded-lg border px-3 py-2 text-sm font-medium transition ${
-                    form.imageMode === "url"
-                      ? "border-emerald-500 bg-emerald-50 text-emerald-600"
-                      : "border-slate-200 text-slate-600 hover:bg-slate-50"
-                  }`}
-                  onClick={() => handleModeChange("url")}
-                >
-                  Use image URL
-                </button>
-                <button
-                  type="button"
-                  className={`rounded-lg border px-3 py-2 text-sm font-medium transition ${
-                    form.imageMode === "upload"
-                      ? "border-emerald-500 bg-emerald-50 text-emerald-600"
-                      : "border-slate-200 text-slate-600 hover:bg-slate-50"
-                  }`}
-                  onClick={() => handleModeChange("upload")}
-                >
-                  Upload image
-                </button>
-              </div>
-
-              {form.imageMode === "url" ? (
-                <label className="flex flex-col gap-1">
-                  <span className="text-sm font-semibold text-slate-700">Image URL</span>
-                  <input
-                    type="url"
-                    value={form.imageUrl}
-                    onChange={(event) => handleUrlChange(event.target.value)}
-                    placeholder="https://cdn.example.com/dish.jpg"
-                    className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
-                  />
-                </label>
-              ) : (
-                <label className="flex flex-col gap-1">
-                  <span className="text-sm font-semibold text-slate-700">Choose image</span>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handleFileChange}
-                    className="text-sm text-slate-600 file:mr-3 file:rounded-lg file:border file:border-slate-200 file:bg-white file:px-3 file:py-2 file:text-sm file:font-medium file:text-slate-600 hover:file:bg-slate-50"
-                  />
-                </label>
-              )}
-
-              {form.imagePreview ? (
-                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                  <span className="mb-2 block text-xs font-semibold uppercase text-slate-500">
-                    Preview
-                  </span>
-                  <img
-                    src={form.imagePreview || dishPlaceholderImage}
-                    alt="Dish preview"
-                    className="h-36 w-full rounded-lg object-cover"
-                    onError={(event) => {
-                      event.currentTarget.onerror = null;
-                      event.currentTarget.src = dishPlaceholderImage;
-                    }}
-                  />
-                </div>
-              ) : null}
-            </div>
-
-            <label className="flex items-center gap-2 md:col-span-2">
-              <input
-                type="checkbox"
-                checked={!form.isHidden}
-                onChange={(event) => updateForm({ isHidden: !event.target.checked })}
-                className="h-4 w-4 rounded border-slate-300 text-emerald-500 focus:ring-emerald-500"
-              />
-              <span className="text-sm text-slate-700">
-                Publish immediately (unchecked keeps the dish hidden).
-              </span>
-            </label>
-
-            <label className="flex items-center gap-2 md:col-span-2">
-              <input
-                type="checkbox"
-                checked={form.popular}
-                onChange={(event) => updateForm({ popular: event.target.checked })}
-                className="h-4 w-4 rounded border-slate-300 text-emerald-500 focus:ring-emerald-500"
-              />
-              <span className="text-sm text-slate-700">Mark as featured dish</span>
-            </label>
-
-            <div className="md:col-span-2 space-y-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
-              <div>
-                <h3 className="text-sm font-semibold text-slate-700">Initial inventory by branch</h3>
-                <p className="text-xs text-slate-500">
-                  Optional: set starting quantities. You can always update inventory later from the
-                  product list.
-                </p>
-              </div>
-              {inventoryReadonly ? (
-                <div className="rounded-lg border border-dashed border-slate-300 bg-white px-4 py-3 text-xs text-slate-500">
-                  Inventory editing is disabled in demo mode.
-                </div>
-              ) : hasBranches ? (
-                <div className="space-y-3">
-                  {branches.map((branch) => {
-                    const values = branchInventory?.[branch.id] || { quantity: "", reserved_qty: "" };
-                    return (
-                      <div
-                        key={branch.id}
-                        className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
-                      >
-                        <div>
-                          <p className="text-sm font-semibold text-slate-900">{branch.name}</p>
-                          {branch.street || branch.city ? (
-                            <p className="text-xs text-slate-500">
-                              {[branch.street, branch.city].filter(Boolean).join(", ")}
-                            </p>
-                          ) : null}
-                        </div>
-                        <div className="grid w-full max-w-md grid-cols-2 gap-3">
-                          <label className="flex flex-col text-xs font-semibold uppercase text-slate-500">
-                            Quantity
-                            <input
-                              type="number"
-                              min="0"
-                              value={values.quantity ?? ""}
-                              onChange={(event) =>
-                                changeBranchInventory(branch.id, "quantity", event.target.value)
-                              }
-                              disabled={disableInventoryInputs}
-                              className="mt-1 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:border-emerald-500 focus:outline-none disabled:cursor-not-allowed disabled:bg-slate-100"
-                              placeholder="0"
-                            />
-                          </label>
-                          <label className="flex flex-col text-xs font-semibold uppercase text-slate-500">
-                            Reserved
-                            <input
-                              type="number"
-                              min="0"
-                              value={values.reserved_qty ?? ""}
-                              onChange={(event) =>
-                                changeBranchInventory(branch.id, "reserved_qty", event.target.value)
-                              }
-                              disabled={disableInventoryInputs}
-                              className="mt-1 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:border-emerald-500 focus:outline-none disabled:cursor-not-allowed disabled:bg-slate-100"
-                              placeholder="0"
-                            />
-                          </label>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="rounded-lg border border-dashed border-slate-300 bg-white px-4 py-3 text-xs text-slate-500">
-                  No branches available yet. Add a branch first to prefill inventory.
-                </div>
-              )}
-            </div>
-
-            <div className="mt-2 flex items-center justify-end gap-3 md:col-span-2">
+          <div className="md:col-span-2 space-y-3">
+            <div className="flex items-center gap-3">
               <button
                 type="button"
-                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
-                onClick={onClose}
-                disabled={saving}
+                className={`rounded-lg border px-3 py-2 text-sm font-medium transition ${
+                  form.imageMode === "url"
+                    ? "border-emerald-500 bg-emerald-50 text-emerald-600"
+                    : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                }`}
+                onClick={() => handleModeChange("url")}
               >
-                Cancel
+                Use image URL
               </button>
               <button
-                type="submit"
-                className="inline-flex items-center gap-2 rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-60"
-                disabled={saving}
+                type="button"
+                className={`rounded-lg border px-3 py-2 text-sm font-medium transition ${
+                  form.imageMode === "upload"
+                    ? "border-emerald-500 bg-emerald-50 text-emerald-600"
+                    : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                }`}
+                onClick={() => handleModeChange("upload")}
               >
-                {saving ? "Saving..." : mode === "edit" ? "Update Dish" : "Create Dish"}
+                Upload image
               </button>
             </div>
-          </form>
-        </div>
+
+            {form.imageMode === "url" ? (
+              <label className="flex flex-col gap-1">
+                <span className="text-sm font-semibold text-slate-700">Image URL</span>
+                <input
+                  type="url"
+                  value={form.imageUrl}
+                  onChange={(e) => handleUrlChange(e.target.value)}
+                  placeholder="https://cdn.example.com/dish.jpg"
+                  className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
+                />
+              </label>
+            ) : (
+              <label className="flex flex-col gap-1">
+                <span className="text-sm font-semibold text-slate-700">Choose image</span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handleFileChange}
+                  className="text-sm text-slate-600 file:mr-3 file:rounded-lg file:border file:border-slate-200 file:bg-white file:px-3 file:py-2 file:text-sm file:font-medium file:text-slate-600 hover:file:bg-slate-50"
+                />
+              </label>
+            )}
+
+            {form.imagePreview ? (
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <span className="mb-2 block text-xs font-semibold uppercase text-slate-500">
+                  Preview
+                </span>
+                <img
+                  src={form.imagePreview || dishPlaceholderImage}
+                  alt="Dish preview"
+                  className="h-36 w-full rounded-lg object-cover"
+                  onError={(event) => {
+                    event.currentTarget.onerror = null;
+                    event.currentTarget.src = dishPlaceholderImage;
+                  }}
+                />
+              </div>
+            ) : null}
+          </div>
+
+          <label className="flex items-center gap-2 md:col-span-2">
+            <input
+              type="checkbox"
+              checked={!form.isHidden}
+              onChange={(e) => updateForm({ isHidden: !e.target.checked })}
+              className="h-4 w-4 rounded border-slate-300 text-emerald-500 focus:ring-emerald-500"
+            />
+            <span className="text-sm text-slate-700">
+              Publish immediately (unchecked keeps the dish hidden).
+            </span>
+          </label>
+
+          <label className="flex items-center gap-2 md:col-span-2">
+            <input
+              type="checkbox"
+              checked={form.popular}
+              onChange={(e) => updateForm({ popular: e.target.checked })}
+              className="h-4 w-4 rounded border-slate-300 text-emerald-500 focus:ring-emerald-500"
+            />
+            <span className="text-sm text-slate-700">Mark as featured dish</span>
+          </label>
+
+          <div className="md:col-span-2 space-y-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <div>
+              <h3 className="text-sm font-semibold text-slate-700">
+                Initial inventory by branch
+              </h3>
+              <p className="text-xs text-slate-500">
+                Optional: set starting quantities. You can always update inventory later
+                from the product list.
+              </p>
+            </div>
+            {inventoryReadonly ? (
+              <div className="rounded-lg border border-dashed border-slate-300 bg-white px-4 py-3 text-xs text-slate-500">
+                Inventory editing is disabled in demo mode.
+              </div>
+            ) : hasBranches ? (
+              <div className="space-y-3">
+                {branches.map((branch) => {
+                  const values =
+                    branchInventory?.[branch.id] || { quantity: "", reserved_qty: "" };
+                  return (
+                    <div
+                      key={branch.id}
+                      className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div>
+                        <p className="text-sm font-semibold text-slate-900">{branch.name}</p>
+                        {branch.street || branch.city ? (
+                          <p className="text-xs text-slate-500">
+                            {[branch.street, branch.city].filter(Boolean).join(", ")}
+                          </p>
+                        ) : null}
+                      </div>
+                      <div className="grid w-full max-w-md grid-cols-2 gap-3">
+                        <label className="flex flex-col text-xs font-semibold uppercase text-slate-500">
+                          Quantity
+                          <input
+                            type="number"
+                            min="0"
+                            value={values.quantity ?? ""}
+                            onChange={(e) =>
+                              changeBranchInventory(branch.id, "quantity", e.target.value)
+                            }
+                            disabled={disableInventoryInputs}
+                            className="mt-1 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:border-emerald-500 focus:outline-none disabled:cursor-not-allowed disabled:bg-slate-100"
+                            placeholder="0"
+                          />
+                        </label>
+                        <label className="flex flex-col text-xs font-semibold uppercase text-slate-500">
+                          Reserved
+                          <input
+                            type="number"
+                            min="0"
+                            value={values.reserved_qty ?? ""}
+                            onChange={(e) =>
+                              changeBranchInventory(branch.id, "reserved_qty", e.target.value)
+                            }
+                            disabled={disableInventoryInputs}
+                            className="mt-1 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:border-emerald-500 focus:outline-none disabled:cursor-not-allowed disabled:bg-slate-100"
+                            placeholder="0"
+                          />
+                        </label>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="rounded-lg border border-dashed border-slate-300 bg-white px-4 py-3 text-xs text-slate-500">
+                No branches available yet. Add a branch first to prefill inventory.
+              </div>
+            )}
+          </div>
+
+          <div className="mt-2 flex items-center justify-end gap-3 md:col-span-2">
+            <button
+              type="button"
+              className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
+              onClick={onClose}
+              disabled={saving}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="inline-flex items-center gap-2 rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={saving}
+            >
+              {saving ? "Saving..." : mode === "edit" ? "Update Dish" : "Create Dish"}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );
@@ -550,9 +544,7 @@ const InventoryModal = ({
                           type="number"
                           min="0"
                           value={values.quantity ?? ""}
-                          onChange={(event) =>
-                            onChange(branch.id, "quantity", event.target.value)
-                          }
+                          onChange={(e) => onChange(branch.id, "quantity", e.target.value)}
                           disabled={disabled}
                           className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none disabled:cursor-not-allowed disabled:bg-slate-100"
                           placeholder="0"
@@ -566,9 +558,7 @@ const InventoryModal = ({
                           type="number"
                           min="0"
                           value={values.reserved_qty ?? ""}
-                          onChange={(event) =>
-                            onChange(branch.id, "reserved_qty", event.target.value)
-                          }
+                          onChange={(e) => onChange(branch.id, "reserved_qty", e.target.value)}
                           disabled={disabled}
                           className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none disabled:cursor-not-allowed disabled:bg-slate-100"
                           placeholder="0"
@@ -641,7 +631,7 @@ const MenuManagement = () => {
   const [inventoryModal, setInventoryModal] = useState({
     open: false,
     productId: null,
-    productTitle: '',
+    productTitle: "",
     readonly: false,
   });
   const [inventoryDraft, setInventoryDraft] = useState({});
@@ -649,73 +639,67 @@ const MenuManagement = () => {
   const [inventorySaving, setInventorySaving] = useState(false);
   const [visibilityOverrides, setVisibilityOverrides] = useState(() => ({}));
 
-  const loadProducts = useCallback(
-    async (restaurantId) => {
-      if (!restaurantId || isSampleId(restaurantId)) {
-        setUsingSampleData(true);
-        setCustomCategories([...SAMPLE_CATEGORIES]);
-        setProducts([...SAMPLE_PRODUCTS]);
+  const loadProducts = useCallback(async (restaurantId) => {
+    if (!restaurantId || isSampleId(restaurantId)) {
+      setUsingSampleData(true);
+      setCustomCategories([...SAMPLE_CATEGORIES]);
+      setProducts([...SAMPLE_PRODUCTS]);
+      setVisibilityOverrides(() => ({}));
+      setBranchInventoryCache({});
+      return;
+    }
+
+    try {
+      const list = await ownerProductService.listByRestaurant(restaurantId);
+      if (Array.isArray(list) && list.length) {
+        setUsingSampleData(false);
+        setCustomCategories((previous) =>
+          previous.filter((name) => !SAMPLE_CATEGORIES.includes(name))
+        );
+        setProducts(list);
         setVisibilityOverrides(() => ({}));
         setBranchInventoryCache({});
-        return;
-      }
-
-      try {
-        const list = await ownerProductService.listByRestaurant(restaurantId);
-        if (Array.isArray(list) && list.length) {
-          setUsingSampleData(false);
-          setCustomCategories((previous) =>
-            previous.filter((name) => !SAMPLE_CATEGORIES.includes(name))
-          );
-          setProducts(list);
-          setVisibilityOverrides(() => ({}));
-          setBranchInventoryCache({});
-        } else {
-          setUsingSampleData(true);
-          setCustomCategories([...SAMPLE_CATEGORIES]);
-          setProducts([...SAMPLE_PRODUCTS]);
-          setVisibilityOverrides(() => ({}));
-          setBranchInventoryCache({});
-        }
-      } catch (requestError) {
-        const message =
-          requestError?.response?.data?.error ||
-          requestError?.message ||
-          "Unable to load dishes.";
-        toast.error(message);
+      } else {
         setUsingSampleData(true);
         setCustomCategories([...SAMPLE_CATEGORIES]);
         setProducts([...SAMPLE_PRODUCTS]);
         setVisibilityOverrides(() => ({}));
         setBranchInventoryCache({});
       }
-    },
-    []
-  );
+    } catch (requestError) {
+      const message =
+        requestError?.response?.data?.error ||
+        requestError?.message ||
+        "Unable to load dishes.";
+      toast.error(message);
+      setUsingSampleData(true);
+      setCustomCategories([...SAMPLE_CATEGORIES]);
+      setProducts([...SAMPLE_PRODUCTS]);
+      setVisibilityOverrides(() => ({}));
+      setBranchInventoryCache({});
+    }
+  }, []);
 
-  const loadBranches = useCallback(
-    async (restaurantId) => {
-      if (!restaurantId || isSampleId(restaurantId)) {
-        setBranches([]);
-        return [];
-      }
-      try {
-        const list = await restaurantManagerService.listBranches(restaurantId);
-        const mapped = Array.isArray(list) ? list : [];
-        setBranches(mapped);
-        return mapped;
-      } catch (requestError) {
-        const message =
-          requestError?.response?.data?.error ||
-          requestError?.message ||
-          "Unable to load restaurant branches.";
-        toast.error(message);
-        setBranches([]);
-        return [];
-      }
-    },
-    [],
-  );
+  const loadBranches = useCallback(async (restaurantId) => {
+    if (!restaurantId || isSampleId(restaurantId)) {
+      setBranches([]);
+      return [];
+    }
+    try {
+      const list = await restaurantManagerService.listBranches(restaurantId);
+      const mapped = Array.isArray(list) ? list : [];
+      setBranches(mapped);
+      return mapped;
+    } catch (requestError) {
+      const message =
+        requestError?.response?.data?.error ||
+        requestError?.message ||
+        "Unable to load restaurant branches.";
+      toast.error(message);
+      setBranches([]);
+      return [];
+    }
+  }, []);
 
   const loadData = useCallback(async () => {
     if (!ownerRestaurantId) {
@@ -802,6 +786,29 @@ const MenuManagement = () => {
       return matchesSearch && matchesCategory && matchesMin && matchesMax;
     });
   }, [products, searchTerm, selectedCategory, priceRange]);
+
+  /** Hoisted function declaration – OK dùng trước khi định nghĩa */
+  function buildInventoryDraftForProduct(branchList, records) {
+    const byBranch = (Array.isArray(records) ? records : []).reduce((acc, item) => {
+      if (item?.branch_id) {
+        acc[item.branch_id] = item;
+      }
+      return acc;
+    }, {});
+    return (branchList || []).reduce((acc, branch) => {
+      const record = byBranch[branch.id] || {};
+      const quantity =
+        typeof record.quantity === "number" && Number.isFinite(record.quantity)
+          ? String(record.quantity)
+          : "";
+      const reserved =
+        typeof record.reserved_qty === "number" && Number.isFinite(record.reserved_qty)
+          ? String(record.reserved_qty)
+          : "";
+      acc[branch.id] = { quantity, reserved_qty: reserved };
+      return acc;
+    }, {});
+  }
 
   const openCreateModal = () => {
     setModalMode("create");
@@ -1090,31 +1097,6 @@ const MenuManagement = () => {
     }
   };
 
-  function buildInventoryDraftForProduct(branchList, records) {
-    const byBranch = (Array.isArray(records) ? records : []).reduce((acc, item) => {
-      if (item?.branch_id) {
-        acc[item.branch_id] = item;
-      }
-      return acc;
-    }, {});
-    return (branchList || []).reduce((acc, branch) => {
-      const record = byBranch[branch.id] || {};
-      const quantity =
-        typeof record.quantity === "number" && Number.isFinite(record.quantity)
-          ? String(record.quantity)
-          : "";
-      const reserved =
-        typeof record.reserved_qty === "number" && Number.isFinite(record.reserved_qty)
-          ? String(record.reserved_qty)
-          : "";
-      acc[branch.id] = {
-        quantity,
-        reserved_qty: reserved,
-      };
-      return acc;
-    }, {});
-  }
-
   const openInventoryManager = async (product) => {
     if (!product) return;
     const readonly =
@@ -1162,7 +1144,7 @@ const MenuManagement = () => {
     setInventoryModal({
       open: false,
       productId: null,
-      productTitle: '',
+      productTitle: "",
       readonly: false,
     });
     setInventoryDraft({});
@@ -1235,13 +1217,13 @@ const MenuManagement = () => {
             restaurant.id,
             branchId,
             inventoryModal.productId,
-            payload,
-          ),
-        ),
+            payload
+          )
+        )
       );
       const refreshed = await ownerProductService.fetchInventory(
         restaurant.id,
-        inventoryModal.productId,
+        inventoryModal.productId
       );
       const inventoryRecords = Array.isArray(refreshed) ? refreshed : [];
       setBranchInventoryCache((previous) => ({
@@ -1251,11 +1233,11 @@ const MenuManagement = () => {
 
       const totalQuantity = inventoryRecords.reduce(
         (acc, item) => acc + Number(item.quantity || 0),
-        0,
+        0
       );
       const totalReserved = inventoryRecords.reduce(
         (acc, item) => acc + Number(item.reserved_qty || 0),
-        0,
+        0
       );
 
       setProducts((previous) =>
@@ -1269,8 +1251,8 @@ const MenuManagement = () => {
                   reserved_qty: totalReserved,
                 },
               }
-            : product,
-        ),
+            : product
+        )
       );
 
       toast.success("Inventory updated successfully.");
@@ -1290,10 +1272,10 @@ const MenuManagement = () => {
     const target = products.find((item) => item.id === productId);
     if (!target) return;
 
-    // ✅ FIX: cần ngoặc khi kết hợp ?? với ||
+    // Cần ngoặc khi kết hợp ?? với ||
     const currentHidden =
-      (visibilityOverrides[productId] ??
-        (target.is_active === false || target.status === "hidden"));
+      visibilityOverrides[productId] ??
+      (target.is_active === false || target.status === "hidden");
 
     const nextHidden = !currentHidden;
 
@@ -1413,7 +1395,7 @@ const MenuManagement = () => {
                 <input
                   type="text"
                   value={newCategoryName}
-                  onChange={(event) => setNewCategoryName(event.target.value)}
+                  onChange={(e) => setNewCategoryName(e.target.value)}
                   placeholder="New category name"
                   className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
                 />
@@ -1435,7 +1417,7 @@ const MenuManagement = () => {
             <input
               type="search"
               value={searchTerm}
-              onChange={(event) => setSearchTerm(event.target.value)}
+              onChange={(e) => setSearchTerm(e.target.value)}
               placeholder="Name or category"
               className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
             />
@@ -1444,7 +1426,7 @@ const MenuManagement = () => {
             <span className="text-xs uppercase text-slate-500">Category</span>
             <select
               value={selectedCategory}
-              onChange={(event) => setSelectedCategory(event.target.value)}
+              onChange={(e) => setSelectedCategory(e.target.value)}
               className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
             >
               <option value="all">All</option>
@@ -1462,8 +1444,8 @@ const MenuManagement = () => {
                 type="number"
                 min="0"
                 value={priceRange.min}
-                onChange={(event) =>
-                  setPriceRange((previous) => ({ ...previous, min: event.target.value }))
+                onChange={(e) =>
+                  setPriceRange((previous) => ({ ...previous, min: e.target.value }))
                 }
                 className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
               />
@@ -1474,8 +1456,8 @@ const MenuManagement = () => {
                 type="number"
                 min="0"
                 value={priceRange.max}
-                onChange={(event) =>
-                  setPriceRange((previous) => ({ ...previous, max: event.target.value }))
+                onChange={(e) =>
+                  setPriceRange((previous) => ({ ...previous, max: e.target.value }))
                 }
                 className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
               />
@@ -1630,20 +1612,22 @@ const MenuManagement = () => {
         </div>
       </section>
 
+      {/* Gọi modal với đủ props */}
       <DishFormModal
         open={modalOpen}
         mode={modalMode}
-        form={formState}
+        form={{ ...emptyFormState, ...formState }}
         categoryOptions={categories}
         branches={branches}
         branchInventory={formState.branchInventory || {}}
         inventoryReadonly={usingSampleData || isSampleRestaurant(restaurant)}
         onInventoryChange={handleFormBranchInventoryChange}
         onClose={closeModal}
-        onChange={setFormState}
+        onChange={(changes) => setFormState((prev) => ({ ...prev, ...changes }))}
         onSubmit={handleSubmit}
         saving={saving}
       />
+
       <InventoryModal
         open={inventoryModal.open}
         productTitle={inventoryModal.productTitle}
