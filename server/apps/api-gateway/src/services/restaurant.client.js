@@ -1,230 +1,241 @@
-// api-gateway/src/services/restaurant.client.js
-const { createAxiosInstance } = require('../utils/httpClient');
+﻿const { createAxiosInstance } = require('../utils/httpClient');
 const config = require('../config');
 
-const userClient = createAxiosInstance({
+const ownerClient = createAxiosInstance({
   baseURL: `${config.userServiceUrl}/api/restaurants`,
   timeout: config.requestTimeout,
 });
 
-const productClient = createAxiosInstance({
+const catalogClient = createAxiosInstance({
   baseURL: `${config.productServiceUrl}/api/restaurants`,
   timeout: config.requestTimeout,
 });
 
-const categoryClient = createAxiosInstance({
-  baseURL: `${config.productServiceUrl}/api/categories`,
-  timeout: config.requestTimeout,
-});
-
-function buildHeaders(req, extra = {}) {
-  const headers = { ...(extra.headers || {}) };
+function withHeaders(req, opts = {}) {
+  const headers = { ...(opts.headers || {}) };
   if (req?.id && !headers['x-request-id']) {
     headers['x-request-id'] = req.id;
   }
   return headers;
 }
 
-async function register(payload, opts = {}) {
-  const res = await userClient.post('/register', payload, { headers: opts.headers });
+async function signupOwner(payload, opts = {}) {
+  const res = await ownerClient.post('/signup', payload, { headers: opts.headers });
   return res.data;
 }
 
-async function verify(payload, opts = {}) {
-  const res = await userClient.post('/verify', payload, { headers: opts.headers });
+async function verifyOwner(payload, opts = {}) {
+  const res = await ownerClient.post('/verify', payload, { headers: opts.headers });
   return res.data;
 }
 
-async function login(payload, opts = {}) {
-  const res = await userClient.post('/login', payload, { headers: opts.headers });
+async function ownerLogin(payload, opts = {}) {
+  const res = await ownerClient.post('/login', payload, { headers: opts.headers });
   return res.data;
 }
 
-async function status(email, opts = {}) {
-  const res = await userClient.get('/status', { params: { email }, headers: opts.headers });
+async function ownerStatus(email, opts = {}) {
+  const res = await ownerClient.get('/status', {
+    params: { email },
+    headers: opts.headers,
+  });
   return res.data;
 }
 
-async function ownerAccount(id, opts = {}) {
-  const res = await userClient.get(`/owners/${id}`, { headers: opts.headers });
+async function resendVerification(payload, opts = {}) {
+  const res = await ownerClient.post('/resend-verification', payload, {
+    headers: opts.headers,
+  });
   return res.data;
 }
 
 async function createRestaurant(payload, req) {
-  const res = await productClient.post('/', payload, { headers: buildHeaders(req) });
-  return res.data;
-}
-
-async function updateRestaurant(id, payload, req) {
-  const res = await productClient.put(`/${id}`, payload, { headers: buildHeaders(req) });
-  return res.data;
-}
-
-async function deleteRestaurant(id, req) {
-  const res = await productClient.delete(`/${id}`, { headers: buildHeaders(req) });
-  return res.data;
-}
-
-async function getRestaurant(id, req) {
-  const res = await productClient.get(`/${id}`, { headers: buildHeaders(req) });
-  return res.data;
-}
-
-async function listRestaurants(params = {}, req) {
-  const res = await productClient.get('/', {
-    params,
-    headers: buildHeaders(req),
+  const res = await catalogClient.post('/', payload, {
+    headers: withHeaders(req),
   });
   return res.data;
 }
 
-async function getRestaurantsByOwner(ownerId, req) {
-  const res = await productClient.get(`/owner/${ownerId}/list`, { headers: buildHeaders(req) });
+async function getRestaurant(restaurantId, opts = {}) {
+  const res = await catalogClient.get(`/${restaurantId}`, { headers: opts.headers });
   return res.data;
 }
 
-async function getRestaurantByOwner(ownerId, req) {
-  const res = await productClient.get(`/owner/${ownerId}`, { headers: buildHeaders(req) });
+async function getRestaurantByOwner(ownerId, opts = {}) {
+  const res = await catalogClient.get(`/owner/${ownerId}`, { headers: opts.headers });
   return res.data;
 }
 
-async function listBranches(restaurantId, req) {
-  const res = await productClient.get(`/${restaurantId}/branches`, { headers: buildHeaders(req) });
+async function listRestaurantsByOwner(ownerId, opts = {}) {
+  const res = await catalogClient.get(`/owner/${ownerId}/list`, { headers: opts.headers });
+  return res.data;
+}
+
+async function updateRestaurant(restaurantId, payload, req) {
+  const res = await catalogClient.put(`/${restaurantId}`, payload, {
+    headers: withHeaders(req),
+  });
   return res.data;
 }
 
 async function createBranch(restaurantId, payload, req) {
-  const res = await productClient.post(`/${restaurantId}/branches`, payload, { headers: buildHeaders(req) });
+  const res = await catalogClient.post(`/${restaurantId}/branches`, payload, {
+    headers: withHeaders(req),
+  });
+  return res.data;
+}
+
+async function listBranches(restaurantId, opts = {}) {
+  const res = await catalogClient.get(`/${restaurantId}/branches`, {
+    headers: opts.headers,
+  });
   return res.data;
 }
 
 async function updateBranch(restaurantId, branchId, payload, req) {
-  const res = await productClient.put(`/${restaurantId}/branches/${branchId}`, payload, { headers: buildHeaders(req) });
+  const res = await catalogClient.put(
+    `/${restaurantId}/branches/${branchId}`,
+    payload,
+    { headers: withHeaders(req) },
+  );
+  return res.data;
+}
+
+async function updateBranchSchedules(restaurantId, branchId, payload, req) {
+  const res = await catalogClient.put(
+    `/${restaurantId}/branches/${branchId}/schedules`,
+    payload,
+    { headers: withHeaders(req) },
+  );
   return res.data;
 }
 
 async function deleteBranch(restaurantId, branchId, req) {
-  const res = await productClient.delete(`/${restaurantId}/branches/${branchId}`, { headers: buildHeaders(req) });
-  return res.data;
-}
-
-async function listRestaurantProducts(restaurantId, params = {}, req) {
-  const res = await productClient.get(`/${restaurantId}/products`, {
-    params,
-    headers: buildHeaders(req),
+  const res = await catalogClient.delete(`/${restaurantId}/branches/${branchId}`, {
+    headers: withHeaders(req),
   });
   return res.data;
 }
 
-async function createRestaurantProduct(restaurantId, payload, req) {
-  const res = await productClient.post(`/${restaurantId}/products`, payload, {
-    headers: buildHeaders(req),
+async function inviteMember(restaurantId, payload, req) {
+  const res = await catalogClient.post(`/${restaurantId}/members`, payload, {
+    headers: withHeaders(req),
   });
   return res.data;
 }
 
-async function updateRestaurantProduct(restaurantId, productId, payload, req) {
-  const res = await productClient.patch(
+async function createCategory(restaurantId, payload, req) {
+  const res = await catalogClient.post(`/${restaurantId}/categories`, payload, {
+    headers: withHeaders(req),
+  });
+  return res.data;
+}
+
+async function listCategories(restaurantId, opts = {}) {
+  const res = await catalogClient.get(`/${restaurantId}/categories`, { headers: opts.headers });
+  return res.data;
+}
+
+async function createProduct(restaurantId, payload, req) {
+  const res = await catalogClient.post(`/${restaurantId}/products`, payload, {
+    headers: withHeaders(req),
+  });
+  return res.data;
+}
+
+async function listProducts(restaurantId, opts = {}) {
+  const res = await catalogClient.get(`/${restaurantId}/products`, { headers: opts.headers });
+  return res.data;
+}
+
+async function updateProduct(restaurantId, productId, payload, req) {
+  const res = await catalogClient.patch(
     `/${restaurantId}/products/${productId}`,
     payload,
-    { headers: buildHeaders(req) },
+    { headers: withHeaders(req) },
   );
   return res.data;
 }
 
-async function deleteRestaurantProduct(restaurantId, productId, req) {
-  const res = await productClient.delete(`/${restaurantId}/products/${productId}`, {
-    headers: buildHeaders(req),
+async function deleteProduct(restaurantId, productId, req) {
+  const res = await catalogClient.delete(`/${restaurantId}/products/${productId}`, {
+    headers: withHeaders(req),
   });
   return res.data;
 }
 
-async function listRestaurantInventory(restaurantId, req) {
-  const res = await productClient.get(`/${restaurantId}/inventory`, {
-    headers: buildHeaders(req),
-  });
+async function listInventory(restaurantId, productId, opts = {}) {
+  const res = await catalogClient.get(
+    `/${restaurantId}/products/${productId}/inventory`,
+    { headers: opts.headers },
+  );
   return res.data;
 }
 
-async function listProductInventory(restaurantId, productId, req) {
-  const res = await productClient.get(`/${restaurantId}/products/${productId}/inventory`, {
-    headers: buildHeaders(req),
-  });
-  return res.data;
-}
-
-async function listBranchInventory(restaurantId, branchId, req) {
-  const res = await productClient.get(`/${restaurantId}/branches/${branchId}/inventory`, {
-    headers: buildHeaders(req),
-  });
-  return res.data;
-}
-
-async function upsertBranchInventory(restaurantId, branchId, productId, payload, req) {
-  const res = await productClient.put(
+async function updateInventory(restaurantId, branchId, productId, payload, req) {
+  const res = await catalogClient.put(
     `/${restaurantId}/branches/${branchId}/inventory/${productId}`,
     payload,
-    { headers: buildHeaders(req) },
+    { headers: withHeaders(req) },
   );
   return res.data;
 }
 
-async function listCategories(params = {}, req) {
-  const res = await categoryClient.get('/', {
-    params,
-    headers: buildHeaders(req),
+async function createOptionGroup(restaurantId, productId, payload, req) {
+  const res = await catalogClient.post(
+    `/${restaurantId}/products/${productId}/options`,
+    payload,
+    { headers: withHeaders(req) },
+  );
+  return res.data;
+}
+
+async function createCombo(restaurantId, payload, req) {
+  const res = await catalogClient.post(`/${restaurantId}/combos`, payload, {
+    headers: withHeaders(req),
   });
   return res.data;
 }
 
-async function createCategory(payload, req) {
-  const res = await categoryClient.post('/', payload, {
-    headers: buildHeaders(req),
-  });
-  return res.data;
-}
-
-async function updateCategory(id, payload, req) {
-  const res = await categoryClient.patch(`/${id}`, payload, {
-    headers: buildHeaders(req),
-  });
-  return res.data;
-}
-
-async function deleteCategory(id, req) {
-  const res = await categoryClient.delete(`/${id}`, {
-    headers: buildHeaders(req),
+async function createPromotion(restaurantId, payload, req) {
+  const body = {
+    ...payload,
+  };
+  if (!body.scopeType) {
+    body.scopeType = body.branchId ? 'branch' : 'restaurant';
+  }
+  const res = await catalogClient.post(`/${restaurantId}/promotions`, body, {
+    headers: withHeaders(req),
   });
   return res.data;
 }
 
 module.exports = {
-  register,
-  verify,
-  login,
-  status,
-  ownerAccount,
+  signupOwner,
+  verifyOwner,
+  ownerLogin,
+  ownerStatus,
+  resendVerification,
   createRestaurant,
-  updateRestaurant,
-  deleteRestaurant,
-  listRestaurants,
   getRestaurant,
-  getRestaurantsByOwner,
   getRestaurantByOwner,
-  listBranches,
+  listRestaurantsByOwner,
+  updateRestaurant,
   createBranch,
+  listBranches,
   updateBranch,
+  updateBranchSchedules,
   deleteBranch,
-  listRestaurantProducts,
-  createRestaurantProduct,
-  updateRestaurantProduct,
-  deleteRestaurantProduct,
-  listRestaurantInventory,
-  listProductInventory,
-  listBranchInventory,
-  upsertBranchInventory,
-  listCategories,
+  inviteMember,
   createCategory,
-  updateCategory,
-  deleteCategory,
+  listCategories,
+  createProduct,
+  listProducts,
+  updateProduct,
+  deleteProduct,
+  listInventory,
+  updateInventory,
+  createOptionGroup,
+  createCombo,
+  createPromotion,
 };

@@ -21,8 +21,14 @@ const STATUS_DESCRIPTIONS = {
 const RestaurantVerify = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const defaultEmail = location?.state?.email || "";
-  const defaultStatus = location?.state?.status || "pending";
+
+  const searchParams = useMemo(() => new URLSearchParams(location.search), [location.search]);
+  const queryEmail = searchParams.get("email")?.trim() || "";
+  const queryOtp = searchParams.get("otp")?.trim() || "";
+  const queryStatus = searchParams.get("status")?.trim();
+
+  const defaultEmail = location?.state?.email || queryEmail;
+  const defaultStatus = location?.state?.status || queryStatus || "pending";
 
   const [email, setEmail] = useState(defaultEmail);
   const [restaurantStatus, setRestaurantStatus] = useState(defaultStatus);
@@ -41,6 +47,7 @@ const RestaurantVerify = () => {
   const [showActivationPassword, setShowActivationPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [resendLoading, setResendLoading] = useState(false);
   const inputsRef = useRef([]);
 
   const otpValue = useMemo(() => otpDigits.join(""), [otpDigits]);
@@ -99,6 +106,39 @@ const RestaurantVerify = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [defaultEmail]);
 
+  useEffect(() => {
+    if (queryOtp && /^\d+$/.test(queryOtp) && queryOtp.length === OTP_LENGTH) {
+      setOtpDigits(queryOtp.split("").slice(0, OTP_LENGTH));
+      setStep((previous) => (previous === "password" ? "password" : "collect"));
+    }
+  }, [queryOtp]);
+
+  const handleResend = async () => {
+    if (!email.trim()) {
+      toast.error("Please enter the email used during registration.");
+      return;
+    }
+    setResendLoading(true);
+    try {
+      await restaurantAuth.resendVerification(email.trim());
+      toast.success("We sent a new OTP and activation password to your email.");
+      setOtpDigits(Array(OTP_LENGTH).fill(""));
+      setActivationPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      setStep("collect");
+      setError("");
+    } catch (err) {
+      const message =
+        err?.response?.data?.message ||
+        err?.message ||
+        "Unable to resend the activation email right now.";
+      toast.error(message);
+    } finally {
+      setResendLoading(false);
+    }
+  };
+
   const focusInput = (index) => {
     const input = inputsRef.current[index];
     if (input) {
@@ -149,8 +189,8 @@ const RestaurantVerify = () => {
 
   const handleVerificationSubmit = async (event) => {
     event.preventDefault();
-    if (newPassword.length < 6) {
-      setError("New password must contain at least 6 characters.");
+    if (newPassword.length < 8) {
+      setError("New password must contain at least 8 characters.");
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -208,6 +248,19 @@ const RestaurantVerify = () => {
               OTP codes expire in 5 minutes. You will be prompted to choose a new password after submitting the OTP and
               activation password.
             </p>
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={handleResend}
+                disabled={resendLoading}
+                className="rounded-full bg-orange-500 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-white transition hover:bg-orange-600 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {resendLoading ? "Sending..." : "Resend activation email"}
+              </button>
+              <p className="text-xs text-gray-500">
+                Use this if your OTP expired or you lost the activation password.
+              </p>
+            </div>
           </div>
 
           {step === "collect" ? (
@@ -271,7 +324,7 @@ const RestaurantVerify = () => {
                       type={showNewPassword ? "text" : "password"}
                       value={newPassword}
                       onChange={(event) => setNewPassword(event.target.value)}
-                      minLength={6}
+                      minLength={8}
                       required
                       className="w-full border-none py-3 text-sm outline-none"
                     />

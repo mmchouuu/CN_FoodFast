@@ -21,7 +21,7 @@ async function createUser({
   last_name,
   email,
   password_hash = null,
-  phone,
+  phone = null,
   role = 'customer',
   is_active = role === 'customer',
   otp_code = null,
@@ -155,13 +155,10 @@ async function getAddressesByUserId(userId) {
   const r = await pool.query(
     `SELECT id,
             label,
-            recipient,
-            phone,
             street,
             ward,
             district,
             city,
-            instructions,
             is_primary,
             created_at,
             updated_at
@@ -175,13 +172,10 @@ async function getAddressesByUserId(userId) {
 
 async function createAddress(userId, {
   label,
-  recipient,
-  phone,
   street,
   ward,
   district,
   city,
-  instructions,
   isDefault,
 }) {
   const client = await pool.connect();
@@ -210,38 +204,29 @@ async function createAddress(userId, {
       `INSERT INTO user_addresses (
           user_id,
           label,
-          recipient,
-          phone,
           street,
           ward,
           district,
           city,
-          instructions,
           is_primary
         )
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+        VALUES ($1,$2,$3,$4,$5,$6,$7)
         RETURNING id,
                   label,
-                  recipient,
-                  phone,
                   street,
                   ward,
                   district,
                   city,
-                  instructions,
                   is_primary,
                   created_at,
                   updated_at`,
       [
         userId,
         label || null,
-        recipient || null,
-        phone || null,
         street,
         ward || null,
         district || null,
         city || null,
-        instructions || null,
         makeDefault,
       ],
     );

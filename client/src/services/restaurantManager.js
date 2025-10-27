@@ -14,7 +14,18 @@ const restaurantManagerService = {
   },
 
   async createRestaurant(payload) {
-    const { data } = await api.post(basePath, payload);
+    const body = { ...(payload || {}) };
+    if (!body.ownerUserId && body.ownerId) {
+      body.ownerUserId = body.ownerId;
+      delete body.ownerId;
+    }
+    if (body.ownerMainAccount?.loginEmail) {
+      body.ownerMainAccount = {
+        ...body.ownerMainAccount,
+        loginEmail: body.ownerMainAccount.loginEmail.trim().toLowerCase(),
+      };
+    }
+    const { data } = await api.post(basePath, body);
     return data;
   },
 
@@ -35,6 +46,11 @@ const restaurantManagerService = {
 
   async listBranches(restaurantId) {
     const { data } = await api.get(`${basePath}/${restaurantId}/branches`);
+    return data;
+  },
+
+  async getRestaurant(restaurantId) {
+    const { data } = await api.get(`${basePath}/${restaurantId}`);
     return data;
   },
 

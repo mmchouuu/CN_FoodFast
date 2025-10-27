@@ -1,61 +1,61 @@
-require('dotenv').config();
+﻿require('dotenv').config();
 const express = require('express');
-const bodyParser = require('body-parser');
 const morgan = require('morgan');
 const config = require('./config');
+const { connectRabbitMQ } = require('./utils/rabbitmq');
+const roleRepository = require('./repositories/role.repository');
 
-// Routes
 const customerRoutes = require('./routes/customer.routes');
-const customerAddressRoutes = require('./routes/customer.address.routes');
 const restaurantRoutes = require('./routes/restaurant.routes');
 const adminRoutes = require('./routes/admin.routes');
-const userRoutes = require('./routes/user.routes');
 
-// RabbitMQ
-const { connectRabbitMQ } = require('./utils/rabbitmq');
-
-// Khởi tạo app
 const app = express();
 
-// Kết nối RabbitMQ
-(async () => {
-  try {
-    await connectRabbitMQ();
-    console.log('✅ Connected to RabbitMQ');
-  } catch (err) {
-    console.error('❌ Failed to connect RabbitMQ:', err.message);
-  }
-})();
+app.use(express.json({ limit: '2mb' }));
+// app.use(morgan('dev'));
+app.use(
+  morgan('dev', {
+    skip: (req) => req.path === '/health',
+  })
+);
 
-// Middleware
-app.use(express.json());
-app.use(bodyParser.json());
-app.use(morgan('dev'));
-
-// Health check
-app.use((req, res, next) => {
-  if (req.path === '/health') return res.status(200).send({ status: 'ok' });
-  next();
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok' });
 });
 
-
-// Routes
-app.use('/api/users', userRoutes);
-app.use('/api/customers/me/addresses', customerAddressRoutes);
 app.use('/api/customers', customerRoutes);
 app.use('/api/restaurants', restaurantRoutes);
 app.use('/api/admin', adminRoutes);
 
-// Middleware xử lý lỗi
 app.use((err, req, res, next) => {
-  console.error('❌ Error:', err);
-  res.status(err.status || 500).json({
+  if (!err) return next();
+  const status = err.status || 500;
+  const payload = {
     message: err.message || 'Internal Server Error',
-  });
+  };
+  if (status >= 500) {
+    // eslint-disable-next-line no-console
+    console.error(err);
+  }
+  res.status(status).json(payload);
 });
 
-// Khởi động server
-const PORT = config.PORT || process.env.PORT || 3001;
-app.listen(PORT, () => {
-  console.log(`🚀 User service listening on port ${PORT}`);
-});
+async function bootstrap() {
+  await roleRepository.ensureGlobalRoles();
+  try {
+    await connectRabbitMQ();
+    // eslint-disable-next-line no-console
+    console.log('Connected to RabbitMQ');
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error('RabbitMQ connection failed:', error.message);
+  }
+
+  const port = config.PORT || 3001;
+  app.listen(port, () => {
+    // eslint-disable-next-line no-console
+    console.log(`User service listening on port ${port}`);
+  });
+}
+
+bootstrap();

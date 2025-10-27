@@ -1,280 +1,675 @@
-// user-service/src/services/restaurant.service.js
-
 const crypto = require('crypto');
-const userModel = require('../models/user.model');
 const bcrypt = require('../utils/bcrypt');
 const jwt = require('../utils/jwt');
 const { generateOTP } = require('../utils/otp');
 const { sendOtpEmail } = require('../utils/emailQueue');
 const { publishSocketEvent } = require('../utils/rabbitmq');
+const { withTransaction } = require('../db');
+const roleRepository = require('../repositories/role.repository');
+const userRepository = require('../repositories/user.repository');
+const tokenRepository = require('../repositories/userToken.repository');
+const restaurantAccountRepository = require('../repositories/restaurantAccount.repository');
 
-const OTP_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const OTP_TTL_MS = 5 * 60 * 1000;
 
-function generateTempPassword(length = 10) {
-  return crypto.randomBytes(length)
-    .toString('base64')
-    .replace(/[^a-zA-Z0-9]/g, '')
-    .slice(0, length) || crypto.randomBytes(length).toString('hex').slice(0, length);
+function generateTemporaryPassword(length = 12) {
+  const charset = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz0123456789';
+  let password = '';
+  while (password.length < length) {
+    const randomBytes = crypto.randomBytes(length);
+    for (let i = 0; i < randomBytes.length && password.length < length; i += 1) {
+      const index = randomBytes[i] % charset.length;
+      password += charset[index];
+    }
+  }
+  return password;
 }
 
-// 1. Restaurant registration
-async function registerRestaurant(payload) {
+function buildOwnerVerifyLink(email, otp) {
+  const frontendBase = process.env.FRONTEND_BASE_URL
+    ? `${process.env.FRONTEND_BASE_URL.replace(/\/$/, '')}/restaurant/auth/verify`
+    : null;
+  const rawBase =
+    process.env.OWNER_VERIFY_URL ||
+    frontendBase ||
+    'http://localhost:5173/restaurant/auth/verify';
+  try {
+    const url = new URL(rawBase);
+    url.searchParams.set('email', email);
+    url.searchParams.set('otp', otp);
+    return url.toString();
+  } catch (error) {
+    const separator = rawBase.includes('?') ? '&' : '?';
+    return `${rawBase}${separator}email=${encodeURIComponent(email)}&otp=${encodeURIComponent(otp)}`;
+  }
+}
+
+function createError(message, status = 400) {
+  const error = new Error(message);
+  error.status = status;
+  return error;
+}
+
+async function ensureOwnerRole(client) {
+  await roleRepository.ensureGlobalRoles(client);
+  const role = await roleRepository.getRoleByCode('owner', client);
+  if (!role) {
+    throw createError('Owner role missing', 500);
+  }
+  return role;
+}
+
+async function registerOwner(payload = {}) {
   const {
+    email,
     firstName,
     lastName,
-    restaurantName,
-    companyAddress,
-    taxCode,
-    managerName,
-    email,
     phone,
+    legalName,
+    taxCode,
+    companyAddress,
+    managerName,
   } = payload;
 
-  if (!firstName || !lastName || !restaurantName || !companyAddress || !taxCode || !email) {
-    throw new Error('Missing required fields');
+  if (!email || !legalName || !taxCode || !companyAddress) {
+    throw createError('Missing required fields');
   }
 
   const normalizedEmail = email.trim().toLowerCase();
+  let owner = null;
 
-  const existing = await userModel.findByEmail(normalizedEmail);
-  if (existing) throw new Error('Email already used');
+  await withTransaction(async (client) => {
+    const role = await ensureOwnerRole(client);
+    const existing = await userRepository.findByEmail(normalizedEmail, client);
+    if (existing) {
+      const roles = await userRepository.getUserRoleCodes(existing.id, client);
+      if (roles.includes('owner')) {
+        throw createError('Email already registered', 409);
+      }
+    }
 
-  const managerLabel = managerName || `${firstName} ${lastName}`.trim();
+    const userRecord = existing
+      ? await userRepository.updateUser(
+          existing.id,
+          {
+            firstName: firstName ?? existing.first_name,
+            lastName: lastName ?? existing.last_name,
+            phone: phone ?? existing.phone,
+            isActive: true,
+          },
+          client,
+        )
+      : await userRepository.createUser(
+          {
+            email: normalizedEmail,
+            firstName,
+            lastName,
+            phone,
+            isActive: true,
+            emailVerified: false,
+          },
+          client,
+        );
 
-  const user = await userModel.createUser({
-    first_name: firstName,
-    last_name: lastName,
-    email: normalizedEmail,
-    phone,
-    role: 'restaurant',
-    is_verified: false,
-    is_approved: false,
-    is_active: false,
-    email_verified: false,
-    otp_code: null,
-    otp_expires: null,
-    restaurant_name: restaurantName,
-    company_address: companyAddress,
-    tax_code: taxCode,
-    manager_name: managerLabel,
-    restaurant_status: 'pending',
-    tier: 'Bronze',
+    owner = userRecord;
+
+    await userRepository.assignRole(owner.id, role.id, client);
+
+    await userRepository.createOwnerProfile(
+      {
+        userId: owner.id,
+        legalName,
+        taxCode,
+        companyAddress,
+        managerName: managerName || `${firstName || ''} ${lastName || ''}`.trim() || null,
+      },
+      client,
+    );
+
   });
 
-  await publishSocketEvent('restaurant.submitted', {
-    restaurantId: user.id,
-    email: user.email,
-    restaurantName,
-  });
+  if (owner) {
+    publishSocketEvent(
+      'owner.registration.submitted',
+      {
+        ownerId: owner.id,
+        email: normalizedEmail,
+      },
+      ['admin:restaurants'],
+    );
+  }
 
   return {
-    message: 'Restaurant profile received. Please wait for admin approval.',
-    restaurantId: user.id,
+    message: 'Registration received. Please wait for admin approval.',
   };
 }
 
-// 2. Admin approval: generate temporary password + OTP, send email
-async function approveRestaurant(id) {
-  const user = await userModel.findById(id);
-  if (!user) throw new Error('Restaurant not found');
-  if (user.role !== 'restaurant') throw new Error('Not a restaurant account');
-  if (user.is_approved) throw new Error('Already approved');
+async function verifyOwner({ email, otp, temporaryPassword, newPassword }) {
+  if (!email || !otp) {
+    throw createError('Email and OTP are required');
+  }
+  const normalizedEmail = email.trim().toLowerCase();
+  const user = await userRepository.findByEmail(normalizedEmail);
+  if (!user) {
+    throw createError('User not found', 404);
+  }
 
-  const otp = generateOTP();
-  const expiresAt = new Date(Date.now() + OTP_TTL_MS);
-  const temporaryPassword = generateTempPassword(12);
-  const password_hash = await bcrypt.hash(temporaryPassword);
+  let roles = await userRepository.getUserRoleCodes(user.id);
+  if (!roles.includes('owner')) {
+    const ownerProfile = await userRepository.getOwnerProfileByUserId(user.id);
+    if (ownerProfile) {
+      const role = await ensureOwnerRole();
+      await userRepository.assignRole(user.id, role.id);
+      roles = await userRepository.getUserRoleCodes(user.id);
+    }
+  }
+  if (!roles.includes('owner')) {
+    throw createError('Not an owner account', 403);
+  }
 
-  const updated = await userModel.updateUser(id, {
-    is_approved: true,
-    is_verified: false,
-    email_verified: false,
-    is_active: true,
-    restaurant_status: 'approve',
-    password_hash,
-    otp_code: otp,
-    otp_expires: expiresAt,
+  const token = await tokenRepository.consumeToken({
+    userId: user.id,
+    purpose: 'verify_email',
+    code: otp,
+  });
+
+  if (!token.success) {
+    throw createError('OTP invalid or expired', 400);
+  }
+
+  await userRepository.updateUser(user.id, { emailVerified: true });
+
+  let passwordUpdated = false;
+  const tempProvided =
+    typeof temporaryPassword === 'string' && temporaryPassword.trim().length > 0;
+  const newProvided =
+    typeof newPassword === 'string' && newPassword.trim().length > 0;
+
+  if (tempProvided !== newProvided) {
+    throw createError('Temporary password and new password must both be provided', 400);
+  }
+  if (newProvided && newPassword.trim().length < 8) {
+    throw createError('New password must be at least 8 characters long', 400);
+  }
+
+  const hasPasswordPayload = tempProvided && newProvided;
+
+  if (hasPasswordPayload) {
+    const role = await ensureOwnerRole();
+    const credential = await userRepository.getCredential(user.id, role.id);
+    if (!credential) {
+      throw createError('Owner credentials not found', 404);
+    }
+
+    if (credential.is_temp) {
+      const matches = await bcrypt.compare(temporaryPassword.trim(), credential.password_hash);
+      if (!matches) {
+        throw createError('Temporary password is invalid', 401);
+      }
+
+      const hash = await bcrypt.hash(newPassword.trim());
+      await userRepository.upsertCredential({
+        userId: user.id,
+        roleId: role.id,
+        passwordHash: hash,
+        isTemp: false,
+      });
+      passwordUpdated = true;
+    }
+  }
+
+  publishSocketEvent(
+    'owner.email.verified',
+    {
+      ownerId: user.id,
+      email: normalizedEmail,
+    },
+    [`restaurant-owner:${user.id}`],
+  );
+
+  return {
+    message: passwordUpdated
+      ? 'Verification successful. Password updated.'
+      : 'Verification successful. Please set a new password using the temporary password.',
+    requiresPasswordReset: !passwordUpdated,
+    passwordUpdated,
+  };
+}
+
+async function ownerLogin({ email, password }) {
+  if (!email || !password) {
+    throw createError('Email and password are required', 401);
+  }
+  const normalizedEmail = email.trim().toLowerCase();
+  const user = await userRepository.findByEmail(normalizedEmail);
+  if (!user) {
+    throw createError('Invalid credentials', 401);
+  }
+
+  const role = await roleRepository.getRoleByCode('owner');
+  const credential = await userRepository.getCredential(user.id, role.id);
+  if (!credential) {
+    throw createError('Invalid credentials', 401);
+  }
+  if (credential.is_temp) {
+    throw createError('Password reset required before login', 403);
+  }
+
+  const ok = await bcrypt.compare(password, credential.password_hash);
+  if (!ok) {
+    throw createError('Invalid credentials', 401);
+  }
+
+  if (!user.email_verified) {
+    throw createError('Email not verified', 403);
+  }
+
+  const ownerProfile = await userRepository.getOwnerProfileByUserId(user.id);
+  if (!ownerProfile) {
+    throw createError('Owner profile not found', 404);
+  }
+  if (ownerProfile.status !== 'approved') {
+    throw createError('Owner account pending approval', 403);
+  }
+
+  const token = jwt.sign({ userId: user.id, role: 'owner' }, { expiresIn: '1h' });
+  return {
+    message: 'Login successful',
+    token,
+    owner: {
+      id: user.id,
+      email: user.email,
+      firstName: user.first_name,
+      lastName: user.last_name,
+      phone: user.phone,
+      profile: ownerProfile,
+    },
+  };
+}
+
+async function getOwnerStatus(email) {
+  const normalizedEmail = (email || '').trim().toLowerCase();
+  if (!normalizedEmail) {
+    return { status: 'not_found' };
+  }
+  const user = await userRepository.findByEmail(normalizedEmail);
+  if (!user) {
+    return { status: 'not_found' };
+  }
+  const profile = await userRepository.getOwnerProfileByUserId(user.id);
+  if (!profile) {
+    return { status: 'not_found' };
+  }
+  return {
+    status: profile.status,
+    emailVerified: user.email_verified,
+    ownerId: user.id,
+    legalName: profile.legal_name,
+    taxCode: profile.tax_code,
+  };
+}
+
+async function adminApproveOwner({ ownerId, adminUserId }) {
+  if (!ownerId) {
+    throw createError('ownerId is required');
+  }
+
+  const owner = await userRepository.findById(ownerId);
+  if (!owner) {
+    throw createError('Owner not found', 404);
+  }
+
+  let profile = await userRepository.getOwnerProfileByUserId(ownerId);
+  if (!profile) {
+    const fallbackName = `${owner.first_name || ''} ${owner.last_name || ''}`.trim()
+      || owner.email
+      || 'Owner';
+    profile = await userRepository.createOwnerProfile(
+      {
+        userId: ownerId,
+        legalName: fallbackName,
+        taxCode: null,
+        companyAddress: null,
+        managerName: fallbackName,
+      },
+    );
+  }
+  if (profile.status === 'approved') {
+    return { message: 'Owner already approved' };
+  }
+
+  const temporaryPassword = generateTemporaryPassword();
+  const passwordHash = await bcrypt.hash(temporaryPassword);
+  const otpCode = generateOTP();
+  const verifyLink = buildOwnerVerifyLink(owner.email, otpCode);
+
+  await withTransaction(async (client) => {
+    const role = await ensureOwnerRole(client);
+
+    await userRepository.updateOwnerProfile(
+      ownerId,
+      {
+        status: 'approved',
+        approvedBy: adminUserId || null,
+        approvedAt: new Date(),
+      },
+      client,
+    );
+
+    await userRepository.upsertCredential(
+      {
+        userId: ownerId,
+        roleId: role.id,
+        passwordHash,
+        isTemp: true,
+      },
+      client,
+    );
+
+    await tokenRepository.createToken(
+      {
+        userId: ownerId,
+        purpose: 'verify_email',
+        code: otpCode,
+        ttlMs: OTP_TTL_MS,
+      },
+      client,
+    );
   });
 
   await sendOtpEmail({
-    to: updated.email,
-    name: updated.first_name || updated.email,
-    otp,
+    to: owner.email,
+    name: owner.first_name || owner.email,
+    otp: otpCode,
     password: temporaryPassword,
-    purpose: 'RESTAURANT_APPROVAL',
+    verifyLink,
+    purpose: 'OWNER_VERIFY',
   });
 
-  await publishSocketEvent('restaurant.approved', {
-    restaurantId: updated.id,
-    email: updated.email,
-    restaurantName: updated.restaurant_name,
-  });
+  publishSocketEvent(
+    'owner.approved',
+    {
+      ownerId,
+      adminUserId: adminUserId || null,
+    },
+    ['admin:restaurants', `restaurant-owner:${ownerId}`],
+  );
 
-  return { message: 'Restaurant approved. Credentials sent via email.' };
+  return { message: 'Owner approved. Verification email sent.' };
 }
 
-// 3. Verification endpoint to allow password change with OTP
-async function verifyRestaurant({ email, otp_code, activationPassword, newPassword }) {
-  const normalizedEmail = (email || '').trim().toLowerCase();
-  if (!normalizedEmail) {
-    throw new Error('Email is required');
+async function resendOwnerVerification({ email }) {
+  if (!email) {
+    throw createError('Email is required');
   }
-  const user = await userModel.findByEmail(normalizedEmail);
-  if (!user) throw new Error('User not found');
-  if (user.role !== 'restaurant') throw new Error('Not a restaurant account');
-  if (!user.is_approved) throw new Error('Admin has not approved this account yet');
-  if (!user.otp_code || !user.otp_expires) throw new Error('No OTP found');
-  if (user.otp_code !== otp_code) throw new Error('Invalid OTP');
-  if (new Date(user.otp_expires) < new Date()) throw new Error('OTP expired');
-
-  if (!activationPassword) {
-    throw new Error('Activation password is required');
+  const normalizedEmail = email.trim().toLowerCase();
+  const owner = await userRepository.findByEmail(normalizedEmail);
+  if (!owner) {
+    throw createError('Owner not found', 404);
   }
-  const tempPasswordMatches = await bcrypt.compare(activationPassword, user.password_hash || '');
-  if (!tempPasswordMatches) {
-    throw new Error('Activation password is incorrect');
+  const profile = await userRepository.getOwnerProfileByUserId(owner.id);
+  if (!profile || profile.status !== 'approved') {
+    throw createError('Owner account is not approved yet', 400);
   }
 
-  if (!newPassword || newPassword.length < 6) {
-    throw new Error('Password must be at least 6 characters');
-  }
+  const temporaryPassword = generateTemporaryPassword();
+  const passwordHash = await bcrypt.hash(temporaryPassword);
+  const otpCode = generateOTP();
+  const verifyLink = buildOwnerVerifyLink(owner.email, otpCode);
 
-  const password_hash = await bcrypt.hash(newPassword);
-
-  const updated = await userModel.updateUser(user.id, {
-    otp_code: null,
-    otp_expires: null,
-    is_verified: true,
-    email_verified: true,
-    is_active: true,
-    restaurant_status: 'active',
-    password_hash,
+  await withTransaction(async (client) => {
+    const role = await ensureOwnerRole(client);
+    await userRepository.upsertCredential(
+      {
+        userId: owner.id,
+        roleId: role.id,
+        passwordHash,
+        isTemp: true,
+      },
+      client,
+    );
+    await tokenRepository.createToken(
+      {
+        userId: owner.id,
+        purpose: 'verify_email',
+        code: otpCode,
+        ttlMs: OTP_TTL_MS,
+      },
+      client,
+    );
   });
 
-  await publishSocketEvent('restaurant.activated', {
-    restaurantId: updated.id,
-    email: updated.email,
+  await sendOtpEmail({
+    to: owner.email,
+    name: owner.first_name || owner.email,
+    otp: otpCode,
+    password: temporaryPassword,
+    verifyLink,
+    purpose: 'OWNER_VERIFY',
   });
 
-  return { message: 'Verification successful. You can now login.', restaurant: updated };
+  publishSocketEvent(
+    'owner.verification.resent',
+    {
+      ownerId: owner.id,
+    },
+    [`restaurant-owner:${owner.id}`],
+  );
+
+  return { message: 'Verification email resent. Please check your inbox.' };
 }
 
-// 4. Restaurant login (email + password)
-async function loginRestaurant({ email, password }) {
-  const normalizedEmail = (email || '').trim().toLowerCase();
-  if (!normalizedEmail) {
-    throw new Error('Email is required');
+async function adminRejectOwner({ ownerId, adminUserId, reason }) {
+  if (!ownerId) {
+    throw createError('ownerId is required');
   }
-  const user = await userModel.findByEmail(normalizedEmail);
-  if (!user) throw new Error('Invalid credentials');
-  if (user.role !== 'restaurant') throw new Error('Not a restaurant account');
-  if (!user.is_approved) throw new Error('Admin has not approved this restaurant yet');
-  if (!user.password_hash) throw new Error('Password not set yet. Please complete OTP verification.');
+  const owner = await userRepository.findById(ownerId);
+  if (!owner) {
+    throw createError('Owner not found', 404);
+  }
+  const profile = await userRepository.getOwnerProfileByUserId(ownerId);
+  if (!profile) {
+    throw createError('Owner profile not found', 404);
+  }
+  await userRepository.updateOwnerProfile(ownerId, {
+    status: 'rejected',
+    approvedBy: adminUserId || null,
+    approvedAt: new Date(),
+  });
 
-  const passwordOk = await bcrypt.compare(password, user.password_hash);
-  if (!passwordOk) throw new Error('Invalid credentials');
-  if (!user.is_verified || !user.email_verified) throw new Error('Restaurant account not verified yet');
-  if (!user.is_active) throw new Error('Restaurant account is locked');
+  await sendOtpEmail({
+    to: owner.email,
+    name: owner.first_name || owner.email,
+    purpose: 'OWNER_REJECTED',
+    reason,
+  });
 
-  const token = jwt.sign({ userId: user.id, role: user.role }, { expiresIn: '15m' });
-  return { message: 'Login successful', user, token };
+  publishSocketEvent(
+    'owner.rejected',
+    {
+      ownerId,
+      adminUserId: adminUserId || null,
+      reason: reason || null,
+    },
+    ['admin:restaurants'],
+  );
+
+  return { message: 'Owner rejected.' };
 }
 
-async function getRestaurantAccountById(id) {
-  const user = await userModel.findById(id);
-  if (!user || user.role !== 'restaurant') throw new Error('Restaurant not found');
+async function createOwnerMainAccount({
+  restaurantId,
+  ownerUserId,
+  loginEmail,
+  displayName,
+  phone,
+  temporaryPassword,
+}) {
+  if (!restaurantId || !ownerUserId || !loginEmail || !temporaryPassword) {
+    throw createError('Missing required fields');
+  }
+
+  const passwordHash = await bcrypt.hash(temporaryPassword);
+  const account = await withTransaction(async (client) => {
+    const createdAccount = await restaurantAccountRepository.createAccount(
+      {
+        restaurantId,
+        loginEmail,
+        displayName: displayName || loginEmail,
+        phone: phone || null,
+        userId: ownerUserId,
+      },
+      client,
+    );
+
+    await restaurantAccountRepository.upsertCredential(
+      {
+        accountId: createdAccount.id,
+        passwordHash,
+        isTemp: true,
+      },
+      client,
+    );
+
+    const membership = await restaurantAccountRepository.assignMembership(
+      {
+        accountId: createdAccount.id,
+        restaurantId,
+        branchId: null,
+        role: 'owner_main',
+      },
+      client,
+    );
+
+    return { account: createdAccount, membership };
+  });
+
   return {
-    id: user.id,
-    email: user.email,
-    phone: user.phone,
-    restaurantName: user.restaurant_name,
-    managerName: user.manager_name,
-    taxCode: user.tax_code,
-    companyAddress: user.company_address,
-    restaurantStatus: user.restaurant_status,
-    isApproved: user.is_approved,
-    isActive: user.is_active,
-    isVerified: user.is_verified,
+    message: 'Owner main account created',
+    account: account.account,
+    membership: account.membership,
   };
 }
 
-async function getRestaurantStatus(email) {
-  const normalizedEmail = (email || '').trim().toLowerCase();
-  if (!normalizedEmail) {
-    return {
-      email: '',
-      restaurantStatus: 'not_found',
-      isApproved: false,
-      isActive: false,
-      isVerified: false,
-    };
+async function createRestaurantMember({
+  restaurantId,
+  branchId,
+  loginEmail,
+  displayName,
+  phone,
+  role,
+  temporaryPassword,
+  permissions,
+}) {
+  if (!restaurantId || !loginEmail || !role || !temporaryPassword) {
+    throw createError('Missing required fields');
   }
-  const user = await userModel.findByEmail(normalizedEmail);
-  if (!user || user.role !== 'restaurant') {
-    return {
-      email: normalizedEmail,
-      restaurantStatus: 'not_found',
-      isApproved: false,
-      isActive: false,
-      isVerified: false,
-    };
+
+  const allowedRoles = ['owner', 'manager', 'staff'];
+  if (!allowedRoles.includes(role)) {
+    throw createError('Unsupported role');
   }
+
+  const passwordHash = await bcrypt.hash(temporaryPassword);
+  const result = await withTransaction(async (client) => {
+    const account = await restaurantAccountRepository.createAccount(
+      {
+        restaurantId,
+        loginEmail,
+        displayName: displayName || loginEmail,
+        phone: phone || null,
+        userId: null,
+      },
+      client,
+    );
+
+    await restaurantAccountRepository.upsertCredential(
+      {
+        accountId: account.id,
+        passwordHash,
+        isTemp: true,
+      },
+      client,
+    );
+
+    const membership = await restaurantAccountRepository.assignMembership(
+      {
+        accountId: account.id,
+        restaurantId,
+        branchId: branchId || null,
+        role,
+        permissions: permissions || {},
+      },
+      client,
+    );
+
+    return { account, membership };
+  });
+
   return {
-    id: user.id,
-    email: user.email,
-    isApproved: user.is_approved,
-    isActive: user.is_active,
-    isVerified: user.is_verified,
-    restaurantStatus: user.restaurant_status,
-    restaurantName: user.restaurant_name,
-    phone: user.phone,
-    managerName: user.manager_name,
-    taxCode: user.tax_code,
-    companyAddress: user.company_address,
+    message: 'Restaurant member created',
+    account: result.account,
+    membership: result.membership,
   };
 }
 
-async function moderateRestaurant(id, action) {
-  const allowedActions = ['lock', 'warning', 'active'];
-  if (!allowedActions.includes(action)) {
-    throw new Error('Unsupported restaurant action');
+async function setOwnerPassword({ email, temporaryPassword, newPassword }) {
+  const cleanEmail = typeof email === 'string' ? email.trim() : '';
+  const cleanTempPassword =
+    typeof temporaryPassword === 'string' ? temporaryPassword.trim() : '';
+  const cleanNewPassword =
+    typeof newPassword === 'string' ? newPassword.trim() : '';
+
+  if (!cleanEmail || !cleanTempPassword || !cleanNewPassword) {
+    throw createError('Email, temporary password and new password are required');
+  }
+  if (cleanNewPassword.length < 8) {
+    throw createError('New password must be at least 8 characters long');
   }
 
-  const user = await userModel.findById(id);
-  if (!user) throw new Error('Restaurant not found');
-  if (user.role !== 'restaurant') throw new Error('Not a restaurant account');
-
-  const updates = {};
-
-  if (action === 'lock') {
-    updates.is_active = false;
-    updates.restaurant_status = user.is_verified ? 'approved' : 'approve';
-  } else if (action === 'warning') {
-    updates.is_active = true;
-    updates.restaurant_status = 'warning';
-  } else if (action === 'active') {
-    updates.is_active = true;
-    updates.restaurant_status = user.is_verified ? 'active' : 'approve';
+  const normalizedEmail = cleanEmail.toLowerCase();
+  const user = await userRepository.findByEmail(normalizedEmail);
+  if (!user) {
+    throw createError('User not found', 404);
+  }
+  if (!user.email_verified) {
+    throw createError('Email not verified yet', 403);
   }
 
-  const updated = await userModel.updateUser(id, updates);
+  const role = await ensureOwnerRole();
+  const credential = await userRepository.getCredential(user.id, role.id);
+  if (!credential) {
+    throw createError('Owner credentials not found', 404);
+  }
+  if (!credential.is_temp) {
+    throw createError('Password already set', 400);
+  }
 
-  await publishSocketEvent('restaurant.moderated', {
-    restaurantId: updated.id,
-    action,
-    restaurantStatus: updated.restaurant_status,
-    isActive: updated.is_active,
+  const tempMatches = await bcrypt.compare(cleanTempPassword, credential.password_hash);
+  if (!tempMatches) {
+    throw createError('Temporary password is invalid', 401);
+  }
+
+  const passwordHash = await bcrypt.hash(cleanNewPassword);
+  await userRepository.upsertCredential({
+    userId: user.id,
+    roleId: role.id,
+    passwordHash,
+    isTemp: false,
   });
 
-  return updated;
+  return { message: 'Password updated successfully. You can now login.' };
 }
 
 module.exports = {
-  registerRestaurant,
-  approveRestaurant,
-  verifyRestaurant,
-  loginRestaurant,
-  getRestaurantStatus,
-  getRestaurantAccountById,
-  moderateRestaurant,
+  registerOwner,
+  verifyOwner,
+  ownerLogin,
+  getOwnerStatus,
+  adminApproveOwner,
+  resendOwnerVerification,
+  adminRejectOwner,
+  createOwnerMainAccount,
+  createRestaurantMember,
+  setOwnerPassword,
 };

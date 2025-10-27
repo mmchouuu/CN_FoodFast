@@ -7,17 +7,24 @@ const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '1h';
 
 const sanitizeUser = (user) => {
   if (!user) return null;
+  const firstName = user.firstName ?? user.first_name ?? null;
+  const lastName = user.lastName ?? user.last_name ?? null;
+  const email = user.email ?? user.emailAddress ?? null;
+  const phone = user.phone ?? user.phoneNumber ?? null;
+  const tier = user.tier ?? user.loyaltyTier ?? null;
+  const isVerified =
+    user.emailVerified ?? user.is_verified ?? user.isVerified ?? null;
   return {
-    id: user.id,
-    first_name: user.first_name ?? null,
-    last_name: user.last_name ?? null,
-    email: user.email ?? null,
-    phone: user.phone ?? null,
+    id: user.id ?? user.userId ?? null,
+    first_name: firstName,
+    last_name: lastName,
+    email,
+    phone,
     role: user.role ?? 'customer',
-    avatar_url: user.avatar_url ?? user.avatar ?? null,
-    tier: user.tier ?? null,
-    is_verified: user.is_verified ?? null,
-    is_approved: user.is_approved ?? null,
+    avatar_url: user.avatar_url ?? user.avatar ?? user.avatarUrl ?? null,
+    tier,
+    is_verified: isVerified,
+    is_approved: user.is_approved ?? user.isApproved ?? null,
   };
 };
 
@@ -89,6 +96,7 @@ async function listAddresses(req, res, next) {
       headers: {
         'x-request-id': req.id,
         'x-user-id': req.user.userId,
+        authorization: req.headers.authorization,
       },
     });
     return res.json(result);
@@ -103,9 +111,25 @@ async function createAddress(req, res, next) {
       headers: {
         'x-request-id': req.id,
         'x-user-id': req.user.userId,
+        authorization: req.headers.authorization,
       },
     });
     return res.status(201).json(result);
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function updateAddress(req, res, next) {
+  try {
+    const result = await customerClient.updateAddress(req.params.id, req.body, {
+      headers: {
+        'x-request-id': req.id,
+        'x-user-id': req.user.userId,
+        authorization: req.headers.authorization,
+      },
+    });
+    return res.json(result);
   } catch (err) {
     next(err);
   }
@@ -117,6 +141,7 @@ async function deleteAddress(req, res, next) {
       headers: {
         'x-request-id': req.id,
         'x-user-id': req.user.userId,
+        authorization: req.headers.authorization,
       },
     });
     return res.status(204).end();
@@ -140,17 +165,28 @@ async function requestPasswordReset(req, res, next) {
 
 async function resetPassword(req, res, next) {
   try {
-    const { email, otp, new_password } = req.body;
-    if (!email || !otp || !new_password) {
-      return res.status(400).json({ message: 'email, otp and new_password are required' });
+    const { email, otp, newPassword } = req.body;
+    if (!email || !otp || !newPassword) {
+      return res.status(400).json({ message: 'email, otp and newPassword are required' });
     }
-    const result = await customerClient.resetPassword({ email, otp, new_password }, {
-      headers: { 'x-request-id': req.id }
-    });
+    const result = await customerClient.resetPassword(
+      { email, otp, newPassword },
+      { headers: { 'x-request-id': req.id } },
+    );
     return res.json(result);
   } catch (err) {
     next(err);
   }
 }
 
-module.exports = { register, verify, login, listAddresses, createAddress, deleteAddress, requestPasswordReset, resetPassword };
+module.exports = {
+  register,
+  verify,
+  login,
+  listAddresses,
+  createAddress,
+  updateAddress,
+  deleteAddress,
+  requestPasswordReset,
+  resetPassword,
+};

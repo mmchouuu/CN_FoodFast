@@ -4,14 +4,11 @@ function serialize(address) {
   if (!address) return null;
   return {
     id: address.id,
+    label: address.label,
     street: address.street,
     ward: address.ward,
     district: address.district,
     city: address.city,
-    recipient: address.recipient,
-    phone: address.phone,
-    instructions: address.instructions,
-    label: address.label,
     is_default: Boolean(address.is_primary),
     created_at: address.created_at,
     updated_at: address.updated_at,

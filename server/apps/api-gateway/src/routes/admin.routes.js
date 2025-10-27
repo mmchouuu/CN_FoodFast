@@ -1,14 +1,19 @@
-// api-gateway/src/routes/admin.routes.js
-const express = require('express');
-const router = express.Router();
+﻿const express = require('express');
 const controller = require('../controllers/admins.controller');
 
-// IMPORTANT: protect these endpoints with auth + role guard in production
-router.put('/approve-restaurant/:id', controller.approveRestaurant);
-router.get('/users', controller.listUsers);
+const router = express.Router();
+
 router.get('/customers', controller.listCustomers);
-router.get('/restaurants', controller.listRestaurants);
-router.get('/users/:id', controller.getUserDetails);
-router.patch('/users/:id/active', controller.updateUserActiveStatus);
+router.get('/customers/:id', controller.customerDetails);
+router.patch('/customers/:id/status', controller.updateCustomerStatus);
+
+router.get('/owners', controller.listOwners);
+router.post('/owners/:id/approve', controller.approveOwner);
+router.post('/owners/:id/reject', controller.rejectOwner);
+
+router.post('/catalog/taxes/templates', controller.createTaxTemplate);
+router.post('/catalog/taxes/assignments', controller.assignTax);
+router.post('/catalog/calendars', controller.createCalendar);
+router.post('/catalog/promotions/global', controller.createGlobalPromotion);
 
 module.exports = router;
