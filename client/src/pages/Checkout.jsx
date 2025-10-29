@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import toast from "react-hot-toast";
 import { useNavigate } from "react-router-dom";
 import { useAppContext } from "../context/AppContext";
@@ -10,8 +10,8 @@ const Checkout = () => {
     getDiscountAmount,
     applyDiscountCode,
     appliedDiscountCode,
-    paymentOptions,
     bankAccounts,
+    cardAccounts,
     method,
     setMethod,
     addresses,
@@ -21,6 +21,7 @@ const Checkout = () => {
     currency,
     placeOrder,
     addNewAddress,
+    openCustomerProfilePanel,
   } = useAppContext();
 
   const [discountCode, setDiscountCode] = useState(
@@ -54,6 +55,37 @@ const Checkout = () => {
   const total = Math.max(subtotal + shippingFee - discount, 0);
 
   const isCartEmpty = useMemo(() => subtotal === 0, [subtotal]);
+
+  const paymentMethods = useMemo(
+    () => [
+      {
+        id: "wallet",
+        label: "Cash",
+        description: "Pay with cash when the courier arrives.",
+      },
+      {
+        id: "bank",
+        label: "Bank account",
+        description: "Link a bank account for secure, cashless payments.",
+      },
+      {
+        id: "card",
+        label: "Debit/Credit card",
+        description: "Save a card for quick, secure checkout.",
+      },
+    ],
+    [],
+  );
+
+  useEffect(() => {
+    if (method === "bank" && bankAccounts.length === 0) {
+      setMethod("wallet");
+      return;
+    }
+    if (method === "card" && cardAccounts.length === 0) {
+      setMethod("wallet");
+    }
+  }, [method, bankAccounts.length, cardAccounts.length, setMethod]);
 
   const handleApplyDiscount = () => {
     applyDiscountCode(discountCode);
@@ -361,29 +393,40 @@ const Checkout = () => {
             Choose how you'd like to pay for this order.
           </p>
           <div className="mt-6 grid gap-4 md:grid-cols-3">
-            {paymentOptions.map((option) => {
-              const isBank = option.id === "bank";
-              const disabled = isBank && bankAccounts.length === 0;
+            {paymentMethods.map((option) => {
               const isSelected = method === option.id;
+              const isBank = option.id === "bank";
+              const isCard = option.id === "card";
+              const bankUnavailable = isBank && bankAccounts.length === 0;
+              const cardUnavailable = isCard && cardAccounts.length === 0;
+              const isDisabled = bankUnavailable || cardUnavailable;
+
+              const cardCountLabel =
+                cardAccounts.length === 1
+                  ? "1 saved card ready to use."
+                  : `${cardAccounts.length} saved cards ready to use.`;
+              const bankCountLabel =
+                bankAccounts.length === 1
+                  ? "1 linked account ready to use."
+                  : `${bankAccounts.length} linked accounts ready to use.`;
+
               return (
                 <button
                   key={option.id}
                   type="button"
+                  aria-disabled={isDisabled}
                   onClick={() => {
-                    if (!disabled) {
-                      setMethod(option.id);
-                    } else {
-                      toast.error(
-                        "Link a bank account from your profile before choosing this method."
-                      );
+                    if (isDisabled) {
+                      openCustomerProfilePanel();
+                      return;
                     }
+                    setMethod(option.id);
                   }}
-                  disabled={disabled}
                   className={`flex h-full flex-col rounded-2xl border p-4 text-left transition ${
                     isSelected
-                      ? "border-orange-500 bg-orange-50"
+                      ? "border-orange-500 bg-orange-50 shadow-sm"
                       : "border-gray-200 hover:border-orange-300"
-                  } ${disabled ? "cursor-not-allowed opacity-60" : ""}`}
+                  } ${isDisabled ? "opacity-60" : ""}`}
                 >
                   <span className="text-sm font-semibold text-gray-900">
                     {option.label}
@@ -391,17 +434,43 @@ const Checkout = () => {
                   <p className="mt-2 text-xs text-gray-500">
                     {option.description}
                   </p>
+
                   {isBank ? (
                     <p className="mt-2 text-xs">
-                      {disabled ? (
-                        <span className="text-orange-500">
+                      {bankUnavailable ? (
+                        <span
+                          className="cursor-pointer text-orange-500 underline underline-offset-2"
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            openCustomerProfilePanel();
+                          }}
+                        >
                           Link a bank account in your profile panel.
                         </span>
                       ) : (
                         <span className="text-emerald-600">
-                          {bankAccounts.length} linked account
-                          {bankAccounts.length > 1 ? "s" : ""} ready to use.
+                          {bankCountLabel}
                         </span>
+                      )}
+                    </p>
+                  ) : null}
+
+                  {isCard ? (
+                    <p className="mt-2 text-xs">
+                      {cardUnavailable ? (
+                        <span
+                          className="cursor-pointer text-orange-500 underline underline-offset-2"
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            openCustomerProfilePanel();
+                          }}
+                        >
+                          Link a card in your profile panel.
+                        </span>
+                      ) : (
+                        <span className="text-emerald-600">{cardCountLabel}</span>
                       )}
                     </p>
                   ) : null}

@@ -16,7 +16,15 @@ const getBasePrice = (dish) => {
       : Object.values(dish.price);
   const numericPrices = prices.filter((value) => typeof value === "number");
   if (!numericPrices.length) return 0;
-  return Math.min(...numericPrices);
+  const lowest = Math.min(...numericPrices);
+  const taxRate = dish.taxRate ?? 0;
+  if (taxRate > 0) {
+    return Math.round(lowest * (1 + taxRate));
+  }
+  if (dish.priceWithTax && dish.priceWithTax > lowest) {
+    return Math.round(dish.priceWithTax);
+  }
+  return lowest;
 };
 
 const sortOptions = [
@@ -72,6 +80,9 @@ const DishCard = ({ dish, restaurantId, currency, onAdd }) => {
           <p className="text-lg font-semibold text-gray-900">
             {currency}
             {basePrice ? basePrice.toLocaleString() : "0"}
+            <span className="ml-1 text-xs font-normal text-gray-500">
+              incl. VAT
+            </span>
           </p>
           <button
             onClick={() => onAdd(dish._id, defaultSize || dish.sizes?.[0])}
@@ -138,25 +149,6 @@ const RestaurantDetail = () => {
     setCurrentPage(1);
   }, [activeCategory, dishSearch, maxPrice, minRating, sortOption]);
 
-  if (!restaurant) {
-    return (
-      <div className="max-padd-container py-36 text-center">
-        <h1 className="text-3xl font-bold text-gray-900">
-          Restaurant not found
-        </h1>
-        <p className="mt-2 text-gray-500">
-          The restaurant may be temporarily unavailable or has been removed.
-        </p>
-        <Link
-          to="/restaurants"
-          className="mt-6 inline-block rounded-full bg-orange-500 px-5 py-3 text-sm font-semibold text-white"
-        >
-          Browse other restaurants
-        </Link>
-      </div>
-    );
-  }
-
   const heroImage = pickFirstImageUrl(
     restaurantPlaceholderImage,
     restaurant.heroImage,
@@ -221,6 +213,25 @@ const RestaurantDetail = () => {
   useEffect(() => {
     setCurrentPage((prev) => (prev > totalPages ? totalPages : prev));
   }, [totalPages]);
+
+  if (!restaurant) {
+    return (
+      <div className="max-padd-container py-36 text-center">
+        <h1 className="text-3xl font-bold text-gray-900">
+          Restaurant not found
+        </h1>
+        <p className="mt-2 text-gray-500">
+          The restaurant may be temporarily unavailable or has been removed.
+        </p>
+        <Link
+          to="/restaurants"
+          className="mt-6 inline-block rounded-full bg-orange-500 px-5 py-3 text-sm font-semibold text-white"
+        >
+          Browse other restaurants
+        </Link>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-14 pb-24">

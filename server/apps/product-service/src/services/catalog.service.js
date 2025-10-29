@@ -109,14 +109,15 @@ async function buildOptionMap(productIds = [], branchIds = []) {
     const list = productOverrides[override.option_item_id] || [];
     list.push({
       branch_id: override.branch_id,
+      branch_product_id: override.branch_product_id,
       product_id: override.product_id,
       option_item_id: override.option_item_id,
-      is_available: override.is_available !== false,
-      is_visible: override.is_visible !== false,
+      is_available: override.is_active !== false,
+      is_visible: override.is_active !== false,
       price_delta_override:
-        override.price_delta_override === null
+        override.price_delta === null || override.price_delta === undefined
           ? null
-          : toNumber(override.price_delta_override, null),
+          : toNumber(override.price_delta, null),
     });
     productOverrides[override.option_item_id] = list;
     acc[override.product_id] = productOverrides;
@@ -396,6 +397,73 @@ async function getRestaurantCatalog(restaurantId, filters = {}) {
 
       branchProductsMap[branchId].push(branchProduct);
     });
+  });
+
+  branches.forEach((branch) => {
+    const existing = branchProductsMap[branch.id] || [];
+    if (existing.length) return;
+
+    productsWithOptions
+      .filter((product) => product.restaurant_id === branch.restaurant_id)
+      .forEach((product) => {
+        const basePrice = toNumber(product.base_price, 0);
+        const taxRate = taxResolver.resolve(branch.id, product.id);
+        const priceWithTax = computePriceWithTax(basePrice, taxRate);
+
+        existing.push({
+          id: product.id,
+          restaurant_id: product.restaurant_id,
+          title: product.title,
+          description: product.description,
+          images: product.images,
+          type: product.type,
+          category_id: product.category_id,
+          category: product.category,
+          base_price: basePrice,
+          price_mode: 'inherit',
+          base_price_override: null,
+          price_with_tax: priceWithTax,
+          tax_rate: taxRate,
+          popular: product.popular,
+          available: product.available !== false,
+          is_visible: product.is_visible !== false,
+          branch_product_id: null,
+          display_order: null,
+          is_featured: false,
+          inventory_summary: {
+            branch_id: branch.id,
+            quantity: null,
+            reserved_qty: null,
+            daily_limit: null,
+          },
+          options: optionMap[product.id] || [],
+          branch_assignment: {
+            id: null,
+            branch_id: branch.id,
+            product_id: product.id,
+            is_available: product.available !== false,
+            is_visible: product.is_visible !== false,
+            is_featured: false,
+            display_order: null,
+            price_mode: 'inherit',
+            base_price_override: null,
+            local_name: null,
+            local_description: null,
+            available_from: null,
+            available_until: null,
+            dayparts: null,
+            created_at: null,
+            updated_at: null,
+            quantity: null,
+            reserved_qty: null,
+            min_stock: null,
+            daily_limit: null,
+            daily_sold: null,
+          },
+        });
+      });
+
+    branchProductsMap[branch.id] = existing;
   });
 
   const branchesWithMenu = branches

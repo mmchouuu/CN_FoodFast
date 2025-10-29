@@ -11,6 +11,17 @@ const Item = ({ product }) => {
   const { currency, addToCart } = useAppContext();
   const [size, setSize] = useState(product.sizes?.[0] || "");
 
+  const resolveDisplayPrice = (sizeLabel) => {
+    const base =
+      (sizeLabel && product.price?.[sizeLabel] != null
+        ? product.price[sizeLabel]
+        : product.basePrice ?? product.priceWithTax ?? 0);
+    const taxRate = product.taxRate ?? 0;
+    return Math.round(base * (1 + taxRate));
+  };
+
+  const displayPrice = resolveDisplayPrice(size || product.sizes?.[0] || "Standard");
+
   if (!product) return null;
 
   const productImage = pickFirstImageUrl(
@@ -77,14 +88,15 @@ const Item = ({ product }) => {
                 {option}
               </button>
             ))}
-          </div>
-          <p className="text-lg font-semibold text-orange-500">
-            {currency}
-            {size && product.price?.[size]
-              ? product.price[size].toLocaleString()
-              : 0}
-          </p>
         </div>
+        <p className="text-lg font-semibold text-orange-500">
+          {currency}
+          {displayPrice.toLocaleString()}
+          <span className="ml-1 text-xs font-normal text-gray-300">
+            incl. VAT
+          </span>
+        </p>
+      </div>
 
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4 text-xs text-gray-500">

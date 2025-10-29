@@ -395,6 +395,48 @@ CREATE TABLE IF NOT EXISTS branch_product_option_items (
 );
 CREATE INDEX IF NOT EXISTS idx_bpoi_branch_product ON branch_product_option_items(branch_id, product_id, is_available, is_visible);
 
+CREATE TABLE IF NOT EXISTS branch_product_option_items (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  branch_product_id UUID NOT NULL REFERENCES branch_products(id) ON DELETE CASCADE,
+  option_item_id UUID NOT NULL REFERENCES option_items(id) ON DELETE CASCADE,
+  price_delta NUMERIC(12,2) NOT NULL,
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE (branch_product_id, option_item_id)
+);
+
+CREATE TABLE IF NOT EXISTS branch_product_option_groups (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  branch_product_id UUID NOT NULL REFERENCES branch_products(id) ON DELETE CASCADE,
+  option_group_id UUID NOT NULL REFERENCES option_groups(id) ON DELETE CASCADE,
+  min_select SMALLINT,
+  max_select SMALLINT,
+  is_required BOOLEAN,
+  display_order INT,
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE (branch_product_id, option_group_id)
+);
+
+-- Optional: bật/tắt nhóm option tại chi nhánh
+CREATE TABLE IF NOT EXISTS branch_option_groups (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  branch_id UUID NOT NULL REFERENCES restaurant_branches(id) ON DELETE CASCADE,
+  option_group_id UUID NOT NULL REFERENCES option_groups(id) ON DELETE CASCADE,
+  is_enabled BOOLEAN DEFAULT TRUE,
+  UNIQUE (branch_id, option_group_id)
+);
+
+-- Optional: ghi log đồng bộ tự động
+CREATE TABLE IF NOT EXISTS branch_option_sync_log (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  branch_product_id UUID NOT NULL,
+  sync_action VARCHAR(30) NOT NULL,
+  synced_at TIMESTAMPTZ DEFAULT now(),
+  details JSONB
+);
+
+
 -- =====================================================================
 -- 10) COMBOS
 -- =====================================================================
@@ -611,6 +653,7 @@ CREATE TABLE IF NOT EXISTS outbox (
 CREATE INDEX IF NOT EXISTS idx_outbox_agg       ON outbox(aggregate_type, aggregate_id);
 CREATE INDEX IF NOT EXISTS idx_outbox_processed ON outbox(processed);
 
+
 -- =====================================================================
 -- SAMPLE RESTAURANT DATASET FOR LOCAL DEVELOPMENT
 -- =====================================================================
@@ -659,30 +702,30 @@ INSERT INTO restaurant_branches (
   is_open
 )
 VALUES
-  ('31111111-1111-4111-8111-000000000201', '21111111-1111-4111-8111-000000000101', 1, 'Lotte Mart District 1', '02836223344', 'd1@lottefoodhall.vn', 4.5, ARRAY['https://images.unsplash.com/photo-1525755662778-989d0524087e?auto=format&fit=crop&w=900&q=80'], '469 Le Loi', 'Ben Thanh', 'District 1', 'Ho Chi Minh City', 10.775658, 106.700423, TRUE, TRUE),
-  ('31111111-1111-4111-8111-000000000202', '21111111-1111-4111-8111-000000000101', 2, 'Lotte Mart District 7', '02837710011', 'd7@lottefoodhall.vn', 4.4, ARRAY['https://images.unsplash.com/photo-1589118949245-7d38baf380d6?auto=format&fit=crop&w=900&q=80'], '485 Nguyen Thi Thap', 'Tan Phong', 'District 7', 'Ho Chi Minh City', 10.732620, 106.721450, FALSE, TRUE),
-  ('31111111-1111-4111-8111-000000000203', '21111111-1111-4111-8111-000000000101', 3, 'Lotte Mart Thu Duc', '02838966000', 'thuduc@lottefoodhall.vn', 4.3, ARRAY['https://images.unsplash.com/photo-1555992336-cbf3c095cf1d?auto=format&fit=crop&w=900&q=80'], '21 Vo Van Ngan', 'Linh Chieu', 'Thu Duc City', 'Ho Chi Minh City', 10.851460, 106.758800, FALSE, TRUE),
-  ('31111111-1111-4111-8111-000000000204', '21111111-1111-4111-8111-000000000102', 1, 'KFC Nguyen Trai', '19006886', 'nguyentrai@kfcvietnam.vn', 4.6, ARRAY['https://images.unsplash.com/photo-1585238342028-4bbc894c2921?auto=format&fit=crop&w=900&q=80'], '192 Nguyen Trai', 'Nguyen Cu Trinh', 'District 1', 'Ho Chi Minh City', 10.764340, 106.692391, TRUE, TRUE),
-  ('31111111-1111-4111-8111-000000000205', '21111111-1111-4111-8111-000000000102', 2, 'KFC Nguyen Dinh Chieu', '19006886', 'nguyendinhchieu@kfcvietnam.vn', 4.4, ARRAY['https://images.unsplash.com/photo-1525088553748-01d6e210e00b?auto=format&fit=crop&w=900&q=80'], '189 Nguyen Dinh Chieu', 'Ward 5', 'District 3', 'Ho Chi Minh City', 10.784520, 106.688210, FALSE, TRUE),
-  ('31111111-1111-4111-8111-000000000206', '21111111-1111-4111-8111-000000000103', 1, 'Jollibee Nguyen Kiem', '19001533', 'nguyenkim@jollibee.vn', 4.5, ARRAY['https://images.unsplash.com/photo-1620277369441-196244f14c07?auto=format&fit=crop&w=900&q=80'], '674 Nguyen Kiem', 'Ward 4', 'Go Vap District', 'Ho Chi Minh City', 10.822520, 106.671230, TRUE, TRUE),
-  ('31111111-1111-4111-8111-000000000207', '21111111-1111-4111-8111-000000000103', 2, 'Jollibee Crescent Mall', '19001533', 'crescent@jollibee.vn', 4.4, ARRAY['https://images.unsplash.com/photo-1498654896293-37aacf113fd9?auto=format&fit=crop&w=900&q=80'], '101 Ton Dat Tien', 'Tan Phu', 'District 7', 'Ho Chi Minh City', 10.728340, 106.718430, FALSE, TRUE),
-  ('31111111-1111-4111-8111-000000000208', '21111111-1111-4111-8111-000000000104', 1, 'Busan Bistro Nguyen Hue', '02822997788', 'nguyenhue@busanbistro.vn', 4.7, ARRAY['https://images.unsplash.com/photo-1525755662778-989d0524087e?auto=format&fit=crop&w=900&q=80'], '12 Nguyen Hue', 'Ben Nghe', 'District 1', 'Ho Chi Minh City', 10.773100, 106.705800, TRUE, TRUE),
-  ('31111111-1111-4111-8111-000000000209', '21111111-1111-4111-8111-000000000104', 2, 'Busan Bistro Thao Dien', '02822997789', 'thaodien@busanbistro.vn', 4.6, ARRAY['https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=900&q=80'], '49 Quoc Huong', 'Thao Dien', 'Thu Duc City', 'Ho Chi Minh City', 10.801420, 106.730650, FALSE, TRUE),
-  ('31111111-1111-4111-8111-000000000210', '21111111-1111-4111-8111-000000000104', 3, 'Busan Bistro Phu My Hung', '02822997790', 'phumyhung@busanbistro.vn', 4.5, ARRAY['https://images.unsplash.com/photo-1504674900247-0877df9cc836?auto=format&fit=crop&w=900&q=80'], '15 Nguyen Khac Vien', 'Tan Phu', 'District 7', 'Ho Chi Minh City', 10.726800, 106.718900, FALSE, TRUE),
-  ('31111111-1111-4111-8111-000000000211', '21111111-1111-4111-8111-000000000105', 1, 'Sasin Hotpot Nguyen Trai', '02822112211', 'nguyentrai@sasinhotpot.vn', 4.4, ARRAY['https://images.unsplash.com/photo-1525755662778-989d0524087e?auto=format&fit=crop&w=900&q=80'], '120 Nguyen Trai', 'Ben Thanh', 'District 1', 'Ho Chi Minh City', 10.769880, 106.694210, TRUE, TRUE),
-  ('31111111-1111-4111-8111-000000000212', '21111111-1111-4111-8111-000000000105', 2, 'Sasin Hotpot Go Vap', '02822112212', 'govap@sasinhotpot.vn', 4.3, ARRAY['https://images.unsplash.com/photo-1589308078050-002c61c2d6b6?auto=format&fit=crop&w=900&q=80'], '135 Quang Trung', 'Ward 10', 'Go Vap District', 'Ho Chi Minh City', 10.832140, 106.672410, FALSE, TRUE),
-  ('31111111-1111-4111-8111-000000000213', '21111111-1111-4111-8111-000000000106', 1, 'Highlands Coffee Landmark 81', '02862744444', 'landmark81@highlandscoffee.vn', 4.7, ARRAY['https://images.unsplash.com/photo-1527169402691-feff5539e52c?auto=format&fit=crop&w=900&q=80'], '720A Dien Bien Phu', 'Ward 22', 'Binh Thanh District', 'Ho Chi Minh City', 10.794930, 106.721620, TRUE, TRUE),
-  ('31111111-1111-4111-8111-000000000214', '21111111-1111-4111-8111-000000000106', 2, 'Highlands Coffee Ben Thanh', '02862744445', 'benthanh@highlandscoffee.vn', 4.6, ARRAY['https://images.unsplash.com/photo-1509042239860-f550ce710b93?auto=format&fit=crop&w=900&q=80'], '2 Le Loi', 'Ben Thanh', 'District 1', 'Ho Chi Minh City', 10.772560, 106.698410, FALSE, TRUE),
-  ('31111111-1111-4111-8111-000000000215', '21111111-1111-4111-8111-000000000106', 3, 'Highlands Coffee Tan Son Nhat', '02862744446', 'airport@highlandscoffee.vn', 4.3, ARRAY['https://images.unsplash.com/photo-1521017432531-fbd92d768814?auto=format&fit=crop&w=900&q=80'], '12 Truong Son', 'Ward 2', 'Tan Binh District', 'Ho Chi Minh City', 10.813210, 106.660050, FALSE, TRUE),
-  ('31111111-1111-4111-8111-000000000216', '21111111-1111-4111-8111-000000000107', 1, 'Katinat Dong Khoi', '02866886688', 'dongkhoi@katinat.vn', 4.6, ARRAY['https://images.unsplash.com/photo-1470337458703-46ad1756a187?auto=format&fit=crop&w=900&q=80'], '91 Dong Khoi', 'Ben Nghe', 'District 1', 'Ho Chi Minh City', 10.776210, 106.704670, TRUE, TRUE),
-  ('31111111-1111-4111-8111-000000000217', '21111111-1111-4111-8111-000000000107', 2, 'Katinat Phu Nhuan', '02866886689', 'phunhuan@katinat.vn', 4.4, ARRAY['https://images.unsplash.com/photo-1485808191679-5f86510681a2?auto=format&fit=crop&w=900&q=80'], '2 Le Van Sy', 'Ward 11', 'Phu Nhuan District', 'Ho Chi Minh City', 10.790210, 106.675210, FALSE, TRUE),
-  ('31111111-1111-4111-8111-000000000218', '21111111-1111-4111-8111-000000000108', 1, 'Bonchon Vincom Dong Khoi', '02839393939', 'vincom@bonchon.vn', 4.5, ARRAY['https://images.unsplash.com/photo-1608032362155-c86a8137b0ae?auto=format&fit=crop&w=900&q=80'], '72 Le Thanh Ton', 'Ben Nghe', 'District 1', 'Ho Chi Minh City', 10.779340, 106.703560, TRUE, TRUE),
-  ('31111111-1111-4111-8111-000000000219', '21111111-1111-4111-8111-000000000108', 2, 'Bonchon Van Hanh Mall', '02839393938', 'vanhanh@bonchon.vn', 4.3, ARRAY['https://images.unsplash.com/photo-1585238342028-4bbc894c2921?auto=format&fit=crop&w=900&q=80'], '11 Su Van Hanh', 'Ward 12', 'District 10', 'Ho Chi Minh City', 10.772750, 106.668950, FALSE, TRUE),
-  ('31111111-1111-4111-8111-000000000220', '21111111-1111-4111-8111-000000000109', 1, 'Texas Chicken Le Van Sy', '02838486666', 'levansy@texaschicken.vn', 4.4, ARRAY['https://images.unsplash.com/photo-1571091718767-18b5b1457add?auto=format&fit=crop&w=900&q=80'], '270 Le Van Sy', 'Ward 1', 'Tan Binh District', 'Ho Chi Minh City', 10.795330, 106.666420, TRUE, TRUE),
-  ('31111111-1111-4111-8111-000000000221', '21111111-1111-4111-8111-000000000109', 2, 'Texas Chicken Di An', '02838486665', 'dian@texaschicken.vn', 4.2, ARRAY['https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=900&q=80'], '1B National Highway 1K', 'Dong Hoa', 'Di An City', 'Binh Duong Province', 10.904560, 106.772830, FALSE, TRUE),
-  ('31111111-1111-4111-8111-000000000222', '21111111-1111-4111-8111-000000000110', 1, 'Pizza 4P''s Ben Thanh', '02836229988', 'benthanh@pizza4ps.com', 4.8, ARRAY['https://images.unsplash.com/photo-1548365328-5b6a2a1d5b37?auto=format&fit=crop&w=900&q=80'], '8 Le Thanh Ton', 'Ben Nghe', 'District 1', 'Ho Chi Minh City', 10.775010, 106.704950, TRUE, TRUE),
-  ('31111111-1111-4111-8111-000000000223', '21111111-1111-4111-8111-000000000110', 2, 'Pizza 4P''s Thao Dien', '02836229989', 'thaodien@pizza4ps.com', 4.7, ARRAY['https://images.unsplash.com/photo-1601925260360-6346ee8349eb?auto=format&fit=crop&w=900&q=80'], '151B Nguyen Van Huong', 'Thao Dien', 'Thu Duc City', 'Ho Chi Minh City', 10.802320, 106.735820, FALSE, TRUE),
-  ('31111111-1111-4111-8111-000000000224', '21111111-1111-4111-8111-000000000110', 3, 'Pizza 4P''s Phu My Hung', '02836229990', 'phumyhung@pizza4ps.com', 4.6, ARRAY['https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=900&q=80'], '10-12 Crescent Mall', 'Tan Phu', 'District 7', 'Ho Chi Minh City', 10.728950, 106.716500, FALSE, TRUE)
+  ('31111111-1111-4111-8111-000000000201', '21111111-1111-4111-8111-000000000101', 1, 'Lotte Mart District 1', '02836223344', 'd1@lottefoodhall.vn', 4.5, ARRAY['https://cmstest.lottemallwestlakehanoi.vn/storage/main-page/images/2b57fc1614ec5c8669c075c8a4255ff444cf6b24.jpg'], '469 Le Loi', 'Ben Thanh', 'District 1', 'Ho Chi Minh City', 10.775658, 106.700423, TRUE, TRUE),
+  ('31111111-1111-4111-8111-000000000202', '21111111-1111-4111-8111-000000000101', 2, 'Lotte Mart District 7', '02837710011', 'd7@lottefoodhall.vn', 4.4, ARRAY['https://static1.cafeland.vn/cafelandData/upload/tintuc/thitruong/2023/09/tuan-03/moi-khai-truong-tap-doan-lotte-da-muon-gia-han-thoi-han-hoat-dong-trung-tam-thuong-mai-lon-nhat-nuoc-hua-se-mo-rong-dau-tu-tai-viet-nam-1695466869.jpg'], '485 Nguyen Thi Thap', 'Tan Phong', 'District 7', 'Ho Chi Minh City', 10.732620, 106.721450, FALSE, TRUE),
+  ('31111111-1111-4111-8111-000000000203', '21111111-1111-4111-8111-000000000101', 3, 'Lotte Mart Thu Duc', '02838966000', 'thuduc@lottefoodhall.vn', 4.3, ARRAY['https://datvinhtien.vn/Data/Sites/1/Product/63/1.jpg'], '21 Vo Van Ngan', 'Linh Chieu', 'Thu Duc City', 'Ho Chi Minh City', 10.851460, 106.758800, FALSE, TRUE),
+  ('31111111-1111-4111-8111-000000000204', '21111111-1111-4111-8111-000000000102', 1, 'KFC Nguyen Trai', '19006886', 'nguyentrai@kfcvietnam.vn', 4.6, ARRAY['https://tuyendung.kfcvietnam.com.vn/Data/Sites/1/News/78/gioithieu-hinhanh3.jpg'], '192 Nguyen Trai', 'Nguyen Cu Trinh', 'District 1', 'Ho Chi Minh City', 10.764340, 106.692391, TRUE, TRUE),
+  ('31111111-1111-4111-8111-000000000205', '21111111-1111-4111-8111-000000000102', 2, 'KFC Nguyen Dinh Chieu', '19006886', 'nguyendinhchieu@kfcvietnam.vn', 4.4, ARRAY['https://cskh.org.vn/wp-content/uploads/2023/11/chi-nhanh-cua-hang-ga-ran-tren-Toan-quoc-.webp'], '189 Nguyen Dinh Chieu', 'Ward 5', 'District 3', 'Ho Chi Minh City', 10.784520, 106.688210, FALSE, TRUE),
+  ('31111111-1111-4111-8111-000000000206', '21111111-1111-4111-8111-000000000103', 1, 'Jollibee Nguyen Kiem', '19001533', 'nguyenkim@jollibee.vn', 4.5, ARRAY['https://aeonmall-review-rikkei.cdn.vccloud.vn/public/wp/21/editors/LK1Hc1miPlmFWCT7lLxoOlvkH7pbKAjhKq6Fg200.jpg'], '674 Nguyen Kiem', 'Ward 4', 'Go Vap District', 'Ho Chi Minh City', 10.822520, 106.671230, TRUE, TRUE),
+  ('31111111-1111-4111-8111-000000000207', '21111111-1111-4111-8111-000000000103', 2, 'Jollibee Crescent Mall', '19001533', 'crescent@jollibee.vn', 4.4, ARRAY['https://aeonmall-hadong.com.vn/wp-content/uploads/2019/08/dsc01758-750x468.jpg'], '101 Ton Dat Tien', 'Tan Phu', 'District 7', 'Ho Chi Minh City', 10.728340, 106.718430, FALSE, TRUE),
+  ('31111111-1111-4111-8111-000000000208', '21111111-1111-4111-8111-000000000104', 1, 'Busan Bistro Nguyen Hue', '02822997788', 'nguyenhue@busanbistro.vn', 4.7, ARRAY['https://emdoi.vn/wp-content/uploads/2024/09/nha-hang-Busan-Korean-Food-1.webp'], '12 Nguyen Hue', 'Ben Nghe', 'District 1', 'Ho Chi Minh City', 10.773100, 106.705800, TRUE, TRUE),
+  ('31111111-1111-4111-8111-000000000209', '21111111-1111-4111-8111-000000000104', 2, 'Busan Bistro Thao Dien', '02822997789', 'thaodien@busanbistro.vn', 4.6, ARRAY['https://product.hstatic.net/1000275435/product/414986336_382463904297535_5138232533235760266_n_7e855c3a9cdc47ec975a2b08b19cae50_master.jpg'], '49 Quoc Huong', 'Thao Dien', 'Thu Duc City', 'Ho Chi Minh City', 10.801420, 106.730650, FALSE, TRUE),
+  ('31111111-1111-4111-8111-000000000210', '21111111-1111-4111-8111-000000000104', 3, 'Busan Bistro Phu My Hung', '02822997790', 'phumyhung@busanbistro.vn', 4.5, ARRAY['https://emdoi.vn/wp-content/uploads/2024/10/Busan-Korean-Food-nguyen-dinh-chieu-1.webp'], '15 Nguyen Khac Vien', 'Tan Phu', 'District 7', 'Ho Chi Minh City', 10.726800, 106.718900, FALSE, TRUE),
+  ('31111111-1111-4111-8111-000000000211', '21111111-1111-4111-8111-000000000105', 1, 'Sasin Hotpot Nguyen Trai', '02822112211', 'nguyentrai@sasinhotpot.vn', 4.4, ARRAY['https://sasin.vn:8005//Resource/Shared/0df4c98f-4c62-4e82-916a-f1be25b4abe1.jpg'], '120 Nguyen Trai', 'Ben Thanh', 'District 1', 'Ho Chi Minh City', 10.769880, 106.694210, TRUE, TRUE),
+  ('31111111-1111-4111-8111-000000000212', '21111111-1111-4111-8111-000000000105', 2, 'Sasin Hotpot Go Vap', '02822112212', 'govap@sasinhotpot.vn', 4.3, ARRAY['https://sasin.vn:8005//Resource/Shared/a2937325-c063-4911-ba2d-948006c9a4e0.jpg'], '135 Quang Trung', 'Ward 10', 'Go Vap District', 'Ho Chi Minh City', 10.832140, 106.672410, FALSE, TRUE),
+  ('31111111-1111-4111-8111-000000000213', '21111111-1111-4111-8111-000000000106', 1, 'Highlands Coffee Landmark 81', '02862744444', 'landmark81@highlandscoffee.vn', 4.7, ARRAY['https://www.cukcuk.vn/wp-content/uploads/2022/03/dia-diem-mo-chi-nhanh-highland.jpg'], '720A Dien Bien Phu', 'Ward 22', 'Binh Thanh District', 'Ho Chi Minh City', 10.794930, 106.721620, TRUE, TRUE),
+  ('31111111-1111-4111-8111-000000000214', '21111111-1111-4111-8111-000000000106', 2, 'Highlands Coffee Ben Thanh', '02862744445', 'benthanh@highlandscoffee.vn', 4.6, ARRAY['https://chothuenhapho.vn/wp-content/uploads/2022/07/thuong-hieu-highlands-coffee.jpg'], '2 Le Loi', 'Ben Thanh', 'District 1', 'Ho Chi Minh City', 10.772560, 106.698410, FALSE, TRUE),
+  ('31111111-1111-4111-8111-000000000215', '21111111-1111-4111-8111-000000000106', 3, 'Highlands Coffee Tan Son Nhat', '02862744446', 'airport@highlandscoffee.vn', 4.3, ARRAY['https://voz.vn/proxy.php?image=https%3A%2F%2Fphoto.znews.vn%2Fw960%2FUploaded%2Fmrndcqjwq%2F2024_11_11%2F439900233_834342558718755_7774630493963132817_n_2.jpg&hash=ffd0fe5e56c4e9099ebfcfe067993d7e'], '12 Truong Son', 'Ward 2', 'Tan Binh District', 'Ho Chi Minh City', 10.813210, 106.660050, FALSE, TRUE),
+  ('31111111-1111-4111-8111-000000000216', '21111111-1111-4111-8111-000000000107', 1, 'Katinat Dong Khoi', '02866886688', 'dongkhoi@katinat.vn', 4.6, ARRAY['https://upload.urbox.vn/strapi/Gallery_Katinat_1_375aa9eded.jpg'], '91 Dong Khoi', 'Ben Nghe', 'District 1', 'Ho Chi Minh City', 10.776210, 106.704670, TRUE, TRUE),
+  ('31111111-1111-4111-8111-000000000217', '21111111-1111-4111-8111-000000000107', 2, 'Katinat Phu Nhuan', '02866886689', 'phunhuan@katinat.vn', 4.4, ARRAY['https://cafefcdn.com/203337114487263232/2023/4/11/katinat-phu-nhuan-1681185124801-1681185124943230270335.jpeg'], '2 Le Van Sy', 'Ward 11', 'Phu Nhuan District', 'Ho Chi Minh City', 10.790210, 106.675210, FALSE, TRUE),
+  ('31111111-1111-4111-8111-000000000218', '21111111-1111-4111-8111-000000000108', 1, 'Bonchon Vincom Dong Khoi', '02839393939', 'vincom@bonchon.vn', 4.5, ARRAY['https://admin.tamshoppe.vn/Web/Resources/Uploaded/2/images/bai-viet/trang-tri-giang-sinh-lung-linh-nha-hang-Bonchon-2.jpeg'], '72 Le Thanh Ton', 'Ben Nghe', 'District 1', 'Ho Chi Minh City', 10.779340, 106.703560, TRUE, TRUE),
+  ('31111111-1111-4111-8111-000000000219', '21111111-1111-4111-8111-000000000108', 2, 'Bonchon Van Hanh Mall', '02839393938', 'vanhanh@bonchon.vn', 4.3, ARRAY['https://fnb.qdc.vn/pictures/catalog/nha-hang-han-quoc/bon-chon/thiet-ke-thi-cong-nha-hang-bon-chon-19.jpg'], '11 Su Van Hanh', 'Ward 12', 'District 10', 'Ho Chi Minh City', 10.772750, 106.668950, FALSE, TRUE),
+  ('31111111-1111-4111-8111-000000000220', '21111111-1111-4111-8111-000000000109', 1, 'Texas Chicken Le Van Sy', '02838486666', 'levansy@texaschicken.vn', 4.4, ARRAY['https://aeonmall-hadong.com.vn/wp-content/uploads/2019/08/dsc00969-750x468.jpg'], '270 Le Van Sy', 'Ward 1', 'Tan Binh District', 'Ho Chi Minh City', 10.795330, 106.666420, TRUE, TRUE),
+  ('31111111-1111-4111-8111-000000000221', '21111111-1111-4111-8111-000000000109', 2, 'Texas Chicken Di An', '02838486665', 'dian@texaschicken.vn', 4.2, ARRAY['https://aeonmall-binhduongcanary.com.vn/wp-content/uploads/2018/12/img_2003-360x225.jpeg'], '1B National Highway 1K', 'Dong Hoa', 'Di An City', 'Binh Duong Province', 10.904560, 106.772830, FALSE, TRUE),
+  ('31111111-1111-4111-8111-000000000222', '21111111-1111-4111-8111-000000000110', 1, 'Pizza 4P''s Ben Thanh', '02836229988', 'benthanh@pizza4ps.com', 4.8, ARRAY['https://congchungnguyenhue.com/Uploaded/Images/Original/2023/11/03/thiet-ke-nha-hang-pizza4ps-6a_0311135318.png'], '8 Le Thanh Ton', 'Ben Nghe', 'District 1', 'Ho Chi Minh City', 10.775010, 106.704950, TRUE, TRUE),
+  ('31111111-1111-4111-8111-000000000223', '21111111-1111-4111-8111-000000000110', 2, 'Pizza 4P''s Thao Dien', '02836229989', 'thaodien@pizza4ps.com', 4.7, ARRAY['https://vn.yamaha.com/vi/files/4p-2_f52edb9295b757e1b25b0739575ac9f1.jpg'], '151B Nguyen Van Huong', 'Thao Dien', 'Thu Duc City', 'Ho Chi Minh City', 10.802320, 106.735820, FALSE, TRUE),
+  ('31111111-1111-4111-8111-000000000224', '21111111-1111-4111-8111-000000000110', 3, 'Pizza 4P''s Phu My Hung', '02836229990', 'phumyhung@pizza4ps.com', 4.6, ARRAY['https://dltm-cdn.vnptit3.vn/resources/portal//Images/HNI/Import/636500767462410572_restaurant_nh%C3%A0h%C3%A0ng_12052017102712301.jpg'], '10-12 Crescent Mall', 'Tan Phu', 'District 7', 'Ho Chi Minh City', 10.728950, 106.716500, FALSE, TRUE)
 ON CONFLICT (id) DO NOTHING;
 
 -- TAX TEMPLATES AND ASSIGNMENTS FOR SAMPLE RESTAURANTS
@@ -936,16 +979,16 @@ INSERT INTO products (
   is_visible
 )
 VALUES
-  ('51111111-1111-4111-8111-000000000401', '21111111-1111-4111-8111-000000000104', 'Busan Cold Buckwheat Noodles', 'Icy soba-style noodles with house chili vinegar, julienned cucumber and pear.', ARRAY['https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=900&q=80'], 'food', '41111111-1111-4111-8111-000000000310', 95000, TRUE, TRUE, TRUE),
-  ('51111111-1111-4111-8111-000000000402', '21111111-1111-4111-8111-000000000104', 'Spicy Seafood Ramen', 'Piping hot ramen with squid, mussels and Busan-style chili broth.', ARRAY['https://images.unsplash.com/photo-1553621042-f6e147245754?auto=format&fit=crop&w=900&q=80'], 'food', '41111111-1111-4111-8111-000000000310', 105000, TRUE, TRUE, TRUE),
-  ('51111111-1111-4111-8111-000000000403', '21111111-1111-4111-8111-000000000104', 'Kimchi Beef Bibimbap', 'Stone bowl rice with marinated beef, vegetables and gochujang.', ARRAY['https://images.unsplash.com/photo-1575936123452-b67c3203c357?auto=format&fit=crop&w=900&q=80'], 'food', '41111111-1111-4111-8111-000000000311', 99000, TRUE, TRUE, TRUE),
-  ('51111111-1111-4111-8111-000000000404', '21111111-1111-4111-8111-000000000104', 'Bulgogi Rice Bowl', 'Flame-grilled bulgogi beef served over steamed rice and pickles.', ARRAY['https://images.unsplash.com/photo-1525755662778-989d0524087e?auto=format&fit=crop&w=900&q=80'], 'food', '41111111-1111-4111-8111-000000000311', 115000, FALSE, TRUE, TRUE),
-  ('51111111-1111-4111-8111-000000000405', '21111111-1111-4111-8111-000000000104', 'Korean Fried Chicken', 'Crispy soy-garlic chicken glazed to order.', ARRAY['https://images.unsplash.com/photo-1608032362155-c86a8137b0ae?auto=format&fit=crop&w=900&q=80'], 'food', '41111111-1111-4111-8111-000000000311', 129000, TRUE, TRUE, TRUE),
-  ('51111111-1111-4111-8111-000000000406', '21111111-1111-4111-8111-000000000104', 'Cheesy Tteokbokki', 'Rice cakes simmered in gochujang sauce topped with mozzarella.', ARRAY['https://images.unsplash.com/photo-1576402187878-974f70cb8dfd?auto=format&fit=crop&w=900&q=80'], 'food', '41111111-1111-4111-8111-000000000311', 85000, FALSE, TRUE, TRUE),
-  ('51111111-1111-4111-8111-000000000407', '21111111-1111-4111-8111-000000000104', 'Seafood Pancake', 'Crispy haemul pajeon with spring onion and dipping sauce.', ARRAY['https://images.unsplash.com/photo-1504674900247-0877df9cc836?auto=format&fit=crop&w=900&q=80'], 'food', '41111111-1111-4111-8111-000000000311', 99000, FALSE, TRUE, TRUE),
-  ('51111111-1111-4111-8111-000000000408', '21111111-1111-4111-8111-000000000104', 'Yuzu Iced Tea', 'Refreshing yuzu citrus tea shaken with orange pulp.', ARRAY['https://images.unsplash.com/photo-1527169402691-feff5539e52c?auto=format&fit=crop&w=900&q=80'], 'drink', '41111111-1111-4111-8111-000000000312', 65000, TRUE, TRUE, TRUE),
-  ('51111111-1111-4111-8111-000000000409', '21111111-1111-4111-8111-000000000104', 'Plum Sparkling Ade', 'Fizzy Korean maesil plum cooler with shiso leaves.', ARRAY['https://images.unsplash.com/photo-1535556116002-6281ff3e26b1?auto=format&fit=crop&w=900&q=80'], 'drink', '41111111-1111-4111-8111-000000000312', 68000, FALSE, TRUE, TRUE),
-  ('51111111-1111-4111-8111-000000000410', '21111111-1111-4111-8111-000000000104', 'Dalgona Coffee Latte', 'Cold brew latte topped with whipped dalgona foam.', ARRAY['https://images.unsplash.com/photo-1587583774846-9e51e13bee76?auto=format&fit=crop&w=900&q=80'], 'drink', '41111111-1111-4111-8111-000000000312', 72000, TRUE, TRUE, TRUE)
+  ('51111111-1111-4111-8111-000000000401', '21111111-1111-4111-8111-000000000104', 'Busan Cold Buckwheat Noodles', 'Icy soba-style noodles with house chili vinegar, julienned cucumber and pear.', ARRAY['https://live.staticflickr.com/65535/53448879705_aa3a054e76_b.jpg'], 'food', '41111111-1111-4111-8111-000000000310', 95000, TRUE, TRUE, TRUE),
+  ('51111111-1111-4111-8111-000000000402', '21111111-1111-4111-8111-000000000104', 'Spicy Seafood Ramen', 'Piping hot ramen with squid, mussels and Busan-style chili broth.', ARRAY['https://i.redd.it/c06vx9t0me1c1.jpg'], 'food', '41111111-1111-4111-8111-000000000310', 105000, TRUE, TRUE, TRUE),
+  ('51111111-1111-4111-8111-000000000403', '21111111-1111-4111-8111-000000000104', 'Kimchi Beef Bibimbap', 'Stone bowl rice with marinated beef, vegetables and gochujang.', ARRAY['https://media.hellofresh.com/f_auto,fl_lossy,q_auto,w_1200/hellofresh_s3/image/korean-beef-bibimbap-4dba0ef9.jpg'], 'food', '41111111-1111-4111-8111-000000000311', 99000, TRUE, TRUE, TRUE),
+  ('51111111-1111-4111-8111-000000000404', '21111111-1111-4111-8111-000000000104', 'Bulgogi Rice Bowl', 'Flame-grilled bulgogi beef served over steamed rice and pickles.', ARRAY['https://beyond-meat-cms-production.s3.us-west-2.amazonaws.com/28b0fb63-31c0-4734-ac01-e37ff57a2ffa.jpg'], 'food', '41111111-1111-4111-8111-000000000311', 115000, FALSE, TRUE, TRUE),
+  ('51111111-1111-4111-8111-000000000405', '21111111-1111-4111-8111-000000000104', 'Korean Fried Chicken', 'Crispy soy-garlic chicken glazed to order.', ARRAY['https://static.hawonkoo.vn/hwk02/images/2023/10/cach-lam-ga-ran-kfc-bang-noi-chien-khong-dau-2.jpg'], 'food', '41111111-1111-4111-8111-000000000311', 129000, TRUE, TRUE, TRUE),
+  ('51111111-1111-4111-8111-000000000406', '21111111-1111-4111-8111-000000000104', 'Cheesy Tteokbokki', 'Rice cakes simmered in gochujang sauce topped with mozzarella.', ARRAY['https://eatdoro.com/cdn/shop/files/Doro_Tteokbokki-Med_03-06-23_80414eaa-3156-4944-ada1-e4ca1a6aca83.png?v=1722088558'], 'food', '41111111-1111-4111-8111-000000000311', 85000, FALSE, TRUE, TRUE),
+  ('51111111-1111-4111-8111-000000000407', '21111111-1111-4111-8111-000000000104', 'Seafood Pancake', 'Crispy haemul pajeon with spring onion and dipping sauce.', ARRAY['https://www.womanblitz.com/images/blog/2020/2021/cq5dam_thumbnail_400.400.png'], 'food', '41111111-1111-4111-8111-000000000311', 99000, FALSE, TRUE, TRUE),
+  ('51111111-1111-4111-8111-000000000408', '21111111-1111-4111-8111-000000000104', 'Yuzu Iced Tea', 'Refreshing yuzu citrus tea shaken with orange pulp.', ARRAY['https://www.yuzuyuzu.cz/fileadmin/_processed_/c/d/csm_yuzu-tea-honey-cold_63b21e5dce.jpg'], 'drink', '41111111-1111-4111-8111-000000000312', 65000, TRUE, TRUE, TRUE),
+  ('51111111-1111-4111-8111-000000000409', '21111111-1111-4111-8111-000000000104', 'Plum Sparkling Ade', 'Fizzy Korean maesil plum cooler with shiso leaves.', ARRAY['https://contents.sixshop.com/thumbnails/uploadedFiles/103270/product/image_1580444018699_750.jpg'], 'drink', '41111111-1111-4111-8111-000000000312', 68000, FALSE, TRUE, TRUE),
+  ('51111111-1111-4111-8111-000000000410', '21111111-1111-4111-8111-000000000104', 'Dalgona Coffee Latte', 'Cold brew latte topped with whipped dalgona foam.', ARRAY['https://thesubversivetable.com/wp-content/uploads/2023/05/Dalgona-Latte-square-scaled.jpg'], 'drink', '41111111-1111-4111-8111-000000000312', 72000, TRUE, TRUE, TRUE)
 ON CONFLICT (id) DO NOTHING;
 
 WITH busan_branch_products AS (
@@ -1114,6 +1157,63 @@ VALUES
   ('83111111-1111-4111-8111-00000000070D', '51111111-1111-4111-8111-000000000407', '81111111-1111-4111-8111-000000000601', 1, 1, TRUE, 1, TRUE),
   ('83111111-1111-4111-8111-00000000070E', '51111111-1111-4111-8111-000000000407', '81111111-1111-4111-8111-000000000602', 0, 3, FALSE, 2, TRUE)
 ON CONFLICT (product_id, group_id) DO NOTHING;
+
+INSERT INTO branch_product_option_items (
+  id,
+  branch_product_id,
+  option_item_id,
+  price_delta,
+  is_active,
+  created_at
+)
+SELECT
+  gen_random_uuid(),
+  bp.id AS branch_product_id,
+  oi.id AS option_item_id,
+  oi.price_delta,
+  TRUE,
+  now()
+FROM branch_products bp
+JOIN product_option_groups pog ON pog.product_id = bp.product_id
+JOIN option_items oi ON oi.group_id = pog.group_id
+WHERE bp.branch_id IN (
+  '31111111-1111-4111-8111-000000000208',  -- Busan Bistro Nguyễn Huệ
+  '31111111-1111-4111-8111-000000000209',  -- Busan Bistro Thảo Điền
+  '31111111-1111-4111-8111-000000000210'   -- Busan Bistro Phú Mỹ Hưng
+)
+AND pog.is_active = TRUE
+AND oi.is_active = TRUE
+ON CONFLICT (branch_product_id, option_item_id) DO NOTHING;
+
+INSERT INTO branch_product_option_groups (
+  id,
+  branch_product_id,
+  option_group_id,
+  min_select,
+  max_select,
+  is_required,
+  display_order,
+  is_active
+)
+SELECT
+  gen_random_uuid(),
+  bp.id,
+  pog.group_id,
+  pog.min_select,
+  pog.max_select,
+  pog.is_required,
+  pog.display_order,
+  TRUE
+FROM branch_products bp
+JOIN product_option_groups pog ON pog.product_id = bp.product_id
+WHERE bp.branch_id IN (
+  '31111111-1111-4111-8111-000000000208',
+  '31111111-1111-4111-8111-000000000209',
+  '31111111-1111-4111-8111-000000000210'
+)
+AND pog.is_active = TRUE
+ON CONFLICT (branch_product_id, option_group_id) DO NOTHING;
+
 
 INSERT INTO combos (
   id,

@@ -466,6 +466,11 @@ async function createProduct(restaurantId, payload = {}) {
         client,
       );
 
+      if (branchProduct?.id) {
+        // eslint-disable-next-line no-await-in-loop
+        await optionsRepository.syncBranchProductOptions(branchProduct.id, product.id, client);
+      }
+
       const inventorySource = inventoryMap.get(assignment.branchId);
       if (branchProduct?.id && inventorySource) {
         const inventoryPayload = { ...inventorySource };
@@ -664,6 +669,13 @@ async function updateProductInventory(restaurantId, branchId, productId, payload
     dayparts: payload.dayparts || null,
   });
 
+  if (assignment?.id) {
+    await optionsRepository.syncBranchProductOptions(
+      assignment.id,
+      assignment.product_id || productId,
+    );
+  }
+
   let inventory = null;
   if (assignment?.id) {
     inventory = await menuRepository.upsertInventory(assignment.id, {
@@ -732,18 +744,55 @@ async function createOptionGroupForProduct(productId, payload = {}) {
       client,
     );
 
+    const branchAssignments = await menuRepository.listBranchAssignmentsForProduct(
+      productId,
+      client,
+    );
+    const branchProductByBranchId = new Map();
+    const branchProductById = new Map();
+
+    for (const assignment of branchAssignments) {
+      if (!assignment?.id) continue;
+      branchProductByBranchId.set(assignment.branch_id, assignment);
+      branchProductById.set(assignment.id, assignment);
+      // eslint-disable-next-line no-await-in-loop
+      await optionsRepository.syncBranchProductOptions(assignment.id, productId, client);
+    }
+
     if (Array.isArray(payload.branchOverrides)) {
       for (const override of payload.branchOverrides) {
-        for (const optionItemId of override.optionItemIds || []) {
+        const rawBranchProductId =
+          override.branchProductId ?? override.branch_product_id ?? null;
+        const rawBranchId =
+          override.branchId ??
+          override.branch_id ??
+          override.branch?.id ??
+          override.branch?.branch_id ??
+          null;
+
+        const branchAssignment =
+          (rawBranchProductId && branchProductById.get(rawBranchProductId)) ||
+          (rawBranchId && branchProductByBranchId.get(rawBranchId));
+
+        if (!branchAssignment?.id) {
+          // eslint-disable-next-line no-continue
+          continue;
+        }
+
+        const optionItemIds = override.optionItemIds ?? override.option_item_ids ?? [];
+        for (const optionItemId of optionItemIds) {
           // eslint-disable-next-line no-await-in-loop
           await optionsRepository.upsertBranchOptionOverride(
             {
-              branchId: override.branchId,
+              branchProductId: branchAssignment.id,
+              branchId: branchAssignment.branch_id,
               productId,
               optionItemId,
-              isAvailable: override.isAvailable !== false,
-              priceDeltaOverride: override.priceDeltaOverride || null,
-              isVisible: override.isVisible !== false,
+              isAvailable: override.isAvailable ?? override.is_available,
+              priceDeltaOverride:
+                override.priceDeltaOverride ?? override.price_delta_override ?? undefined,
+              isVisible: override.isVisible ?? override.is_visible,
+              isActive: override.is_active,
             },
             client,
           );
