@@ -1,222 +1,3 @@
--- -- =========================================
--- -- BẬT EXTENSION UUID
--- -- =========================================
--- CREATE EXTENSION IF NOT EXISTS "pgcrypto";
--- -- =========================================
--- -- 1) NHÀ HÀNG / THƯƠNG HIỆU
--- -- =========================================
--- CREATE TABLE IF NOT EXISTS restaurants (
---   id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
---   owner_id             UUID NOT NULL, 
---   name                 VARCHAR(150) NOT NULL,
---   description          TEXT,
---   about                TEXT,
---   cuisine              VARCHAR(100),                 -- loại ẩm thực chính
---   phone                VARCHAR(50),                  -- hotline/CSKH
---   email                VARCHAR(150),                 -- email CSKH
---   logo                 TEXT[],
---   images               TEXT[],                       -- ảnh thương hiệu
---   is_active            BOOLEAN DEFAULT TRUE,         -- thương hiệu còn hoạt động?
---   avg_branch_rating    NUMERIC(3,2) NOT NULL DEFAULT 0,  -- điểm TB của toàn bộ chi nhánh
---   total_branch_ratings INT NOT NULL DEFAULT 0,          -- số chi nhánh có rating > 0
---   created_at           TIMESTAMP WITH TIME ZONE DEFAULT now(),
---   updated_at           TIMESTAMP WITH TIME ZONE DEFAULT now()
--- );
-
--- CREATE INDEX IF NOT EXISTS idx_restaurants_name     ON restaurants(name);
--- CREATE INDEX IF NOT EXISTS idx_restaurants_cuisine  ON restaurants(cuisine);
--- CREATE INDEX IF NOT EXISTS idx_restaurants_owner    ON restaurants(owner_id);
-
--- -- =========================================
--- -- 2) CHI NHÁNH CỦA THƯƠNG HIỆU
--- -- =========================================
--- CREATE TABLE IF NOT EXISTS restaurant_branches (
---   id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
---   restaurant_id  UUID NOT NULL REFERENCES restaurants(id) ON DELETE CASCADE,
---   branch_number  INT NOT NULL,                 -- mã chi nhánh nội bộ
---   name           VARCHAR(150),                 -- tên hiển thị chi nhánh
---   branch_phone   VARCHAR(50),
---   branch_email   VARCHAR(150),
---   rating         NUMERIC(3,2) DEFAULT 0 CHECK (rating >= 0 AND rating <= 5),
---   images         TEXT[],                       -- hình ảnh riêng của chi nhánh
---   street         VARCHAR(200) NOT NULL,
---   ward           VARCHAR(100),
---   district       VARCHAR(100),
---   city           VARCHAR(100),
---   latitude       NUMERIC(9,6),
---   longitude      NUMERIC(9,6),
---   is_primary     BOOLEAN DEFAULT FALSE,
---   is_open        BOOLEAN DEFAULT FALSE,
---   created_at     TIMESTAMP WITH TIME ZONE DEFAULT now(),
---   updated_at     TIMESTAMP WITH TIME ZONE DEFAULT now(),
---   CONSTRAINT uq_branch_per_restaurant UNIQUE (restaurant_id, branch_number)
--- );
-
--- CREATE INDEX IF NOT EXISTS idx_branches_restaurant   ON restaurant_branches(restaurant_id);
--- CREATE INDEX IF NOT EXISTS idx_branches_city         ON restaurant_branches(city, district);
--- CREATE INDEX IF NOT EXISTS idx_branches_rating       ON restaurant_branches(rating DESC);
--- CREATE INDEX IF NOT EXISTS idx_branches_is_primary   ON restaurant_branches(restaurant_id, is_primary);
-
--- -- ============================================================
--- -- 3) GIỜ MỞ CỬA THEO NGÀY TRONG TUẦN
--- -- ============================================================
--- CREATE TABLE IF NOT EXISTS branch_opening_hours (
---   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
---   branch_id   UUID NOT NULL REFERENCES restaurant_branches(id) ON DELETE CASCADE,
---   day_of_week SMALLINT NOT NULL CHECK (day_of_week BETWEEN 0 AND 6),
---   open_time   TIME,
---   close_time  TIME,
---   is_closed   BOOLEAN NOT NULL DEFAULT FALSE,
---   overnight   BOOLEAN NOT NULL DEFAULT FALSE,
---   created_at  TIMESTAMP WITH TIME ZONE DEFAULT now(),
---   updated_at  TIMESTAMP WITH TIME ZONE DEFAULT now(),
---   CONSTRAINT uq_hours UNIQUE (branch_id, day_of_week)
--- );
-
--- CREATE INDEX IF NOT EXISTS idx_hours_branch ON branch_opening_hours(branch_id, day_of_week);
-
--- -- ============================================================
--- -- 4) GIỜ MỞ CỬA ĐẶC BIỆT (NGÀY LỄ / SỰ KIỆN)
--- -- ============================================================
--- CREATE TABLE IF NOT EXISTS branch_special_hours (
---   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
---   branch_id   UUID NOT NULL REFERENCES restaurant_branches(id) ON DELETE CASCADE,
---   on_date     DATE NOT NULL,
---   open_time   TIME,
---   close_time  TIME,
---   is_closed   BOOLEAN NOT NULL DEFAULT FALSE,
---   overnight   BOOLEAN NOT NULL DEFAULT FALSE,
---   note        VARCHAR(200),
---   created_at  TIMESTAMP WITH TIME ZONE DEFAULT now(),
---   updated_at  TIMESTAMP WITH TIME ZONE DEFAULT now(),
---   CONSTRAINT uq_special UNIQUE (branch_id, on_date)
--- );
-
--- CREATE INDEX IF NOT EXISTS idx_special_hours_branch_date ON branch_special_hours(branch_id, on_date);
-
--- -- ============================================================
--- -- 5) ĐÁNH GIÁ CHI NHÁNH (branch_rating)
--- -- ============================================================
--- CREATE TABLE IF NOT EXISTS branch_rating (
---   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-
---   -- Liên kết đến chi nhánh (branch)
---   branch_id UUID NOT NULL REFERENCES restaurant_branches(id) ON DELETE CASCADE,
-
---   -- Liên kết đến người dùng (từ user-service)
---   user_id UUID NOT NULL,
-
---   -- Liên kết đến đơn hàng (từ order-service)
---   order_id UUID NOT NULL,
-
---   -- Thông tin đánh giá
---   rating_value INT CHECK (rating_value BETWEEN 1 AND 5),
---   comment TEXT,
---   image_url TEXT,
-
---   created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
---   updated_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
-
---   CONSTRAINT uq_branch_rating UNIQUE (branch_id, user_id, order_id)
--- );
-
--- CREATE INDEX IF NOT EXISTS idx_branch_rating_branch  ON branch_rating(branch_id);
--- CREATE INDEX IF NOT EXISTS idx_branch_rating_user    ON branch_rating(user_id);
--- CREATE INDEX IF NOT EXISTS idx_branch_rating_order   ON branch_rating(order_id);
-
--- -- ============================================================
--- -- 6) BẢNG TRUNG BÌNH RATING CHI NHÁNH (branch_rating_avg)
--- -- ============================================================
--- CREATE TABLE IF NOT EXISTS branch_rating_avg (
---   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
---   branch_id UUID NOT NULL UNIQUE REFERENCES restaurant_branches(id) ON DELETE CASCADE,
---   avg_rating NUMERIC(3,2) DEFAULT 0,
---   total_ratings INT DEFAULT 0,
---   last_updated TIMESTAMP WITH TIME ZONE DEFAULT now()
--- );
-
--- -- =========================================
--- -- 7) DANH MỤC SẢN PHẨM
--- -- =========================================
--- CREATE TABLE IF NOT EXISTS categories (
---   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
---   name VARCHAR(100) UNIQUE NOT NULL,      -- Tên danh mục (VD: Lẩu, Đồ uống, Tráng miệng)
---   description TEXT,                       -- Mô tả chi tiết danh mục
---   created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
---   updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
--- );
-
--- -- =========================================
--- -- 8) SẢN PHẨM
--- -- =========================================
--- CREATE TABLE IF NOT EXISTS products (
---   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
---   restaurant_id   UUID NOT NULL REFERENCES restaurants(id) ON DELETE CASCADE,
-
---   -- 🥘 Thông tin sản phẩm
---   title           VARCHAR(200) NOT NULL,         -- Tên món ăn
---   description     TEXT,                          -- Mô tả chi tiết
---   images          TEXT[],                        -- Ảnh sản phẩm
---   type            VARCHAR(50),                   -- Loại (combo, topping, món chính,...)
-
---   -- 🗂️ Danh mục sản phẩm
---   category_id     UUID REFERENCES categories(id) ON DELETE SET NULL, -- Liên kết danh mục
-
---   -- 💰 Giá & Thuế
---   base_price      NUMERIC(12,2) NOT NULL DEFAULT 0,    -- Giá gốc chưa thuế
---   tax_rate        NUMERIC(5,2) DEFAULT 0,              -- Phần trăm thuế (%)
---   tax_amount      NUMERIC(12,2) GENERATED ALWAYS AS (base_price * tax_rate / 100) STORED,  
---   price_with_tax  NUMERIC(12,2) GENERATED ALWAYS AS (base_price + (base_price * tax_rate / 100)) STORED,
-
---   -- ⚙️ Cài đặt khác
---   is_tax_included BOOLEAN DEFAULT FALSE,        -- TRUE nếu base_price đã gồm thuế
---   popular         BOOLEAN DEFAULT FALSE,        -- Sản phẩm phổ biến
---   available       BOOLEAN DEFAULT TRUE,         -- Còn bán hay không
---   is_visible      BOOLEAN DEFAULT TRUE,         -- Ẩn/hiện trên giao diện
-
---   created_at      TIMESTAMP WITH TIME ZONE DEFAULT now(),
---   updated_at      TIMESTAMP WITH TIME ZONE DEFAULT now()
--- );
-
--- CREATE INDEX IF NOT EXISTS idx_products_restaurant ON products(restaurant_id);
--- CREATE INDEX IF NOT EXISTS idx_products_category   ON products(category_id);
--- CREATE INDEX IF NOT EXISTS idx_products_visible    ON products(is_visible);
-
-
--- -- =========================================
--- -- 9) TỒN KHO
--- -- =========================================
--- CREATE TABLE IF NOT EXISTS inventory (
---   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
---   branch_id       UUID NOT NULL REFERENCES restaurant_branches(id) ON DELETE CASCADE,
---   product_id      UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
-
---   -- 📊 Quản lý tồn kho
---   quantity        INT DEFAULT 0,              -- Số lượng còn trong kho
---   reserved_qty    INT DEFAULT 0,              -- Số lượng đang giữ chỗ (chưa thanh toán)
---   min_stock       INT DEFAULT 10,             -- Ngưỡng cảnh báo khi sắp hết
---   last_restock_at TIMESTAMP WITH TIME ZONE,   -- Lần nhập hàng gần nhất
-
---   -- 📅 Giới hạn bán hàng theo ngày
---   daily_limit     INT DEFAULT NULL,           -- Số lượng bán tối đa trong 1 ngày
---   daily_sold      INT DEFAULT 0,              -- Đã bán hôm nay
-
---   -- ⚙️ Trạng thái
---   is_visible      BOOLEAN DEFAULT TRUE,       -- Ẩn sản phẩm khi hết hàng
---   is_active       BOOLEAN DEFAULT TRUE,       -- Đang quản lý tồn kho hay không
-
---   updated_at      TIMESTAMP WITH TIME ZONE DEFAULT now(),
-
---   CONSTRAINT uq_inventory_branch_product UNIQUE (branch_id, product_id)
--- );
-
--- CREATE INDEX IF NOT EXISTS idx_inventory_branch_product ON inventory(branch_id, product_id);
--- CREATE INDEX IF NOT EXISTS idx_inventory_active ON inventory(is_active);
-
--- =====================================================================
--- PRODUCT-SERVICE DDL (PostgreSQL) — WITH TAX SUPPORT
--- =====================================================================
-
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 -- =====================================================================
@@ -304,15 +85,43 @@ CREATE TABLE IF NOT EXISTS branch_special_hours (
 CREATE INDEX IF NOT EXISTS idx_special_hours ON branch_special_hours(branch_id, on_date);
 
 -- =====================================================================
--- 4) CATEGORIES
+-- 4) CATEGORIES (chỉ cấp restaurant)
 -- =====================================================================
 CREATE TABLE IF NOT EXISTS categories (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name VARCHAR(100) UNIQUE NOT NULL,
+  restaurant_id UUID NOT NULL,
+  name VARCHAR(100) NOT NULL,
   description TEXT,
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
   created_at TIMESTAMPTZ DEFAULT now(),
-  updated_at TIMESTAMPTZ DEFAULT now()
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE (restaurant_id, name)
 );
+
+CREATE INDEX IF NOT EXISTS idx_categories_restaurant
+  ON categories(restaurant_id, is_active);
+
+CREATE INDEX IF NOT EXISTS idx_categories_name
+  ON categories(name);
+
+-- =====================================================================
+-- 4.1) BRANCH_CATEGORY_ASSIGNMENTS (N–N)
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS branch_category_assignments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  branch_id UUID NOT NULL,
+  category_id UUID NOT NULL,
+  is_visible BOOLEAN NOT NULL DEFAULT TRUE,
+  is_active  BOOLEAN NOT NULL DEFAULT TRUE,
+  display_order INT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE (branch_id, category_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_branch_cat_assign
+  ON branch_category_assignments(branch_id, is_active, is_visible);
+
 
 -- =====================================================================
 -- 5) TAX: MASTER + CALENDAR + ASSIGNMENTS (N-N)
@@ -801,6 +610,582 @@ CREATE TABLE IF NOT EXISTS outbox (
 );
 CREATE INDEX IF NOT EXISTS idx_outbox_agg       ON outbox(aggregate_type, aggregate_id);
 CREATE INDEX IF NOT EXISTS idx_outbox_processed ON outbox(processed);
+
+-- =====================================================================
+-- SAMPLE RESTAURANT DATASET FOR LOCAL DEVELOPMENT
+-- =====================================================================
+
+INSERT INTO restaurants (
+  id,
+  owner_user_id,
+  name,
+  description,
+  about,
+  cuisine,
+  phone,
+  email,
+  logo,
+  images
+)
+VALUES
+  ('21111111-1111-4111-8111-000000000101', '11111111-1111-4111-8111-000000000101', 'Lotte Mart Food Hall', 'Korean fusion food court featuring signature dishes from Lotte Mart.', 'Curated stalls serving trending Korean comfort food, desserts and beverages throughout the day.', 'Korean Fusion', '02836223344', 'contact@lottefoodhall.vn', ARRAY['https://upload.wikimedia.org/wikipedia/commons/4/4d/Lotte_logo.svg'], ARRAY['https://upload.wikimedia.org/wikipedia/commons/1/15/Lotte_Mart_Vietnam.jpg','https://images.unsplash.com/photo-1504674900247-0877df9cc836?auto=format&fit=crop&w=900&q=80']),
+  ('21111111-1111-4111-8111-000000000102', '11111111-1111-4111-8111-000000000102', 'KFC Vietnam', 'Kentucky Fried Chicken quick service restaurants across Vietnam.', 'Serving Original Recipe chicken, burgers and sides prepared fresh in store.', 'American Fast Food', '19006886', 'support@kfcvietnam.vn', ARRAY['https://upload.wikimedia.org/wikipedia/commons/b/bf/KFC_logo.svg'], ARRAY['https://upload.wikimedia.org/wikipedia/commons/7/7d/KFC_Restaurant.jpg','https://images.unsplash.com/photo-1606755962773-0e7d1c9a5ddc?auto=format&fit=crop&w=900&q=80']),
+  ('21111111-1111-4111-8111-000000000103', '11111111-1111-4111-8111-000000000103', 'Jollibee Vietnam', 'Philippines born quick service restaurant famous for fried chicken and sweet-style spaghetti.', 'Bright, family-friendly dining rooms with rice meals, burgers and desserts loved across Vietnam.', 'Filipino Fast Food', '19001533', 'hello@jollibee.vn', ARRAY['https://upload.wikimedia.org/wikipedia/en/5/5a/Jollibee_logo.svg'], ARRAY['https://upload.wikimedia.org/wikipedia/commons/1/1e/Jollibee_store.jpg','https://images.unsplash.com/photo-1586816879360-954c3d0262a4?auto=format&fit=crop&w=900&q=80']),
+  ('21111111-1111-4111-8111-000000000104', '11111111-1111-4111-8111-000000000104', 'Busan Bistro', 'Modern Korean dining inspired by the coastal flavors of Busan.', 'Seasonal menu crafted with handmade broths, cold noodles and street food favourites.', 'Korean Casual Dining', '02822997788', 'hello@busanbistro.vn', ARRAY['https://upload.wikimedia.org/wikipedia/commons/5/5f/Korean_food_logo.png'], ARRAY['https://images.unsplash.com/photo-1525755662778-989d0524087e?auto=format&fit=crop&w=900&q=80','https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=900&q=80']),
+  ('21111111-1111-4111-8111-000000000105', '11111111-1111-4111-8111-000000000105', 'Sasin Hotpot', 'Thai and Vietnamese style hotpot chain known for rich broths and affordable combos.', 'Comfortable social dining with refillable toppings, handmade sauces and seasonal seafood.', 'Hotpot & Thai Street Food', '02822112211', 'cskh@sasinhotpot.vn', ARRAY['https://sasin.vn/wp-content/uploads/2020/05/logo-sasin.png'], ARRAY['https://sasin.vn/wp-content/uploads/2020/05/lau-sasin.jpg','https://images.unsplash.com/photo-1525755662778-989d0524087e?auto=format&fit=crop&w=900&q=80']),
+  ('21111111-1111-4111-8111-000000000106', '11111111-1111-4111-8111-000000000106', 'Highlands Coffee', 'Vietnamese coffeehouse brand serving robusta-based drinks and bakery treats.', 'Spaces designed for casual meetings with signature phin coffee, teas and light meals.', 'Coffeehouse', '02862744444', 'contact@highlandscoffee.vn', ARRAY['https://upload.wikimedia.org/wikipedia/commons/4/4f/Highlands_Coffee_logo.svg'], ARRAY['https://upload.wikimedia.org/wikipedia/commons/d/dc/Highlands_Coffee_in_HCMC.jpg','https://images.unsplash.com/photo-1504674900247-0877df9cc836?auto=format&fit=crop&w=900&q=80']),
+  ('21111111-1111-4111-8111-000000000107', '11111111-1111-4111-8111-000000000107', 'Katinat Saigon Kafe', 'Local lifestyle cafe spotlighting specialty drinks and handcrafted pastries.', 'Boutique Saigon-inspired interiors pairing cold brew, milk tea and modern brunch plates.', 'Cafe & Bakery', '02866886688', 'hello@katinat.vn', ARRAY['https://katinat.vn/wp-content/uploads/2023/05/katinat-logo.png'], ARRAY['https://katinat.vn/wp-content/uploads/2023/05/katinat-store.jpg','https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?auto=format&fit=crop&w=900&q=80']),
+  ('21111111-1111-4111-8111-000000000108', '11111111-1111-4111-8111-000000000108', 'Bonchon Chicken', 'Korean fried chicken chain famous for double-fried crunchy wings.', 'Serving soy garlic and spicy chicken, bibimbap and street snacks in a contemporary setting.', 'Korean Fried Chicken', '02839393939', 'support@bonchon.vn', ARRAY['https://upload.wikimedia.org/wikipedia/commons/7/72/Bonchon_Logo.svg'], ARRAY['https://upload.wikimedia.org/wikipedia/commons/9/9f/Bonchon_Chicken.jpg','https://images.unsplash.com/photo-1604908177086-d91f20d23e2d?auto=format&fit=crop&w=900&q=80']),
+  ('21111111-1111-4111-8111-000000000109', '11111111-1111-4111-8111-000000000109', 'Texas Chicken', 'American fried chicken franchise serving hand-battered chicken and honey butter biscuits.', 'Bold flavors, hearty sides and quick service dining for families on the go.', 'American Fast Food', '02838486666', 'care@texaschicken.vn', ARRAY['https://upload.wikimedia.org/wikipedia/en/4/4a/Texas_Chicken_logo.svg'], ARRAY['https://upload.wikimedia.org/wikipedia/commons/8/8e/Texas_Chicken_store.jpg','https://images.unsplash.com/photo-1571091718767-18b5b1457add?auto=format&fit=crop&w=900&q=80']),
+  ('21111111-1111-4111-8111-000000000110', '11111111-1111-4111-8111-000000000110', 'Pizza 4P''s', 'Artisanal pizza restaurant famous for house-made cheese and farm to table ingredients.', 'Japanese founders crafting Neapolitan-style pizzas, pasta and sharing plates.', 'Artisan Pizza', '02836229988', 'hello@pizza4ps.com', ARRAY['https://upload.wikimedia.org/wikipedia/en/8/8e/Pizza_4P%27s_logo.png'], ARRAY['https://upload.wikimedia.org/wikipedia/commons/e/e8/Pizza_4Ps.jpg','https://images.unsplash.com/photo-1548365328-5b6a2a1d5b37?auto=format&fit=crop&w=900&q=80'])
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO restaurant_branches (
+  id,
+  restaurant_id,
+  branch_number,
+  name,
+  branch_phone,
+  branch_email,
+  rating,
+  images,
+  street,
+  ward,
+  district,
+  city,
+  latitude,
+  longitude,
+  is_primary,
+  is_open
+)
+VALUES
+  ('31111111-1111-4111-8111-000000000201', '21111111-1111-4111-8111-000000000101', 1, 'Lotte Mart District 1', '02836223344', 'd1@lottefoodhall.vn', 4.5, ARRAY['https://images.unsplash.com/photo-1525755662778-989d0524087e?auto=format&fit=crop&w=900&q=80'], '469 Le Loi', 'Ben Thanh', 'District 1', 'Ho Chi Minh City', 10.775658, 106.700423, TRUE, TRUE),
+  ('31111111-1111-4111-8111-000000000202', '21111111-1111-4111-8111-000000000101', 2, 'Lotte Mart District 7', '02837710011', 'd7@lottefoodhall.vn', 4.4, ARRAY['https://images.unsplash.com/photo-1589118949245-7d38baf380d6?auto=format&fit=crop&w=900&q=80'], '485 Nguyen Thi Thap', 'Tan Phong', 'District 7', 'Ho Chi Minh City', 10.732620, 106.721450, FALSE, TRUE),
+  ('31111111-1111-4111-8111-000000000203', '21111111-1111-4111-8111-000000000101', 3, 'Lotte Mart Thu Duc', '02838966000', 'thuduc@lottefoodhall.vn', 4.3, ARRAY['https://images.unsplash.com/photo-1555992336-cbf3c095cf1d?auto=format&fit=crop&w=900&q=80'], '21 Vo Van Ngan', 'Linh Chieu', 'Thu Duc City', 'Ho Chi Minh City', 10.851460, 106.758800, FALSE, TRUE),
+  ('31111111-1111-4111-8111-000000000204', '21111111-1111-4111-8111-000000000102', 1, 'KFC Nguyen Trai', '19006886', 'nguyentrai@kfcvietnam.vn', 4.6, ARRAY['https://images.unsplash.com/photo-1585238342028-4bbc894c2921?auto=format&fit=crop&w=900&q=80'], '192 Nguyen Trai', 'Nguyen Cu Trinh', 'District 1', 'Ho Chi Minh City', 10.764340, 106.692391, TRUE, TRUE),
+  ('31111111-1111-4111-8111-000000000205', '21111111-1111-4111-8111-000000000102', 2, 'KFC Nguyen Dinh Chieu', '19006886', 'nguyendinhchieu@kfcvietnam.vn', 4.4, ARRAY['https://images.unsplash.com/photo-1525088553748-01d6e210e00b?auto=format&fit=crop&w=900&q=80'], '189 Nguyen Dinh Chieu', 'Ward 5', 'District 3', 'Ho Chi Minh City', 10.784520, 106.688210, FALSE, TRUE),
+  ('31111111-1111-4111-8111-000000000206', '21111111-1111-4111-8111-000000000103', 1, 'Jollibee Nguyen Kiem', '19001533', 'nguyenkim@jollibee.vn', 4.5, ARRAY['https://images.unsplash.com/photo-1620277369441-196244f14c07?auto=format&fit=crop&w=900&q=80'], '674 Nguyen Kiem', 'Ward 4', 'Go Vap District', 'Ho Chi Minh City', 10.822520, 106.671230, TRUE, TRUE),
+  ('31111111-1111-4111-8111-000000000207', '21111111-1111-4111-8111-000000000103', 2, 'Jollibee Crescent Mall', '19001533', 'crescent@jollibee.vn', 4.4, ARRAY['https://images.unsplash.com/photo-1498654896293-37aacf113fd9?auto=format&fit=crop&w=900&q=80'], '101 Ton Dat Tien', 'Tan Phu', 'District 7', 'Ho Chi Minh City', 10.728340, 106.718430, FALSE, TRUE),
+  ('31111111-1111-4111-8111-000000000208', '21111111-1111-4111-8111-000000000104', 1, 'Busan Bistro Nguyen Hue', '02822997788', 'nguyenhue@busanbistro.vn', 4.7, ARRAY['https://images.unsplash.com/photo-1525755662778-989d0524087e?auto=format&fit=crop&w=900&q=80'], '12 Nguyen Hue', 'Ben Nghe', 'District 1', 'Ho Chi Minh City', 10.773100, 106.705800, TRUE, TRUE),
+  ('31111111-1111-4111-8111-000000000209', '21111111-1111-4111-8111-000000000104', 2, 'Busan Bistro Thao Dien', '02822997789', 'thaodien@busanbistro.vn', 4.6, ARRAY['https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=900&q=80'], '49 Quoc Huong', 'Thao Dien', 'Thu Duc City', 'Ho Chi Minh City', 10.801420, 106.730650, FALSE, TRUE),
+  ('31111111-1111-4111-8111-000000000210', '21111111-1111-4111-8111-000000000104', 3, 'Busan Bistro Phu My Hung', '02822997790', 'phumyhung@busanbistro.vn', 4.5, ARRAY['https://images.unsplash.com/photo-1504674900247-0877df9cc836?auto=format&fit=crop&w=900&q=80'], '15 Nguyen Khac Vien', 'Tan Phu', 'District 7', 'Ho Chi Minh City', 10.726800, 106.718900, FALSE, TRUE),
+  ('31111111-1111-4111-8111-000000000211', '21111111-1111-4111-8111-000000000105', 1, 'Sasin Hotpot Nguyen Trai', '02822112211', 'nguyentrai@sasinhotpot.vn', 4.4, ARRAY['https://images.unsplash.com/photo-1525755662778-989d0524087e?auto=format&fit=crop&w=900&q=80'], '120 Nguyen Trai', 'Ben Thanh', 'District 1', 'Ho Chi Minh City', 10.769880, 106.694210, TRUE, TRUE),
+  ('31111111-1111-4111-8111-000000000212', '21111111-1111-4111-8111-000000000105', 2, 'Sasin Hotpot Go Vap', '02822112212', 'govap@sasinhotpot.vn', 4.3, ARRAY['https://images.unsplash.com/photo-1589308078050-002c61c2d6b6?auto=format&fit=crop&w=900&q=80'], '135 Quang Trung', 'Ward 10', 'Go Vap District', 'Ho Chi Minh City', 10.832140, 106.672410, FALSE, TRUE),
+  ('31111111-1111-4111-8111-000000000213', '21111111-1111-4111-8111-000000000106', 1, 'Highlands Coffee Landmark 81', '02862744444', 'landmark81@highlandscoffee.vn', 4.7, ARRAY['https://images.unsplash.com/photo-1527169402691-feff5539e52c?auto=format&fit=crop&w=900&q=80'], '720A Dien Bien Phu', 'Ward 22', 'Binh Thanh District', 'Ho Chi Minh City', 10.794930, 106.721620, TRUE, TRUE),
+  ('31111111-1111-4111-8111-000000000214', '21111111-1111-4111-8111-000000000106', 2, 'Highlands Coffee Ben Thanh', '02862744445', 'benthanh@highlandscoffee.vn', 4.6, ARRAY['https://images.unsplash.com/photo-1509042239860-f550ce710b93?auto=format&fit=crop&w=900&q=80'], '2 Le Loi', 'Ben Thanh', 'District 1', 'Ho Chi Minh City', 10.772560, 106.698410, FALSE, TRUE),
+  ('31111111-1111-4111-8111-000000000215', '21111111-1111-4111-8111-000000000106', 3, 'Highlands Coffee Tan Son Nhat', '02862744446', 'airport@highlandscoffee.vn', 4.3, ARRAY['https://images.unsplash.com/photo-1521017432531-fbd92d768814?auto=format&fit=crop&w=900&q=80'], '12 Truong Son', 'Ward 2', 'Tan Binh District', 'Ho Chi Minh City', 10.813210, 106.660050, FALSE, TRUE),
+  ('31111111-1111-4111-8111-000000000216', '21111111-1111-4111-8111-000000000107', 1, 'Katinat Dong Khoi', '02866886688', 'dongkhoi@katinat.vn', 4.6, ARRAY['https://images.unsplash.com/photo-1470337458703-46ad1756a187?auto=format&fit=crop&w=900&q=80'], '91 Dong Khoi', 'Ben Nghe', 'District 1', 'Ho Chi Minh City', 10.776210, 106.704670, TRUE, TRUE),
+  ('31111111-1111-4111-8111-000000000217', '21111111-1111-4111-8111-000000000107', 2, 'Katinat Phu Nhuan', '02866886689', 'phunhuan@katinat.vn', 4.4, ARRAY['https://images.unsplash.com/photo-1485808191679-5f86510681a2?auto=format&fit=crop&w=900&q=80'], '2 Le Van Sy', 'Ward 11', 'Phu Nhuan District', 'Ho Chi Minh City', 10.790210, 106.675210, FALSE, TRUE),
+  ('31111111-1111-4111-8111-000000000218', '21111111-1111-4111-8111-000000000108', 1, 'Bonchon Vincom Dong Khoi', '02839393939', 'vincom@bonchon.vn', 4.5, ARRAY['https://images.unsplash.com/photo-1608032362155-c86a8137b0ae?auto=format&fit=crop&w=900&q=80'], '72 Le Thanh Ton', 'Ben Nghe', 'District 1', 'Ho Chi Minh City', 10.779340, 106.703560, TRUE, TRUE),
+  ('31111111-1111-4111-8111-000000000219', '21111111-1111-4111-8111-000000000108', 2, 'Bonchon Van Hanh Mall', '02839393938', 'vanhanh@bonchon.vn', 4.3, ARRAY['https://images.unsplash.com/photo-1585238342028-4bbc894c2921?auto=format&fit=crop&w=900&q=80'], '11 Su Van Hanh', 'Ward 12', 'District 10', 'Ho Chi Minh City', 10.772750, 106.668950, FALSE, TRUE),
+  ('31111111-1111-4111-8111-000000000220', '21111111-1111-4111-8111-000000000109', 1, 'Texas Chicken Le Van Sy', '02838486666', 'levansy@texaschicken.vn', 4.4, ARRAY['https://images.unsplash.com/photo-1571091718767-18b5b1457add?auto=format&fit=crop&w=900&q=80'], '270 Le Van Sy', 'Ward 1', 'Tan Binh District', 'Ho Chi Minh City', 10.795330, 106.666420, TRUE, TRUE),
+  ('31111111-1111-4111-8111-000000000221', '21111111-1111-4111-8111-000000000109', 2, 'Texas Chicken Di An', '02838486665', 'dian@texaschicken.vn', 4.2, ARRAY['https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=900&q=80'], '1B National Highway 1K', 'Dong Hoa', 'Di An City', 'Binh Duong Province', 10.904560, 106.772830, FALSE, TRUE),
+  ('31111111-1111-4111-8111-000000000222', '21111111-1111-4111-8111-000000000110', 1, 'Pizza 4P''s Ben Thanh', '02836229988', 'benthanh@pizza4ps.com', 4.8, ARRAY['https://images.unsplash.com/photo-1548365328-5b6a2a1d5b37?auto=format&fit=crop&w=900&q=80'], '8 Le Thanh Ton', 'Ben Nghe', 'District 1', 'Ho Chi Minh City', 10.775010, 106.704950, TRUE, TRUE),
+  ('31111111-1111-4111-8111-000000000223', '21111111-1111-4111-8111-000000000110', 2, 'Pizza 4P''s Thao Dien', '02836229989', 'thaodien@pizza4ps.com', 4.7, ARRAY['https://images.unsplash.com/photo-1601925260360-6346ee8349eb?auto=format&fit=crop&w=900&q=80'], '151B Nguyen Van Huong', 'Thao Dien', 'Thu Duc City', 'Ho Chi Minh City', 10.802320, 106.735820, FALSE, TRUE),
+  ('31111111-1111-4111-8111-000000000224', '21111111-1111-4111-8111-000000000110', 3, 'Pizza 4P''s Phu My Hung', '02836229990', 'phumyhung@pizza4ps.com', 4.6, ARRAY['https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=900&q=80'], '10-12 Crescent Mall', 'Tan Phu', 'District 7', 'Ho Chi Minh City', 10.728950, 106.716500, FALSE, TRUE)
+ON CONFLICT (id) DO NOTHING;
+
+-- TAX TEMPLATES AND ASSIGNMENTS FOR SAMPLE RESTAURANTS
+INSERT INTO tax_templates (id, code, name, description)
+VALUES
+  ('81111111-1111-4111-8111-000000000501', 'VAT7_DEFAULT', 'VAT 7% Standard', 'Standard VAT applied to dine-in and delivery orders.'),
+  ('81111111-1111-4111-8111-000000000502', 'VAT10_BEVERAGE', 'Beverage VAT 10%', 'Higher VAT for premium beverages and cocktails.'),
+  ('81111111-1111-4111-8111-000000000503', 'VAT0_PROMO', 'Promotional VAT Holiday', 'Limited-time zero VAT promotion.')
+ON CONFLICT (code) DO NOTHING;
+
+INSERT INTO restaurant_tax_assignments (
+  id,
+  restaurant_id,
+  tax_template_id,
+  rate_percent,
+  is_default,
+  calendar_id,
+  start_at,
+  end_at,
+  priority,
+  is_active
+)
+VALUES
+  ('92111111-1111-4111-8111-000000000601', '21111111-1111-4111-8111-000000000104', '81111111-1111-4111-8111-000000000501', 7.00, TRUE, NULL, NULL, NULL, 10, TRUE)
+ON CONFLICT (restaurant_id, tax_template_id) DO UPDATE
+  SET rate_percent = EXCLUDED.rate_percent,
+      is_default = EXCLUDED.is_default,
+      calendar_id = EXCLUDED.calendar_id,
+      start_at = EXCLUDED.start_at,
+      end_at = EXCLUDED.end_at,
+      priority = EXCLUDED.priority,
+      is_active = EXCLUDED.is_active,
+      updated_at = now();
+
+INSERT INTO branch_tax_assignments (
+  id,
+  branch_id,
+  tax_template_id,
+  rate_percent,
+  is_default,
+  calendar_id,
+  start_at,
+  end_at,
+  priority,
+  is_active
+)
+VALUES
+  ('93111111-1111-4111-8111-000000000701', '31111111-1111-4111-8111-000000000208', '81111111-1111-4111-8111-000000000501', 7.00, TRUE, NULL, NULL, NULL, 10, TRUE),
+  ('93111111-1111-4111-8111-000000000702', '31111111-1111-4111-8111-000000000209', '81111111-1111-4111-8111-000000000501', 7.00, TRUE, NULL, NULL, NULL, 10, TRUE),
+  ('93111111-1111-4111-8111-000000000703', '31111111-1111-4111-8111-000000000210', '81111111-1111-4111-8111-000000000501', 7.00, TRUE, NULL, NULL, NULL, 10, TRUE),
+  ('93111111-1111-4111-8111-000000000704', '31111111-1111-4111-8111-000000000210', '81111111-1111-4111-8111-000000000503', 0.00, FALSE, NULL, TIMESTAMPTZ '2025-03-01 00:00:00+07', TIMESTAMPTZ '2025-03-31 23:59:59+07', 5, TRUE)
+ON CONFLICT (branch_id, tax_template_id) DO UPDATE
+  SET rate_percent = EXCLUDED.rate_percent,
+      is_default = EXCLUDED.is_default,
+      calendar_id = EXCLUDED.calendar_id,
+      start_at = EXCLUDED.start_at,
+      end_at = EXCLUDED.end_at,
+      priority = EXCLUDED.priority,
+      is_active = EXCLUDED.is_active,
+      updated_at = now();
+
+INSERT INTO branch_product_tax_overrides (
+  id,
+  branch_id,
+  product_id,
+  tax_template_id,
+  rate_percent,
+  start_at,
+  end_at,
+  priority,
+  is_active
+)
+VALUES
+  ('94111111-1111-4111-8111-000000000801', '31111111-1111-4111-8111-000000000208', '51111111-1111-4111-8111-000000000408', '81111111-1111-4111-8111-000000000502', 10.00, NULL, NULL, 30, TRUE),
+  ('94111111-1111-4111-8111-000000000802', '31111111-1111-4111-8111-000000000208', '51111111-1111-4111-8111-000000000409', '81111111-1111-4111-8111-000000000502', 10.00, NULL, NULL, 30, TRUE),
+  ('94111111-1111-4111-8111-000000000803', '31111111-1111-4111-8111-000000000208', '51111111-1111-4111-8111-000000000410', '81111111-1111-4111-8111-000000000502', 10.00, NULL, NULL, 30, TRUE),
+  ('94111111-1111-4111-8111-000000000804', '31111111-1111-4111-8111-000000000210', '51111111-1111-4111-8111-000000000410', '81111111-1111-4111-8111-000000000503', 0.00, TIMESTAMPTZ '2025-03-01 00:00:00+07', TIMESTAMPTZ '2025-03-31 23:59:59+07', 4, TRUE)
+ON CONFLICT (branch_id, product_id, tax_template_id) DO UPDATE
+  SET rate_percent = EXCLUDED.rate_percent,
+      start_at = EXCLUDED.start_at,
+      end_at = EXCLUDED.end_at,
+      priority = EXCLUDED.priority,
+      is_active = EXCLUDED.is_active,
+      updated_at = now();
+
+WITH target_branches(branch_id) AS (
+  VALUES
+    ('31111111-1111-4111-8111-000000000201'::uuid),
+    ('31111111-1111-4111-8111-000000000202'::uuid),
+    ('31111111-1111-4111-8111-000000000203'::uuid),
+    ('31111111-1111-4111-8111-000000000204'::uuid),
+    ('31111111-1111-4111-8111-000000000205'::uuid),
+    ('31111111-1111-4111-8111-000000000206'::uuid),
+    ('31111111-1111-4111-8111-000000000207'::uuid),
+    ('31111111-1111-4111-8111-000000000208'::uuid),
+    ('31111111-1111-4111-8111-000000000209'::uuid),
+    ('31111111-1111-4111-8111-000000000210'::uuid),
+    ('31111111-1111-4111-8111-000000000211'::uuid),
+    ('31111111-1111-4111-8111-000000000212'::uuid),
+    ('31111111-1111-4111-8111-000000000213'::uuid),
+    ('31111111-1111-4111-8111-000000000214'::uuid),
+    ('31111111-1111-4111-8111-000000000215'::uuid),
+    ('31111111-1111-4111-8111-000000000216'::uuid),
+    ('31111111-1111-4111-8111-000000000217'::uuid),
+    ('31111111-1111-4111-8111-000000000218'::uuid),
+    ('31111111-1111-4111-8111-000000000219'::uuid),
+    ('31111111-1111-4111-8111-000000000220'::uuid),
+    ('31111111-1111-4111-8111-000000000221'::uuid),
+    ('31111111-1111-4111-8111-000000000222'::uuid),
+    ('31111111-1111-4111-8111-000000000223'::uuid),
+    ('31111111-1111-4111-8111-000000000224'::uuid)
+)
+INSERT INTO branch_opening_hours (branch_id, day_of_week, open_time, close_time, is_closed, overnight)
+SELECT
+  b.branch_id,
+  gs,
+  CASE WHEN gs IN (5, 6) THEN TIME '08:30' ELSE TIME '08:00' END,
+  CASE WHEN gs IN (5, 6) THEN TIME '23:00' ELSE TIME '22:00' END,
+  FALSE,
+  FALSE
+FROM target_branches b
+CROSS JOIN generate_series(0, 6) AS gs
+ON CONFLICT (branch_id, day_of_week) DO UPDATE
+  SET open_time = EXCLUDED.open_time,
+      close_time = EXCLUDED.close_time,
+      is_closed = FALSE,
+      overnight = FALSE,
+      updated_at = now();
+
+INSERT INTO categories (id, restaurant_id, name, description)
+VALUES
+  ('41111111-1111-4111-8111-000000000301', '21111111-1111-4111-8111-000000000101', 'Korean BBQ Classics', 'Signature grilled meats and hearty mains.'),
+  ('41111111-1111-4111-8111-000000000302', '21111111-1111-4111-8111-000000000101', 'Street Food Favorites', 'Trending snacks and fast comfort dishes.'),
+  ('41111111-1111-4111-8111-000000000303', '21111111-1111-4111-8111-000000000101', 'Sweet Treats', 'Desserts, bingsu and baked goods.'),
+  ('41111111-1111-4111-8111-000000000304', '21111111-1111-4111-8111-000000000102', 'Signature Chicken', 'Original Recipe and spicy fried chicken buckets.'),
+  ('41111111-1111-4111-8111-000000000305', '21111111-1111-4111-8111-000000000102', 'Burgers & Wraps', 'Handheld meals with fries and sides.'),
+  ('41111111-1111-4111-8111-000000000306', '21111111-1111-4111-8111-000000000102', 'Sips & Sides', 'Mashed potatoes, salads and beverages.'),
+  ('41111111-1111-4111-8111-000000000307', '21111111-1111-4111-8111-000000000103', 'Chicken Joy', 'Crispy chicken served with gravy and rice.'),
+  ('41111111-1111-4111-8111-000000000308', '21111111-1111-4111-8111-000000000103', 'Rice Meals', 'Yumburger steaks, palabok and hearty plates.'),
+  ('41111111-1111-4111-8111-000000000309', '21111111-1111-4111-8111-000000000103', 'Desserts & Palabok', 'Sweet pies, halo-halo and party trays.'),
+  ('41111111-1111-4111-8111-000000000310', '21111111-1111-4111-8111-000000000104', 'Noodles', 'Hot and cold noodle bowls from Busan.'),
+  ('41111111-1111-4111-8111-000000000311', '21111111-1111-4111-8111-000000000104', 'Hot Plates', 'Rice bowls, pancakes and shareable mains.'),
+  ('41111111-1111-4111-8111-000000000312', '21111111-1111-4111-8111-000000000104', 'Beverages', 'House-made teas, ades and coffees.'),
+  ('41111111-1111-4111-8111-000000000313', '21111111-1111-4111-8111-000000000105', 'Premium Broths', 'Signature Tom Yum and collagen broths.'),
+  ('41111111-1111-4111-8111-000000000314', '21111111-1111-4111-8111-000000000105', 'Add-on Platters', 'Meats, seafood and vegetables for sharing.'),
+  ('41111111-1111-4111-8111-000000000315', '21111111-1111-4111-8111-000000000105', 'Refreshments', 'Cold drinks to balance the spice.'),
+  ('41111111-1111-4111-8111-000000000316', '21111111-1111-4111-8111-000000000106', 'Phin Coffee', 'Slow-dripped robusta coffee classics.'),
+  ('41111111-1111-4111-8111-000000000317', '21111111-1111-4111-8111-000000000106', 'Tea & Freeze', 'Milk tea, iced tea and blended freeze beverages.'),
+  ('41111111-1111-4111-8111-000000000318', '21111111-1111-4111-8111-000000000106', 'Bakery & Snacks', 'Cakes, croissants and savory bites.'),
+  ('41111111-1111-4111-8111-000000000319', '21111111-1111-4111-8111-000000000107', 'Signature Drinks', 'Best-selling coffee and milk tea creations.'),
+  ('41111111-1111-4111-8111-000000000320', '21111111-1111-4111-8111-000000000107', 'Cold Brew Lab', 'Slow-steeped cold brew menu.'),
+  ('41111111-1111-4111-8111-000000000321', '21111111-1111-4111-8111-000000000107', 'Brunch Bites', 'Savory pastries and light brunch dishes.'),
+  ('41111111-1111-4111-8111-000000000322', '21111111-1111-4111-8111-000000000108', 'Korean Chicken', 'Double-fried chicken with bold sauces.'),
+  ('41111111-1111-4111-8111-000000000323', '21111111-1111-4111-8111-000000000108', 'Rice & Noodles', 'Korean comfort staples beyond chicken.'),
+  ('41111111-1111-4111-8111-000000000324', '21111111-1111-4111-8111-000000000108', 'Appetizers', 'Shareable starters and sides.'),
+  ('41111111-1111-4111-8111-000000000325', '21111111-1111-4111-8111-000000000109', 'Fried Chicken', 'Crispy fried chicken with honey butter biscuits.'),
+  ('41111111-1111-4111-8111-000000000326', '21111111-1111-4111-8111-000000000109', 'Sandwiches', 'Cajun sandwiches and wraps.'),
+  ('41111111-1111-4111-8111-000000000327', '21111111-1111-4111-8111-000000000109', 'Sides & Drinks', 'Fries, coleslaw and fountain drinks.'),
+  ('41111111-1111-4111-8111-000000000328', '21111111-1111-4111-8111-000000000110', 'Artisan Pizza', 'Wood-fired pizzas with house-made cheese.'),
+  ('41111111-1111-4111-8111-000000000329', '21111111-1111-4111-8111-000000000110', 'Pasta & Lasagna', 'Fresh pasta and baked lasagna specialties.'),
+  ('41111111-1111-4111-8111-000000000330', '21111111-1111-4111-8111-000000000110', 'Desserts & Cheese', 'Desserts, tiramisu and premium cheese boards.')
+ON CONFLICT (restaurant_id, name) DO NOTHING;
+
+INSERT INTO branch_category_assignments (branch_id, category_id, is_visible, is_active, display_order)
+VALUES
+  ('31111111-1111-4111-8111-000000000201', '41111111-1111-4111-8111-000000000301', TRUE, TRUE, 1),
+  ('31111111-1111-4111-8111-000000000201', '41111111-1111-4111-8111-000000000302', TRUE, TRUE, 2),
+  ('31111111-1111-4111-8111-000000000201', '41111111-1111-4111-8111-000000000303', TRUE, TRUE, 3),
+  ('31111111-1111-4111-8111-000000000202', '41111111-1111-4111-8111-000000000301', TRUE, TRUE, 1),
+  ('31111111-1111-4111-8111-000000000202', '41111111-1111-4111-8111-000000000302', TRUE, TRUE, 2),
+  ('31111111-1111-4111-8111-000000000202', '41111111-1111-4111-8111-000000000303', TRUE, TRUE, 3),
+  ('31111111-1111-4111-8111-000000000203', '41111111-1111-4111-8111-000000000301', TRUE, TRUE, 1),
+  ('31111111-1111-4111-8111-000000000203', '41111111-1111-4111-8111-000000000302', TRUE, TRUE, 2),
+  ('31111111-1111-4111-8111-000000000203', '41111111-1111-4111-8111-000000000303', TRUE, TRUE, 3),
+  ('31111111-1111-4111-8111-000000000204', '41111111-1111-4111-8111-000000000304', TRUE, TRUE, 1),
+  ('31111111-1111-4111-8111-000000000204', '41111111-1111-4111-8111-000000000305', TRUE, TRUE, 2),
+  ('31111111-1111-4111-8111-000000000204', '41111111-1111-4111-8111-000000000306', TRUE, TRUE, 3),
+  ('31111111-1111-4111-8111-000000000205', '41111111-1111-4111-8111-000000000304', TRUE, TRUE, 1),
+  ('31111111-1111-4111-8111-000000000205', '41111111-1111-4111-8111-000000000305', TRUE, TRUE, 2),
+  ('31111111-1111-4111-8111-000000000205', '41111111-1111-4111-8111-000000000306', TRUE, TRUE, 3),
+  ('31111111-1111-4111-8111-000000000206', '41111111-1111-4111-8111-000000000307', TRUE, TRUE, 1),
+  ('31111111-1111-4111-8111-000000000206', '41111111-1111-4111-8111-000000000308', TRUE, TRUE, 2),
+  ('31111111-1111-4111-8111-000000000206', '41111111-1111-4111-8111-000000000309', TRUE, TRUE, 3),
+  ('31111111-1111-4111-8111-000000000207', '41111111-1111-4111-8111-000000000307', TRUE, TRUE, 1),
+  ('31111111-1111-4111-8111-000000000207', '41111111-1111-4111-8111-000000000308', TRUE, TRUE, 2),
+  ('31111111-1111-4111-8111-000000000207', '41111111-1111-4111-8111-000000000309', TRUE, TRUE, 3),
+  ('31111111-1111-4111-8111-000000000208', '41111111-1111-4111-8111-000000000310', TRUE, TRUE, 1),
+  ('31111111-1111-4111-8111-000000000208', '41111111-1111-4111-8111-000000000311', TRUE, TRUE, 2),
+  ('31111111-1111-4111-8111-000000000208', '41111111-1111-4111-8111-000000000312', TRUE, TRUE, 3),
+  ('31111111-1111-4111-8111-000000000209', '41111111-1111-4111-8111-000000000310', TRUE, TRUE, 1),
+  ('31111111-1111-4111-8111-000000000209', '41111111-1111-4111-8111-000000000311', TRUE, TRUE, 2),
+  ('31111111-1111-4111-8111-000000000209', '41111111-1111-4111-8111-000000000312', TRUE, TRUE, 3),
+  ('31111111-1111-4111-8111-000000000210', '41111111-1111-4111-8111-000000000310', TRUE, TRUE, 1),
+  ('31111111-1111-4111-8111-000000000210', '41111111-1111-4111-8111-000000000311', TRUE, TRUE, 2),
+  ('31111111-1111-4111-8111-000000000210', '41111111-1111-4111-8111-000000000312', TRUE, TRUE, 3),
+  ('31111111-1111-4111-8111-000000000211', '41111111-1111-4111-8111-000000000313', TRUE, TRUE, 1),
+  ('31111111-1111-4111-8111-000000000211', '41111111-1111-4111-8111-000000000314', TRUE, TRUE, 2),
+  ('31111111-1111-4111-8111-000000000211', '41111111-1111-4111-8111-000000000315', TRUE, TRUE, 3),
+  ('31111111-1111-4111-8111-000000000212', '41111111-1111-4111-8111-000000000313', TRUE, TRUE, 1),
+  ('31111111-1111-4111-8111-000000000212', '41111111-1111-4111-8111-000000000314', TRUE, TRUE, 2),
+  ('31111111-1111-4111-8111-000000000212', '41111111-1111-4111-8111-000000000315', TRUE, TRUE, 3),
+  ('31111111-1111-4111-8111-000000000213', '41111111-1111-4111-8111-000000000316', TRUE, TRUE, 1),
+  ('31111111-1111-4111-8111-000000000213', '41111111-1111-4111-8111-000000000317', TRUE, TRUE, 2),
+  ('31111111-1111-4111-8111-000000000213', '41111111-1111-4111-8111-000000000318', TRUE, TRUE, 3),
+  ('31111111-1111-4111-8111-000000000214', '41111111-1111-4111-8111-000000000316', TRUE, TRUE, 1),
+  ('31111111-1111-4111-8111-000000000214', '41111111-1111-4111-8111-000000000317', TRUE, TRUE, 2),
+  ('31111111-1111-4111-8111-000000000214', '41111111-1111-4111-8111-000000000318', TRUE, TRUE, 3),
+  ('31111111-1111-4111-8111-000000000215', '41111111-1111-4111-8111-000000000316', TRUE, TRUE, 1),
+  ('31111111-1111-4111-8111-000000000215', '41111111-1111-4111-8111-000000000317', TRUE, TRUE, 2),
+  ('31111111-1111-4111-8111-000000000215', '41111111-1111-4111-8111-000000000318', TRUE, TRUE, 3),
+  ('31111111-1111-4111-8111-000000000216', '41111111-1111-4111-8111-000000000319', TRUE, TRUE, 1),
+  ('31111111-1111-4111-8111-000000000216', '41111111-1111-4111-8111-000000000320', TRUE, TRUE, 2),
+  ('31111111-1111-4111-8111-000000000216', '41111111-1111-4111-8111-000000000321', TRUE, TRUE, 3),
+  ('31111111-1111-4111-8111-000000000217', '41111111-1111-4111-8111-000000000319', TRUE, TRUE, 1),
+  ('31111111-1111-4111-8111-000000000217', '41111111-1111-4111-8111-000000000320', TRUE, TRUE, 2),
+  ('31111111-1111-4111-8111-000000000217', '41111111-1111-4111-8111-000000000321', TRUE, TRUE, 3),
+  ('31111111-1111-4111-8111-000000000218', '41111111-1111-4111-8111-000000000322', TRUE, TRUE, 1),
+  ('31111111-1111-4111-8111-000000000218', '41111111-1111-4111-8111-000000000323', TRUE, TRUE, 2),
+  ('31111111-1111-4111-8111-000000000218', '41111111-1111-4111-8111-000000000324', TRUE, TRUE, 3),
+  ('31111111-1111-4111-8111-000000000219', '41111111-1111-4111-8111-000000000322', TRUE, TRUE, 1),
+  ('31111111-1111-4111-8111-000000000219', '41111111-1111-4111-8111-000000000323', TRUE, TRUE, 2),
+  ('31111111-1111-4111-8111-000000000219', '41111111-1111-4111-8111-000000000324', TRUE, TRUE, 3),
+  ('31111111-1111-4111-8111-000000000220', '41111111-1111-4111-8111-000000000325', TRUE, TRUE, 1),
+  ('31111111-1111-4111-8111-000000000220', '41111111-1111-4111-8111-000000000326', TRUE, TRUE, 2),
+  ('31111111-1111-4111-8111-000000000220', '41111111-1111-4111-8111-000000000327', TRUE, TRUE, 3),
+  ('31111111-1111-4111-8111-000000000221', '41111111-1111-4111-8111-000000000325', TRUE, TRUE, 1),
+  ('31111111-1111-4111-8111-000000000221', '41111111-1111-4111-8111-000000000326', TRUE, TRUE, 2),
+  ('31111111-1111-4111-8111-000000000221', '41111111-1111-4111-8111-000000000327', TRUE, TRUE, 3),
+  ('31111111-1111-4111-8111-000000000222', '41111111-1111-4111-8111-000000000328', TRUE, TRUE, 1),
+  ('31111111-1111-4111-8111-000000000222', '41111111-1111-4111-8111-000000000329', TRUE, TRUE, 2),
+  ('31111111-1111-4111-8111-000000000222', '41111111-1111-4111-8111-000000000330', TRUE, TRUE, 3),
+  ('31111111-1111-4111-8111-000000000223', '41111111-1111-4111-8111-000000000328', TRUE, TRUE, 1),
+  ('31111111-1111-4111-8111-000000000223', '41111111-1111-4111-8111-000000000329', TRUE, TRUE, 2),
+  ('31111111-1111-4111-8111-000000000223', '41111111-1111-4111-8111-000000000330', TRUE, TRUE, 3),
+  ('31111111-1111-4111-8111-000000000224', '41111111-1111-4111-8111-000000000328', TRUE, TRUE, 1),
+  ('31111111-1111-4111-8111-000000000224', '41111111-1111-4111-8111-000000000329', TRUE, TRUE, 2),
+  ('31111111-1111-4111-8111-000000000224', '41111111-1111-4111-8111-000000000330', TRUE, TRUE, 3)
+ON CONFLICT (branch_id, category_id) DO NOTHING;
+
+INSERT INTO products (
+  id,
+  restaurant_id,
+  title,
+  description,
+  images,
+  type,
+  category_id,
+  base_price,
+  popular,
+  available,
+  is_visible
+)
+VALUES
+  ('51111111-1111-4111-8111-000000000401', '21111111-1111-4111-8111-000000000104', 'Busan Cold Buckwheat Noodles', 'Icy soba-style noodles with house chili vinegar, julienned cucumber and pear.', ARRAY['https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=900&q=80'], 'food', '41111111-1111-4111-8111-000000000310', 95000, TRUE, TRUE, TRUE),
+  ('51111111-1111-4111-8111-000000000402', '21111111-1111-4111-8111-000000000104', 'Spicy Seafood Ramen', 'Piping hot ramen with squid, mussels and Busan-style chili broth.', ARRAY['https://images.unsplash.com/photo-1553621042-f6e147245754?auto=format&fit=crop&w=900&q=80'], 'food', '41111111-1111-4111-8111-000000000310', 105000, TRUE, TRUE, TRUE),
+  ('51111111-1111-4111-8111-000000000403', '21111111-1111-4111-8111-000000000104', 'Kimchi Beef Bibimbap', 'Stone bowl rice with marinated beef, vegetables and gochujang.', ARRAY['https://images.unsplash.com/photo-1575936123452-b67c3203c357?auto=format&fit=crop&w=900&q=80'], 'food', '41111111-1111-4111-8111-000000000311', 99000, TRUE, TRUE, TRUE),
+  ('51111111-1111-4111-8111-000000000404', '21111111-1111-4111-8111-000000000104', 'Bulgogi Rice Bowl', 'Flame-grilled bulgogi beef served over steamed rice and pickles.', ARRAY['https://images.unsplash.com/photo-1525755662778-989d0524087e?auto=format&fit=crop&w=900&q=80'], 'food', '41111111-1111-4111-8111-000000000311', 115000, FALSE, TRUE, TRUE),
+  ('51111111-1111-4111-8111-000000000405', '21111111-1111-4111-8111-000000000104', 'Korean Fried Chicken', 'Crispy soy-garlic chicken glazed to order.', ARRAY['https://images.unsplash.com/photo-1608032362155-c86a8137b0ae?auto=format&fit=crop&w=900&q=80'], 'food', '41111111-1111-4111-8111-000000000311', 129000, TRUE, TRUE, TRUE),
+  ('51111111-1111-4111-8111-000000000406', '21111111-1111-4111-8111-000000000104', 'Cheesy Tteokbokki', 'Rice cakes simmered in gochujang sauce topped with mozzarella.', ARRAY['https://images.unsplash.com/photo-1576402187878-974f70cb8dfd?auto=format&fit=crop&w=900&q=80'], 'food', '41111111-1111-4111-8111-000000000311', 85000, FALSE, TRUE, TRUE),
+  ('51111111-1111-4111-8111-000000000407', '21111111-1111-4111-8111-000000000104', 'Seafood Pancake', 'Crispy haemul pajeon with spring onion and dipping sauce.', ARRAY['https://images.unsplash.com/photo-1504674900247-0877df9cc836?auto=format&fit=crop&w=900&q=80'], 'food', '41111111-1111-4111-8111-000000000311', 99000, FALSE, TRUE, TRUE),
+  ('51111111-1111-4111-8111-000000000408', '21111111-1111-4111-8111-000000000104', 'Yuzu Iced Tea', 'Refreshing yuzu citrus tea shaken with orange pulp.', ARRAY['https://images.unsplash.com/photo-1527169402691-feff5539e52c?auto=format&fit=crop&w=900&q=80'], 'drink', '41111111-1111-4111-8111-000000000312', 65000, TRUE, TRUE, TRUE),
+  ('51111111-1111-4111-8111-000000000409', '21111111-1111-4111-8111-000000000104', 'Plum Sparkling Ade', 'Fizzy Korean maesil plum cooler with shiso leaves.', ARRAY['https://images.unsplash.com/photo-1535556116002-6281ff3e26b1?auto=format&fit=crop&w=900&q=80'], 'drink', '41111111-1111-4111-8111-000000000312', 68000, FALSE, TRUE, TRUE),
+  ('51111111-1111-4111-8111-000000000410', '21111111-1111-4111-8111-000000000104', 'Dalgona Coffee Latte', 'Cold brew latte topped with whipped dalgona foam.', ARRAY['https://images.unsplash.com/photo-1587583774846-9e51e13bee76?auto=format&fit=crop&w=900&q=80'], 'drink', '41111111-1111-4111-8111-000000000312', 72000, TRUE, TRUE, TRUE)
+ON CONFLICT (id) DO NOTHING;
+
+WITH busan_branch_products AS (
+  SELECT *
+  FROM (
+    VALUES
+      ('61111111-1111-4111-8111-000000000701'::uuid, '31111111-1111-4111-8111-000000000208'::uuid, '51111111-1111-4111-8111-000000000401'::uuid, 1, TRUE, 48, 5, 10, 90, 99000),
+      ('61111111-1111-4111-8111-000000000702'::uuid, '31111111-1111-4111-8111-000000000208'::uuid, '51111111-1111-4111-8111-000000000402'::uuid, 2, TRUE, 45, 5, 10, 90, 112000),
+      ('61111111-1111-4111-8111-000000000703'::uuid, '31111111-1111-4111-8111-000000000208'::uuid, '51111111-1111-4111-8111-000000000403'::uuid, 3, FALSE, 40, 4, 10, 90, 101000),
+      ('61111111-1111-4111-8111-000000000704'::uuid, '31111111-1111-4111-8111-000000000208'::uuid, '51111111-1111-4111-8111-000000000404'::uuid, 4, FALSE, 42, 4, 10, 90, 119000),
+      ('61111111-1111-4111-8111-000000000705'::uuid, '31111111-1111-4111-8111-000000000208'::uuid, '51111111-1111-4111-8111-000000000405'::uuid, 5, TRUE, 38, 5, 10, 90, 135000),
+      ('61111111-1111-4111-8111-000000000706'::uuid, '31111111-1111-4111-8111-000000000208'::uuid, '51111111-1111-4111-8111-000000000406'::uuid, 6, FALSE, 50, 5, 10, 90, 88000),
+      ('61111111-1111-4111-8111-000000000707'::uuid, '31111111-1111-4111-8111-000000000208'::uuid, '51111111-1111-4111-8111-000000000407'::uuid, 7, FALSE, 36, 3, 10, 90, 102000),
+      ('61111111-1111-4111-8111-000000000708'::uuid, '31111111-1111-4111-8111-000000000208'::uuid, '51111111-1111-4111-8111-000000000408'::uuid, 8, TRUE, 70, 4, 10, 120, 68000),
+      ('61111111-1111-4111-8111-000000000709'::uuid, '31111111-1111-4111-8111-000000000208'::uuid, '51111111-1111-4111-8111-000000000409'::uuid, 9, FALSE, 68, 4, 10, 120, 71000),
+      ('61111111-1111-4111-8111-000000000710'::uuid, '31111111-1111-4111-8111-000000000208'::uuid, '51111111-1111-4111-8111-000000000410'::uuid, 10, FALSE, 65, 4, 10, 120, 75000),
+      ('61111111-1111-4111-8111-000000000711'::uuid, '31111111-1111-4111-8111-000000000209'::uuid, '51111111-1111-4111-8111-000000000401'::uuid, 1, FALSE, 40, 4, 10, 80, 95000),
+      ('61111111-1111-4111-8111-000000000712'::uuid, '31111111-1111-4111-8111-000000000209'::uuid, '51111111-1111-4111-8111-000000000402'::uuid, 2, FALSE, 38, 4, 10, 80, 105000),
+      ('61111111-1111-4111-8111-000000000713'::uuid, '31111111-1111-4111-8111-000000000209'::uuid, '51111111-1111-4111-8111-000000000403'::uuid, 3, FALSE, 35, 3, 10, 80, 98000),
+      ('61111111-1111-4111-8111-000000000714'::uuid, '31111111-1111-4111-8111-000000000209'::uuid, '51111111-1111-4111-8111-000000000404'::uuid, 4, FALSE, 37, 3, 10, 80, 113000),
+      ('61111111-1111-4111-8111-000000000715'::uuid, '31111111-1111-4111-8111-000000000209'::uuid, '51111111-1111-4111-8111-000000000405'::uuid, 5, FALSE, 34, 3, 10, 80, 129000),
+      ('61111111-1111-4111-8111-000000000716'::uuid, '31111111-1111-4111-8111-000000000209'::uuid, '51111111-1111-4111-8111-000000000406'::uuid, 6, FALSE, 36, 3, 10, 80, 84000),
+      ('61111111-1111-4111-8111-000000000717'::uuid, '31111111-1111-4111-8111-000000000209'::uuid, '51111111-1111-4111-8111-000000000407'::uuid, 7, FALSE, 32, 2, 10, 80, 97000),
+      ('61111111-1111-4111-8111-000000000718'::uuid, '31111111-1111-4111-8111-000000000209'::uuid, '51111111-1111-4111-8111-000000000408'::uuid, 8, FALSE, 55, 3, 10, 110, 65000),
+      ('61111111-1111-4111-8111-000000000719'::uuid, '31111111-1111-4111-8111-000000000209'::uuid, '51111111-1111-4111-8111-000000000409'::uuid, 9, FALSE, 53, 3, 10, 110, 67000),
+      ('61111111-1111-4111-8111-000000000720'::uuid, '31111111-1111-4111-8111-000000000209'::uuid, '51111111-1111-4111-8111-000000000410'::uuid, 10, FALSE, 52, 3, 10, 110, 70000),
+      ('61111111-1111-4111-8111-000000000721'::uuid, '31111111-1111-4111-8111-000000000210'::uuid, '51111111-1111-4111-8111-000000000401'::uuid, 1, FALSE, 34, 3, 10, 70, 92000),
+      ('61111111-1111-4111-8111-000000000722'::uuid, '31111111-1111-4111-8111-000000000210'::uuid, '51111111-1111-4111-8111-000000000402'::uuid, 2, FALSE, 32, 3, 10, 70, 99000),
+      ('61111111-1111-4111-8111-000000000723'::uuid, '31111111-1111-4111-8111-000000000210'::uuid, '51111111-1111-4111-8111-000000000403'::uuid, 3, FALSE, 31, 3, 10, 70, 94000),
+      ('61111111-1111-4111-8111-000000000724'::uuid, '31111111-1111-4111-8111-000000000210'::uuid, '51111111-1111-4111-8111-000000000404'::uuid, 4, FALSE, 30, 2, 10, 70, 108000),
+      ('61111111-1111-4111-8111-000000000725'::uuid, '31111111-1111-4111-8111-000000000210'::uuid, '51111111-1111-4111-8111-000000000405'::uuid, 5, FALSE, 28, 2, 10, 70, 122000),
+      ('61111111-1111-4111-8111-000000000726'::uuid, '31111111-1111-4111-8111-000000000210'::uuid, '51111111-1111-4111-8111-000000000406'::uuid, 6, FALSE, 29, 2, 10, 70, 81000),
+      ('61111111-1111-4111-8111-000000000727'::uuid, '31111111-1111-4111-8111-000000000210'::uuid, '51111111-1111-4111-8111-000000000407'::uuid, 7, FALSE, 27, 2, 10, 70, 93000),
+      ('61111111-1111-4111-8111-000000000728'::uuid, '31111111-1111-4111-8111-000000000210'::uuid, '51111111-1111-4111-8111-000000000408'::uuid, 8, FALSE, 48, 2, 10, 100, 62000),
+      ('61111111-1111-4111-8111-000000000729'::uuid, '31111111-1111-4111-8111-000000000210'::uuid, '51111111-1111-4111-8111-000000000409'::uuid, 9, FALSE, 46, 2, 10, 100, 64000),
+      ('61111111-1111-4111-8111-000000000730'::uuid, '31111111-1111-4111-8111-000000000210'::uuid, '51111111-1111-4111-8111-000000000410'::uuid, 10, FALSE, 45, 2, 10, 100, 68000)
+  ) AS t(
+    branch_product_id,
+    branch_id,
+    product_id,
+    display_order,
+    is_featured,
+    quantity,
+    reserved_qty,
+    min_stock,
+    daily_limit,
+    price_override
+  )
+)
+INSERT INTO branch_products (
+  id,
+  branch_id,
+  product_id,
+  is_available,
+  is_visible,
+  is_featured,
+  display_order,
+  price_mode,
+  base_price_override,
+  local_name,
+  local_description
+)
+SELECT
+  branch_product_id,
+  branch_id,
+  product_id,
+  TRUE,
+  TRUE,
+  is_featured,
+  display_order,
+  CASE WHEN price_override IS NULL THEN 'inherit' ELSE 'override' END,
+  price_override,
+  NULL,
+  NULL
+FROM busan_branch_products
+ON CONFLICT (branch_id, product_id) DO UPDATE
+  SET is_visible = EXCLUDED.is_visible,
+      is_featured = EXCLUDED.is_featured,
+      updated_at = now();
+
+INSERT INTO inventory (
+  branch_product_id,
+  quantity,
+  reserved_qty,
+  min_stock,
+  daily_limit,
+  daily_sold,
+  is_visible,
+  is_active,
+  last_restock_at
+)
+SELECT
+  branch_product_id,
+  quantity,
+  reserved_qty,
+  min_stock,
+  daily_limit,
+  0,
+  TRUE,
+  TRUE,
+  now()
+FROM busan_branch_products
+ON CONFLICT (branch_product_id) DO UPDATE
+  SET quantity = EXCLUDED.quantity,
+      reserved_qty = EXCLUDED.reserved_qty,
+      min_stock = EXCLUDED.min_stock,
+      daily_limit = EXCLUDED.daily_limit,
+      updated_at = now();
+
+INSERT INTO option_groups (
+  id,
+  restaurant_id,
+  name,
+  description,
+  selection_type,
+  min_select,
+  max_select,
+  is_required,
+  is_active
+)
+VALUES
+  ('81111111-1111-4111-8111-000000000601', '21111111-1111-4111-8111-000000000104', 'Size', 'Choose preferred portion size.', 'single', 1, 1, TRUE, TRUE),
+  ('81111111-1111-4111-8111-000000000602', '21111111-1111-4111-8111-000000000104', 'Topping', 'Add-ons to compliment your dish.', 'multiple', 0, 3, FALSE, TRUE)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO option_items (
+  id,
+  group_id,
+  name,
+  description,
+  price_delta,
+  is_active,
+  display_order
+)
+VALUES
+  ('82111111-1111-4111-8111-000000000611', '81111111-1111-4111-8111-000000000601', 'Regular', 'Standard serving size.', 0, TRUE, 1),
+  ('82111111-1111-4111-8111-000000000612', '81111111-1111-4111-8111-000000000601', 'Large', 'Larger portion with extra noodles or rice.', 15000, TRUE, 2),
+  ('82111111-1111-4111-8111-000000000613', '81111111-1111-4111-8111-000000000602', 'Soft-boiled Egg', 'Tamago style egg.', 10000, TRUE, 1),
+  ('82111111-1111-4111-8111-000000000614', '81111111-1111-4111-8111-000000000602', 'Extra Kimchi', 'House fermented cabbage.', 8000, TRUE, 2),
+  ('82111111-1111-4111-8111-000000000615', '81111111-1111-4111-8111-000000000602', 'Mozzarella Cheese', 'Melted cheese topping.', 12000, TRUE, 3)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO product_option_groups (
+  id,
+  product_id,
+  group_id,
+  min_select,
+  max_select,
+  is_required,
+  display_order,
+  is_active
+)
+VALUES
+  ('83111111-1111-4111-8111-000000000701', '51111111-1111-4111-8111-000000000401', '81111111-1111-4111-8111-000000000601', 1, 1, TRUE, 1, TRUE),
+  ('83111111-1111-4111-8111-000000000702', '51111111-1111-4111-8111-000000000401', '81111111-1111-4111-8111-000000000602', 0, 3, FALSE, 2, TRUE),
+  ('83111111-1111-4111-8111-000000000703', '51111111-1111-4111-8111-000000000402', '81111111-1111-4111-8111-000000000601', 1, 1, TRUE, 1, TRUE),
+  ('83111111-1111-4111-8111-000000000704', '51111111-1111-4111-8111-000000000402', '81111111-1111-4111-8111-000000000602', 0, 3, FALSE, 2, TRUE),
+  ('83111111-1111-4111-8111-000000000705', '51111111-1111-4111-8111-000000000403', '81111111-1111-4111-8111-000000000601', 1, 1, TRUE, 1, TRUE),
+  ('83111111-1111-4111-8111-000000000706', '51111111-1111-4111-8111-000000000403', '81111111-1111-4111-8111-000000000602', 0, 3, FALSE, 2, TRUE),
+  ('83111111-1111-4111-8111-000000000707', '51111111-1111-4111-8111-000000000404', '81111111-1111-4111-8111-000000000601', 1, 1, TRUE, 1, TRUE),
+  ('83111111-1111-4111-8111-000000000708', '51111111-1111-4111-8111-000000000404', '81111111-1111-4111-8111-000000000602', 0, 3, FALSE, 2, TRUE),
+  ('83111111-1111-4111-8111-000000000709', '51111111-1111-4111-8111-000000000405', '81111111-1111-4111-8111-000000000601', 1, 1, TRUE, 1, TRUE),
+  ('83111111-1111-4111-8111-00000000070A', '51111111-1111-4111-8111-000000000405', '81111111-1111-4111-8111-000000000602', 0, 3, FALSE, 2, TRUE),
+  ('83111111-1111-4111-8111-00000000070B', '51111111-1111-4111-8111-000000000406', '81111111-1111-4111-8111-000000000601', 1, 1, TRUE, 1, TRUE),
+  ('83111111-1111-4111-8111-00000000070C', '51111111-1111-4111-8111-000000000406', '81111111-1111-4111-8111-000000000602', 0, 3, FALSE, 2, TRUE),
+  ('83111111-1111-4111-8111-00000000070D', '51111111-1111-4111-8111-000000000407', '81111111-1111-4111-8111-000000000601', 1, 1, TRUE, 1, TRUE),
+  ('83111111-1111-4111-8111-00000000070E', '51111111-1111-4111-8111-000000000407', '81111111-1111-4111-8111-000000000602', 0, 3, FALSE, 2, TRUE)
+ON CONFLICT (product_id, group_id) DO NOTHING;
+
+INSERT INTO combos (
+  id,
+  restaurant_id,
+  name,
+  description,
+  base_price,
+  images,
+  is_active
+)
+VALUES
+  ('71111111-1111-4111-8111-000000000701', '21111111-1111-4111-8111-000000000104', 'Busan Lunch Combo', 'Choose one noodle bowl and any iced drink for a quick lunch.', 165000, ARRAY['https://images.unsplash.com/photo-1540189549336-e6e99c3679fe?auto=format&fit=crop&w=900&q=80'], TRUE),
+  ('71111111-1111-4111-8111-000000000702', '21111111-1111-4111-8111-000000000104', 'Busan Sharing Set', 'Two hot plates and a shareable beverage for evening dining.', 285000, ARRAY['https://images.unsplash.com/photo-1608032362155-c86a8137b0ae?auto=format&fit=crop&w=900&q=80'], TRUE)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO combo_groups (
+  id,
+  combo_id,
+  name,
+  min_select,
+  max_select,
+  required,
+  display_order
+)
+VALUES
+  ('72111111-1111-4111-8111-000000000711', '71111111-1111-4111-8111-000000000701', 'Main Dish', 1, 1, TRUE, 1),
+  ('72111111-1111-4111-8111-000000000712', '71111111-1111-4111-8111-000000000701', 'Drink', 1, 1, TRUE, 2),
+  ('72111111-1111-4111-8111-000000000713', '71111111-1111-4111-8111-000000000702', 'Hot Plates', 2, 2, TRUE, 1),
+  ('72111111-1111-4111-8111-000000000714', '71111111-1111-4111-8111-000000000702', 'Beverage', 1, 1, TRUE, 2)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO combo_group_items (
+  id,
+  combo_group_id,
+  item_type,
+  product_id,
+  category_id,
+  extra_price
+)
+VALUES
+  ('73111111-1111-4111-8111-000000000721', '72111111-1111-4111-8111-000000000711', 'product', '51111111-1111-4111-8111-000000000401', NULL, 0),
+  ('73111111-1111-4111-8111-000000000722', '72111111-1111-4111-8111-000000000711', 'product', '51111111-1111-4111-8111-000000000402', NULL, 0),
+  ('73111111-1111-4111-8111-000000000723', '72111111-1111-4111-8111-000000000711', 'product', '51111111-1111-4111-8111-000000000404', NULL, 5000),
+  ('73111111-1111-4111-8111-000000000724', '72111111-1111-4111-8111-000000000712', 'product', '51111111-1111-4111-8111-000000000408', NULL, 0),
+  ('73111111-1111-4111-8111-000000000725', '72111111-1111-4111-8111-000000000712', 'product', '51111111-1111-4111-8111-000000000409', NULL, 0),
+  ('73111111-1111-4111-8111-000000000726', '72111111-1111-4111-8111-000000000712', 'product', '51111111-1111-4111-8111-000000000410', NULL, 5000),
+  ('73111111-1111-4111-8111-000000000727', '72111111-1111-4111-8111-000000000713', 'product', '51111111-1111-4111-8111-000000000403', NULL, 0),
+  ('73111111-1111-4111-8111-000000000728', '72111111-1111-4111-8111-000000000713', 'product', '51111111-1111-4111-8111-000000000404', NULL, 0),
+  ('73111111-1111-4111-8111-000000000729', '72111111-1111-4111-8111-000000000713', 'product', '51111111-1111-4111-8111-000000000405', NULL, 10000),
+  ('73111111-1111-4111-8111-00000000072A', '72111111-1111-4111-8111-000000000713', 'product', '51111111-1111-4111-8111-000000000406', NULL, 0),
+  ('73111111-1111-4111-8111-00000000072B', '72111111-1111-4111-8111-000000000713', 'product', '51111111-1111-4111-8111-000000000407', NULL, 0),
+  ('73111111-1111-4111-8111-00000000072C', '72111111-1111-4111-8111-000000000714', 'product', '51111111-1111-4111-8111-000000000408', NULL, 0),
+  ('73111111-1111-4111-8111-00000000072D', '72111111-1111-4111-8111-000000000714', 'product', '51111111-1111-4111-8111-000000000409', NULL, 0),
+  ('73111111-1111-4111-8111-00000000072E', '72111111-1111-4111-8111-000000000714', 'product', '51111111-1111-4111-8111-000000000410', NULL, 0)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO branch_combos (
+  branch_id,
+  combo_id,
+  is_available,
+  is_visible,
+  base_price_override,
+  display_order
+)
+VALUES
+  ('31111111-1111-4111-8111-000000000208', '71111111-1111-4111-8111-000000000701', TRUE, TRUE, NULL, 1),
+  ('31111111-1111-4111-8111-000000000208', '71111111-1111-4111-8111-000000000702', TRUE, TRUE, NULL, 2),
+  ('31111111-1111-4111-8111-000000000209', '71111111-1111-4111-8111-000000000701', TRUE, TRUE, NULL, 1),
+  ('31111111-1111-4111-8111-000000000209', '71111111-1111-4111-8111-000000000702', TRUE, TRUE, NULL, 2),
+  ('31111111-1111-4111-8111-000000000210', '71111111-1111-4111-8111-000000000701', TRUE, TRUE, NULL, 1),
+  ('31111111-1111-4111-8111-000000000210', '71111111-1111-4111-8111-000000000702', TRUE, TRUE, NULL, 2)
+ON CONFLICT (branch_id, combo_id) DO NOTHING;
 
 WITH cal AS (
   INSERT INTO calendars (name, scope_type, is_active)

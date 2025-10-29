@@ -127,6 +127,74 @@ const deriveAssignedBranchIds = (branchList = [], assignmentList = [], fallbackT
   return fallbackToAll ? availableIds : [];
 };
 
+const buildInventorySummary = (items = []) => {
+  const summary = {
+    quantity: 0,
+    reserved_qty: 0,
+    byBranch: {},
+  };
+  if (!Array.isArray(items)) {
+    return summary;
+  }
+  items.forEach((item) => {
+    if (!item) return;
+    const branchId = normalizeBranchId(item);
+    if (!branchId) return;
+    const rawQuantity =
+      item.quantity ??
+      item?.inventory?.quantity ??
+      0;
+    const rawReserved =
+      item.reserved_qty ??
+      item?.inventory?.reserved_qty ??
+      0;
+    const quantity = Number.isFinite(Number(rawQuantity)) ? Number(rawQuantity) : 0;
+    const reserved = Number.isFinite(Number(rawReserved)) ? Number(rawReserved) : 0;
+    summary.quantity += quantity;
+    summary.reserved_qty += reserved;
+    summary.byBranch[branchId] = {
+      quantity,
+      reserved_qty: reserved,
+    };
+  });
+  return summary;
+};
+
+const decorateProductsWithInventory = (items = []) =>
+  (Array.isArray(items) ? items : []).map((product) => {
+    const assignments = Array.isArray(product?.branch_assignments)
+      ? product.branch_assignments
+      : [];
+    return {
+      ...product,
+      inventory_summary: buildInventorySummary(assignments),
+    };
+  });
+
+const decorateProductWithInventory = (product = {}) =>
+  decorateProductsWithInventory([product])[0] || {
+    ...product,
+    inventory_summary: buildInventorySummary(
+      Array.isArray(product?.branch_assignments) ? product.branch_assignments : [],
+    ),
+  };
+
+const normalizeCategoryAssignments = (assignments = []) =>
+  (Array.isArray(assignments) ? assignments : [])
+    .map((assignment) => {
+      if (!assignment) return null;
+      const branchId = normalizeBranchId(assignment);
+      if (!branchId) return null;
+      return {
+        branch_id: branchId,
+        is_visible: assignment.is_visible !== false,
+        is_active: assignment.is_active !== false,
+        display_order:
+          assignment.display_order ?? assignment.displayOrder ?? null,
+      };
+    })
+    .filter(Boolean);
+
 const emptyFormState = computePricing({
   title: "",
   description: "",
@@ -1106,7 +1174,7 @@ const InventoryModal = ({
             <p className="text-sm text-slate-500">
               {readonly
                 ? "Inventory management is not available in demo mode."
-                : `Update stock levels for �${productTitle || "Dish"}�.`}
+                : `Update stock levels for ${productTitle || "Dish"}.`}
             </p>
           </div>
 
@@ -1203,7 +1271,7 @@ const MenuManagement = () => {
 
   const [restaurant, setRestaurant] = useState(() => SAMPLE_RESTAURANT);
   const [loading, setLoading] = useState(true);
-const [products, setProducts] = useState(() => [...SAMPLE_PRODUCTS]);
+const [products, setProducts] = useState(() => decorateProductsWithInventory(SAMPLE_PRODUCTS));
 const [error, setError] = useState("");
 const [usingSampleData, setUsingSampleData] = useState(true);
 const [ownerRestaurants, setOwnerRestaurants] = useState([]);
@@ -1214,6 +1282,7 @@ const [apiCategories, setApiCategories] = useState(() =>
   SAMPLE_CATEGORIES.map((name) => ({
     id: `sample-${name.toLowerCase().replace(/\s+/g, "-")}`,
     name,
+    branchAssignments: [],
   })),
 );
 
@@ -1223,6 +1292,7 @@ const [apiCategories, setApiCategories] = useState(() =>
   const [showCategories, setShowCategories] = useState(true);
   const [customCategories, setCustomCategories] = useState(() => [...SAMPLE_CATEGORIES]);
   const [newCategoryName, setNewCategoryName] = useState("");
+  const [newCategoryBranchIds, setNewCategoryBranchIds] = useState([]);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState("create");
@@ -1253,10 +1323,11 @@ const [apiCategories, setApiCategories] = useState(() =>
         SAMPLE_CATEGORIES.map((name) => ({
           id: `sample-${name.toLowerCase().replace(/\s+/g, "-")}`,
           name,
+          branchAssignments: [],
         })),
       );
       setCustomCategories([...SAMPLE_CATEGORIES]);
-      setProducts([...SAMPLE_PRODUCTS]);
+      setProducts(decorateProductsWithInventory(SAMPLE_PRODUCTS));
       setVisibilityOverrides(() => ({}));
       setBranchInventoryCache({});
       setProductsLoading(false);
@@ -1278,11 +1349,15 @@ const [apiCategories, setApiCategories] = useState(() =>
               if (category && typeof category === "object") {
                 const name = (category.name || category.label || "").trim();
                 if (!name) return null;
+                const branchAssignments = normalizeCategoryAssignments(
+                  category.branch_assignments || category.branchAssignments || []
+                );
                 return {
                   id: category.id || category.category_id || null,
                   name,
                   description: category.description || null,
                   productCount: Number(category.productCount ?? category.product_count ?? 0),
+                  branchAssignments,
                 };
               }
               return null;
@@ -1301,7 +1376,8 @@ const [apiCategories, setApiCategories] = useState(() =>
       setUsingSampleData(false);
       setApiCategories(normalizedCategories);
       setCustomCategories([]);
-      setProducts(Array.isArray(list) ? list : []);
+      const normalizedProducts = decorateProductsWithInventory(Array.isArray(list) ? list : []);
+      setProducts(normalizedProducts);
       setVisibilityOverrides(() => ({}));
       setBranchInventoryCache({});
     } catch (requestError) {
@@ -1315,10 +1391,11 @@ const [apiCategories, setApiCategories] = useState(() =>
         SAMPLE_CATEGORIES.map((name) => ({
           id: `sample-${name.toLowerCase().replace(/\s+/g, "-")}`,
           name,
+          branchAssignments: [],
         })),
       );
       setCustomCategories([...SAMPLE_CATEGORIES]);
-      setProducts([...SAMPLE_PRODUCTS]);
+      setProducts(decorateProductsWithInventory(SAMPLE_PRODUCTS));
       setVisibilityOverrides(() => ({}));
       setBranchInventoryCache({});
     } finally {
@@ -1378,7 +1455,7 @@ const [apiCategories, setApiCategories] = useState(() =>
       if (!restaurantId) {
         setRestaurant(SAMPLE_RESTAURANT);
         setUsingSampleData(true);
-        setProducts([...SAMPLE_PRODUCTS]);
+        setProducts(decorateProductsWithInventory(SAMPLE_PRODUCTS));
         setVisibilityOverrides(() => ({}));
         setBranchInventoryCache({});
         setBranches([]);
@@ -1392,7 +1469,7 @@ const [apiCategories, setApiCategories] = useState(() =>
         if (!data || data.pending_profile) {
           setRestaurant(SAMPLE_RESTAURANT);
           setUsingSampleData(true);
-          setProducts([...SAMPLE_PRODUCTS]);
+          setProducts(decorateProductsWithInventory(SAMPLE_PRODUCTS));
           setVisibilityOverrides(() => ({}));
           setBranchInventoryCache({});
           setBranches([]);
@@ -1425,7 +1502,7 @@ const [apiCategories, setApiCategories] = useState(() =>
         }
         setRestaurant(SAMPLE_RESTAURANT);
         setUsingSampleData(true);
-        setProducts([...SAMPLE_PRODUCTS]);
+        setProducts(decorateProductsWithInventory(SAMPLE_PRODUCTS));
         setVisibilityOverrides(() => ({}));
         setBranchInventoryCache({});
         setBranches([]);
@@ -1473,9 +1550,10 @@ const [apiCategories, setApiCategories] = useState(() =>
         SAMPLE_CATEGORIES.map((name) => ({
           id: `sample-${name.toLowerCase().replace(/\s+/g, "-")}`,
           name,
+          branchAssignments: [],
         })),
       );
-      setProducts([...SAMPLE_PRODUCTS]);
+      setProducts(decorateProductsWithInventory(SAMPLE_PRODUCTS));
       setVisibilityOverrides(() => ({}));
       setBranches([]);
       setBranchInventoryCache({});
@@ -1496,9 +1574,10 @@ const [apiCategories, setApiCategories] = useState(() =>
           SAMPLE_CATEGORIES.map((name) => ({
             id: `sample-${name.toLowerCase().replace(/\s+/g, "-")}`,
             name,
+            branchAssignments: [],
           })),
         );
-        setProducts([...SAMPLE_PRODUCTS]);
+        setProducts(decorateProductsWithInventory(SAMPLE_PRODUCTS));
         setVisibilityOverrides(() => ({}));
         setBranches([]);
         setBranchInventoryCache({});
@@ -1526,9 +1605,10 @@ const [apiCategories, setApiCategories] = useState(() =>
         SAMPLE_CATEGORIES.map((name) => ({
           id: `sample-${name.toLowerCase().replace(/\s+/g, "-")}`,
           name,
+          branchAssignments: [],
         })),
       );
-      setProducts([...SAMPLE_PRODUCTS]);
+      setProducts(decorateProductsWithInventory(SAMPLE_PRODUCTS));
       setVisibilityOverrides(() => ({}));
       setBranches([]);
       setBranchInventoryCache({});
@@ -1543,6 +1623,32 @@ const [apiCategories, setApiCategories] = useState(() =>
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    if (usingSampleData) {
+      setNewCategoryBranchIds([]);
+      return;
+    }
+    if (!Array.isArray(branches) || !branches.length) {
+      setNewCategoryBranchIds([]);
+      return;
+    }
+    setNewCategoryBranchIds((previous) => {
+      const validPrevious = Array.isArray(previous)
+        ? previous.filter((id) => branches.some((branch) => branch.id === id))
+        : [];
+      if (validPrevious.length) {
+        return validPrevious;
+      }
+      if (
+        selectedBranchId !== "all" &&
+        branches.some((branch) => branch.id === selectedBranchId)
+      ) {
+        return [selectedBranchId];
+      }
+      return [];
+    });
+  }, [branches, selectedBranchId, usingSampleData]);
 
   const derivedCategories = useMemo(() => {
     const collected = products
@@ -1969,9 +2075,10 @@ const [apiCategories, setApiCategories] = useState(() =>
         } else {
           const updated = await ownerProductService.update(restaurantId, activeProductId, payload);
           setProducts((previous) =>
-            previous.map((product) =>
-              product.id === activeProductId ? { ...product, ...updated } : product
-            )
+            previous.map((product) => {
+              if (product.id !== activeProductId) return product;
+              return decorateProductWithInventory({ ...product, ...updated });
+            })
           );
           toast.success("Dish updated.");
           shouldRefresh = true;
@@ -1996,7 +2103,8 @@ const [apiCategories, setApiCategories] = useState(() =>
               })),
               optionGroups: sanitizedOptionGroups,
             };
-            setProducts((previous) => [...previous, newProduct]);
+            const decoratedNewProduct = decorateProductWithInventory(newProduct);
+            setProducts((previous) => [...previous, decoratedNewProduct]);
             toast.success("Dish created.");
             shouldCloseModal = true;
           } else {
@@ -2036,7 +2144,8 @@ const [apiCategories, setApiCategories] = useState(() =>
               sanitizedOptionGroups.length > 0
                 ? { ...created, optionGroups: sanitizedOptionGroups }
                 : created;
-            setProducts((previous) => [...previous, enrichedCreated]);
+            const decoratedCreated = decorateProductWithInventory(enrichedCreated);
+            setProducts((previous) => [...previous, decoratedCreated]);
             setVisibilityOverrides((previous) => ({
               ...previous,
               [created.id]: formState.isHidden,
@@ -2246,25 +2355,32 @@ const [apiCategories, setApiCategories] = useState(() =>
         [inventoryModal.productId]: inventoryRecords,
       }));
 
-      const totalQuantity = inventoryRecords.reduce(
-        (acc, item) => acc + Number(item.quantity || 0),
-        0
-      );
-      const totalReserved = inventoryRecords.reduce(
-        (acc, item) => acc + Number(item.reserved_qty || 0),
-        0
-      );
-
+      const summary = buildInventorySummary(inventoryRecords);
+      const recordsByBranch = inventoryRecords.reduce((acc, item) => {
+        if (item?.branch_id) {
+          acc[item.branch_id] = item;
+        }
+        return acc;
+      }, {});
       setProducts((previous) =>
         previous.map((product) =>
           product.id === inventoryModal.productId
             ? {
               ...product,
-              inventory_summary: {
-                ...(product.inventory_summary || {}),
-                quantity: totalQuantity,
-                reserved_qty: totalReserved,
-              },
+              branch_assignments: Array.isArray(product.branch_assignments)
+                ? product.branch_assignments.map((assignment) => {
+                  const branchId = normalizeBranchId(assignment);
+                  if (!branchId) return assignment;
+                  const record = recordsByBranch[branchId];
+                  if (!record) return assignment;
+                  return {
+                    ...assignment,
+                    quantity: Number(record.quantity ?? 0),
+                    reserved_qty: Number(record.reserved_qty ?? 0),
+                  };
+                })
+                : product.branch_assignments,
+              inventory_summary: summary,
             }
             : product
         )
@@ -2309,6 +2425,30 @@ const [apiCategories, setApiCategories] = useState(() =>
     }));
   };
 
+  const toggleNewCategoryBranch = (branchId) => {
+    if (!branchId) return;
+    if (!Array.isArray(branches) || !branches.some((branch) => branch.id === branchId)) return;
+    setNewCategoryBranchIds((previous) => {
+      const list = Array.isArray(previous) ? [...previous] : [];
+      const index = list.indexOf(branchId);
+      if (index >= 0) {
+        list.splice(index, 1);
+        return list;
+      }
+      return [...list, branchId];
+    });
+  };
+
+  const selectAllNewCategoryBranches = () => {
+    if (!Array.isArray(branches) || !branches.length) return;
+    const ids = branches.map((branch) => branch.id).filter(Boolean);
+    setNewCategoryBranchIds(ids);
+  };
+
+  const clearNewCategoryBranches = () => {
+    setNewCategoryBranchIds([]);
+  };
+
   const handleAddCategory = async () => {
     const trimmed = newCategoryName.trim();
     if (!trimmed) {
@@ -2337,10 +2477,12 @@ const [apiCategories, setApiCategories] = useState(() =>
         {
           id: `sample-${normalizedLower.replace(/\s+/g, "-")}`,
           name: normalizedName,
+          branchAssignments: [],
         },
       ]);
       toast.success("Category added (demo).");
       setNewCategoryName("");
+      setNewCategoryBranchIds([]);
       return;
     }
 
@@ -2349,16 +2491,48 @@ const [apiCategories, setApiCategories] = useState(() =>
       return;
     }
 
+    const availableBranches = Array.isArray(branches) ? branches : [];
+    const selectedBranchIds = availableBranches.length
+      ? newCategoryBranchIds.filter((id) =>
+          availableBranches.some((branch) => branch.id === id),
+        )
+      : [];
+
+    if (availableBranches.length && !selectedBranchIds.length) {
+      toast.error("Select at least one branch to apply this category.");
+      return;
+    }
+
+    const payload = { name: normalizedName };
+    if (selectedBranchIds.length === 1) {
+      payload.branchId = selectedBranchIds[0];
+    } else if (selectedBranchIds.length > 1) {
+      payload.branchIds = selectedBranchIds;
+    }
+
     try {
-      const created = await ownerProductService.createCategory(restaurant.id, {
-        name: normalizedName,
-      });
+      const created = await ownerProductService.createCategory(restaurant.id, payload);
       const resolvedName =
         (created && (created.name || created.label)) || normalizedName;
       const resolvedId = created?.id || created?.category_id || null;
+      let resolvedAssignments = normalizeCategoryAssignments(
+        created?.branch_assignments || created?.branchAssignments || []
+      );
+      if (!resolvedAssignments.length && selectedBranchIds.length) {
+        resolvedAssignments = selectedBranchIds.map((branchId) => ({
+          branch_id: branchId,
+          is_visible: true,
+          is_active: true,
+          display_order: null,
+        }));
+      }
       setApiCategories((previous) => {
         if (previous.some((item) => item?.name?.toLowerCase() === resolvedName.toLowerCase())) {
-          return previous;
+          return previous.map((item) =>
+            item?.name?.toLowerCase() === resolvedName.toLowerCase()
+              ? { ...item, branchAssignments: resolvedAssignments }
+              : item
+          );
         }
         return [
           ...previous,
@@ -2367,11 +2541,13 @@ const [apiCategories, setApiCategories] = useState(() =>
             name: resolvedName,
             description: created?.description || null,
             productCount: Number(created?.productCount ?? created?.product_count ?? 0),
+            branchAssignments: resolvedAssignments,
           },
         ];
       });
       toast.success("Category created.");
       setNewCategoryName("");
+      setNewCategoryBranchIds(selectedBranchIds);
     } catch (error) {
       const message =
         error?.response?.data?.error ||
@@ -2492,21 +2668,85 @@ const [apiCategories, setApiCategories] = useState(() =>
                   <span className="text-sm text-slate-500">No categories yet.</span>
                 )}
               </div>
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                <input
-                  type="text"
-                  value={newCategoryName}
-                  onChange={(e) => setNewCategoryName(e.target.value)}
-                  placeholder="New category name"
-                  className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
-                />
-                <button
-                  type="button"
-                  className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-600"
-                  onClick={handleAddCategory}
-                >
-                  Add category
-                </button>
+              <div className="space-y-4">
+                {!usingSampleData && branches.length ? (
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs uppercase text-slate-500">Apply to branches</span>
+                      <div className="flex items-center gap-2 text-[11px] font-semibold text-emerald-600">
+                        <button
+                          type="button"
+                          className="rounded-md border border-emerald-200 px-2 py-1 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60"
+                          onClick={selectAllNewCategoryBranches}
+                          disabled={newCategoryBranchIds.length === branches.length}
+                        >
+                          Select all
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded-md border border-slate-200 px-2 py-1 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+                          onClick={clearNewCategoryBranches}
+                          disabled={!newCategoryBranchIds.length}
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {branches.map((branch) => {
+                        const branchId = branch.id;
+                        const active = newCategoryBranchIds.includes(branchId);
+                        return (
+                          <button
+                            key={branchId}
+                            type="button"
+                            aria-pressed={active}
+                            onClick={() => toggleNewCategoryBranch(branchId)}
+                            className={`flex items-center gap-2 rounded-full border px-3 py-1 text-sm transition ${
+                              active
+                                ? "border-emerald-500 bg-emerald-50 text-emerald-700"
+                                : "border-slate-200 text-slate-600 hover:border-emerald-300"
+                            }`}
+                          >
+                            <span
+                              className={`flex h-3.5 w-3.5 items-center justify-center rounded-full border ${
+                                active ? "border-emerald-500 bg-emerald-500 text-white" : "border-slate-300"
+                              }`}
+                            >
+                              {active ? "O" : ""}
+                            </span>
+                            {branch.name || branch.branch_name || "Unnamed branch"}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {!newCategoryBranchIds.length ? (
+                      <p className="text-[11px] text-amber-600">
+                        Select one or more branches for this category.
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                  <input
+                    type="text"
+                    value={newCategoryName}
+                    onChange={(e) => setNewCategoryName(e.target.value)}
+                    placeholder="New category name"
+                    className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-600 disabled:cursor-not-allowed disabled:bg-slate-300"
+                    onClick={handleAddCategory}
+                    disabled={
+                      !newCategoryName.trim() ||
+                      (!usingSampleData && branches.length && !newCategoryBranchIds.length)
+                    }
+                  >
+                    Add category
+                  </button>
+                </div>
               </div>
             </div>
           ) : null}
@@ -2671,8 +2911,13 @@ const [apiCategories, setApiCategories] = useState(() =>
                     "";
                   const displayImage = primaryImage || dishPlaceholderImage;
                   const inventorySummary = product.inventory_summary || {};
-                  const totalQuantity = Number(inventorySummary.quantity || 0);
-                  const totalReserved = Number(inventorySummary.reserved_qty || 0);
+                  const branchInventory =
+                    selectedBranchId !== "all"
+                      ? inventorySummary.byBranch?.[selectedBranchId] || null
+                      : null;
+                  const branchQuantity = Number(branchInventory?.quantity || 0);
+                  const branchReserved = Number(branchInventory?.reserved_qty || 0);
+                  const showBranchInventory = selectedBranchId !== "all";
                   const manageDisabled =
                     usingSampleData || isSampleRestaurant(restaurant) || isSampleId(product.id);
 
@@ -2727,12 +2972,20 @@ const [apiCategories, setApiCategories] = useState(() =>
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex flex-col gap-2 text-sm">
-                          <span className="font-semibold text-slate-800">
-                            {totalQuantity.toLocaleString("vi-VN")} in stock
-                          </span>
-                          <span className="text-xs text-slate-500">
-                            Reserved: {totalReserved.toLocaleString("vi-VN")}
-                          </span>
+                          {showBranchInventory ? (
+                            <>
+                              <span className="font-semibold text-slate-800">
+                                {branchQuantity.toLocaleString("vi-VN")} in stock
+                              </span>
+                              <span className="text-xs text-slate-500">
+                                Reserved: {branchReserved.toLocaleString("vi-VN")}
+                              </span>
+                            </>
+                          ) : (
+                            <span className="text-xs text-slate-500">
+                              Select a branch filter to view stock levels.
+                            </span>
+                          )}
                           <button
                             type="button"
                             className="w-full rounded-lg border border-emerald-200 bg-emerald-50 py-2 text-xs font-semibold text-emerald-600 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"

@@ -6,6 +6,7 @@ import {
   pickFirstImageUrl,
 } from "../utils/imageHelpers";
 
+
 const DishDetail = () => {
   const { restaurantId, dishId } = useParams();
   const {
@@ -110,7 +111,7 @@ const DishDetail = () => {
   );
 
   return (
-    <div className="max-padd-container space-y-12 py-24">
+    <div className="max-w-[1400px] mx-auto space-y-16 py-24 px-6">
       <nav className="text-sm text-gray-500">
         <Link to="/" className="hover:text-orange-500">
           Home
@@ -125,8 +126,8 @@ const DishDetail = () => {
         / <span className="text-gray-700">{dish.title}</span>
       </nav>
 
-      <div className="flex flex-col gap-8 lg:flex-row">
-        <div className="lg:w-[420px]">
+      <div className="flex flex-col gap-12 lg:flex-row lg:gap-16 max-w-[1280px] mx-auto">
+        <div className="lg:w-[520px]">
           <div className="rounded-3xl bg-white p-4 shadow-sm">
             <div className="aspect-[3/4] overflow-hidden rounded-2xl bg-orange-50/60">
               <img
@@ -170,11 +171,10 @@ const DishDetail = () => {
                   <button
                     key={size}
                     onClick={() => setSelectedSize(size)}
-                    className={`rounded-full border px-4 py-2 text-sm font-semibold transition ${
-                      selectedSize === size
+                    className={`rounded-full border px-4 py-2 text-sm font-semibold transition ${selectedSize === size
                         ? "border-orange-500 bg-orange-500 text-white"
                         : "border-orange-100 bg-white text-gray-600 hover:border-orange-300"
-                    }`}
+                      }`}
                   >
                     {size}
                   </button>
@@ -201,11 +201,10 @@ const DishDetail = () => {
                           onClick={() =>
                             handleSelectOption(option.id, value.id)
                           }
-                          className={`rounded-full border px-4 py-2 text-xs font-semibold transition ${
-                            isSelected
+                          className={`rounded-full border px-4 py-2 text-xs font-semibold transition ${isSelected
                               ? "border-orange-500 bg-orange-500 text-white"
                               : "border-orange-100 bg-white text-gray-600 hover:border-orange-300"
-                          }`}
+                            }`}
                         >
                           {value.label}
                           {value.priceDelta
@@ -300,7 +299,7 @@ const DishDetail = () => {
         <h2 className="text-xl font-bold text-gray-900">
           More from {restaurant?.name}
         </h2>
-        <div className="no-scrollbar flex gap-5 overflow-x-auto pb-4">
+        <div className="flex gap-8 overflow-x-auto pb-8 scroll-smooth snap-x snap-mandatory no-scrollbar">
           {relatedDishes.map((item) => {
             const fallbackSize = item.sizes?.[0];
             const base =
@@ -316,8 +315,9 @@ const DishDetail = () => {
               <Link
                 key={item._id}
                 to={`/restaurants/${restaurantId}/dishes/${item._id}`}
-                className="group flex w-[260px] flex-col overflow-hidden rounded-3xl bg-white shadow-sm transition hover:-translate-y-1 hover:shadow-lg"
+                className="group flex w-[320px] flex-col snap-start flex-shrink-0 overflow-hidden rounded-3xl bg-white shadow-md transition hover:-translate-y-1 hover:shadow-lg"
               >
+
                 <div className="relative h-40 overflow-hidden">
                   <img
                     src={cardImage}

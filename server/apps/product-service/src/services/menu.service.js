@@ -1,5 +1,6 @@
 ﻿const { withTransaction } = require('../db');
 const menuRepository = require('../repositories/menu.repository');
+const restaurantRepository = require('../repositories/restaurant.repository');
 const optionsRepository = require('../repositories/options.repository');
 const comboRepository = require('../repositories/combo.repository');
 const promotionRepository = require('../repositories/promotion.repository');
@@ -62,22 +63,131 @@ function mapProductRow(row, branchAssignments = []) {
   };
 }
 
+function parseJsonArray(value) {
+  if (Array.isArray(value)) return value;
+  if (!value) return [];
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (error) {
+      return [];
+    }
+  }
+  return [];
+}
+
+function mapCategoryRow(row) {
+  if (!row) return null;
+  const assignments = parseJsonArray(row.branch_assignments ?? row.branchAssignments).map(
+    (assignment) => {
+      if (!assignment) return null;
+      const branchId =
+        assignment.branch_id ||
+        assignment.branchId ||
+        assignment.branch;
+      if (!branchId) return null;
+      return {
+        branch_id: branchId,
+        is_visible: assignment.is_visible !== false,
+        is_active: assignment.is_active !== false,
+        display_order:
+          assignment.display_order ?? assignment.displayOrder ?? null,
+      };
+    },
+  ).filter(Boolean);
+  return {
+    id: row.id,
+    restaurant_id: row.restaurant_id,
+    name: row.name,
+    description: row.description,
+    is_active: row.is_active !== false,
+    productCount: Number(row.product_count ?? row.productCount ?? 0),
+    branch_assignments: assignments,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
 async function createCategory(restaurantId, payload = {}) {
   assert(restaurantId, 'restaurantId is required');
   assert(payload.name, 'Category name is required');
-  const category = await menuRepository.ensureCategory({
-    name: payload.name,
-    description: payload.description || null,
+
+  const name = String(payload.name).trim();
+  assert(name.length, 'Category name cannot be empty');
+
+  const description = payload.description || null;
+  const categoryActive = payload.isActive ?? payload.is_active;
+  const assignmentVisible = payload.isVisible ?? payload.is_visible;
+  const displayOrder = payload.displayOrder ?? payload.display_order ?? null;
+
+  const branchIdSet = new Set();
+  const pushBranchCandidate = (candidate) => {
+    if (!candidate) return;
+    const value = typeof candidate === 'string' ? candidate.trim() : candidate?.id || candidate?.branch_id;
+    if (typeof value === 'string' && value.trim().length) {
+      branchIdSet.add(value.trim());
+    }
+  };
+
+  if (Array.isArray(payload.branchIds)) {
+    payload.branchIds.forEach(pushBranchCandidate);
+  }
+  pushBranchCandidate(payload.branchId);
+  pushBranchCandidate(payload.branch_id);
+
+  const { category, assignments } = await withTransaction(async (client) => {
+    const categoryRow = await menuRepository.ensureCategory(
+      {
+        restaurantId,
+        name,
+        description,
+        isActive: categoryActive !== false,
+      },
+      client,
+    );
+
+    const assignmentRows = [];
+    for (const branchId of branchIdSet) {
+      // eslint-disable-next-line no-await-in-loop
+      const branch = await restaurantRepository.findBranchById(restaurantId, branchId, client);
+      if (!branch) {
+        const error = new Error('Branch not found for restaurant');
+        error.status = 404;
+        throw error;
+      }
+      // eslint-disable-next-line no-await-in-loop
+      const assignment = await menuRepository.assignCategoryToBranch(
+        {
+          branchId,
+          categoryId: categoryRow.id,
+          isVisible: assignmentVisible !== false,
+          isActive: categoryActive !== false,
+          displayOrder,
+        },
+        client,
+      );
+      assignmentRows.push(assignment);
+    }
+
+    return { category: categoryRow, assignments: assignmentRows };
   });
+
+  const mapped = mapCategoryRow({
+    ...category,
+    product_count: category.product_count ?? 0,
+    branch_assignments: assignments,
+  });
+
   publishSocketEvent(
     'menu.category.created',
     {
       restaurantId,
-      category,
+      category: mapped,
     },
     [`restaurant:${restaurantId}`],
   );
-  return category;
+  return mapped;
 }
 
 async function createProduct(restaurantId, payload = {}) {
@@ -97,16 +207,33 @@ async function createProduct(restaurantId, payload = {}) {
     let categoryId = payload.categoryId || null;
     if (!categoryId && payload.categoryName) {
       const category = await menuRepository.ensureCategory(
-        { name: payload.categoryName, description: payload.categoryDescription || null },
+        {
+          restaurantId,
+          name: payload.categoryName,
+          description: payload.categoryDescription || null,
+          isActive: true,
+        },
         client,
       );
       categoryId = category.id;
     } else if (!categoryId && payload.category) {
       const category = await menuRepository.ensureCategory(
-        { name: payload.category, description: payload.categoryDescription || null },
+        {
+          restaurantId,
+          name: payload.category,
+          description: payload.categoryDescription || null,
+          isActive: true,
+        },
         client,
       );
       categoryId = category.id;
+    } else if (categoryId) {
+      const category = await menuRepository.findCategoryById(categoryId, client);
+      if (!category || category.restaurant_id !== restaurantId) {
+        const error = new Error('Category not found for restaurant');
+        error.status = 400;
+        throw error;
+      }
     }
 
     const product = await menuRepository.createProduct(
@@ -362,15 +489,42 @@ async function createProduct(restaurantId, payload = {}) {
   return product;
 }
 
-async function listCategories(restaurantId) {
+async function listCategories(restaurantId, filters = {}) {
   assert(restaurantId, 'restaurantId is required');
   const categories = await menuRepository.listCategoriesForRestaurant(restaurantId);
-  return categories.map((category) => ({
-    id: category.id,
-    name: category.name,
-    description: category.description,
-    productCount: Number(category.product_count ?? category.productCount ?? 0),
-  }));
+  const branchFilterRaw =
+    filters.branchId ||
+    filters.branch_id ||
+    filters.branch ||
+    null;
+  const branchFilter =
+    typeof branchFilterRaw === 'string' && branchFilterRaw.trim().length
+      ? branchFilterRaw.trim()
+      : null;
+
+  const mapped = categories.map((category) => mapCategoryRow(category)).filter(Boolean);
+  if (!branchFilter) {
+    return mapped;
+  }
+
+  return mapped
+    .map((category) => {
+      const assignments = Array.isArray(category.branch_assignments)
+        ? category.branch_assignments.filter(
+            (assignment) =>
+              assignment &&
+              assignment.branch_id === branchFilter &&
+              assignment.is_active !== false &&
+              assignment.is_visible !== false,
+          )
+        : [];
+      if (!assignments.length) return null;
+      return {
+        ...category,
+        branch_assignments: assignments,
+      };
+    })
+    .filter(Boolean);
 }
 
 async function listProducts(restaurantId, filters = {}) {
@@ -419,11 +573,28 @@ async function updateProduct(restaurantId, productId, payload = {}) {
 
   let categoryId = payload.categoryId || null;
   if (!categoryId && payload.categoryName) {
-    const category = await menuRepository.ensureCategory({ name: payload.categoryName });
+    const category = await menuRepository.ensureCategory({
+      restaurantId,
+      name: payload.categoryName,
+      description: payload.categoryDescription || null,
+      isActive: true,
+    });
     categoryId = category.id;
   } else if (!categoryId && payload.category) {
-    const category = await menuRepository.ensureCategory({ name: payload.category });
+    const category = await menuRepository.ensureCategory({
+      restaurantId,
+      name: payload.category,
+      description: payload.categoryDescription || null,
+      isActive: true,
+    });
     categoryId = category.id;
+  } else if (categoryId) {
+    const category = await menuRepository.findCategoryById(categoryId);
+    if (!category || category.restaurant_id !== restaurantId) {
+      const error = new Error('Category not found for restaurant');
+      error.status = 400;
+      throw error;
+    }
   }
 
   const fields = {

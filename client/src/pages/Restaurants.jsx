@@ -65,7 +65,7 @@ const Restaurants = () => {
       <header className="flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">
-            Restaurants near you
+            Restaurants
           </h1>
           <p className="mt-1 text-sm text-gray-500">
             Discover local favourites, seasonal specials, and must-try places.

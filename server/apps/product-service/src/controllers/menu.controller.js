@@ -14,7 +14,7 @@ async function createCategory(req, res, next) {
 async function listCategories(req, res, next) {
   try {
     const { restaurantId } = req.params;
-    const categories = await menuService.listCategories(restaurantId);
+    const categories = await menuService.listCategories(restaurantId, req.query || {});
     res.json(categories);
   } catch (error) {
     next(error);

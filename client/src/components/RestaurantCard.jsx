@@ -14,7 +14,23 @@ const RestaurantCard = ({ restaurant, variant = "default" }) => {
     restaurant.coverImage,
     restaurant.heroImage,
     restaurant.images,
+    restaurant.brand?.images,
   );
+
+  const title = restaurant.displayName || restaurant.name;
+  const distance = Number.isFinite(restaurant.distanceKm)
+    ? restaurant.distanceKm
+    : Number.isFinite(restaurant.brand?.distanceKm)
+      ? restaurant.brand.distanceKm
+      : 0;
+  const tags = restaurant.tags?.length
+    ? restaurant.tags
+    : restaurant.brand?.cuisine
+      ? [restaurant.brand.cuisine]
+      : [];
+  const ratingValue = restaurant.rating ?? restaurant.brand?.rating ?? 0;
+  const addressLine = restaurant.address || restaurant.brand?.description || "Address updating soon.";
+
 
   return (
     <Link
@@ -30,12 +46,12 @@ const RestaurantCard = ({ restaurant, variant = "default" }) => {
       >
         <img
           src={coverImage}
-          alt={restaurant.name}
+          alt={title}
           className="h-full w-full object-cover object-center transition duration-300 group-hover:scale-105"
           onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = restaurantPlaceholderImage; }}
         />
         <div className="absolute left-4 top-4 rounded-full bg-white/90 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-orange-500 shadow">
-          {restaurant.tags?.[0] || "Nổi bật"}
+          {tags[0] || "Popular spot"}
         </div>
       </div>
 
@@ -43,19 +59,19 @@ const RestaurantCard = ({ restaurant, variant = "default" }) => {
         <div className="flex items-start justify-between gap-4">
           <div>
             <h3 className="text-lg font-semibold text-gray-900">
-              {restaurant.name}
+              {title}
             </h3>
-            <p className="text-sm text-gray-500">{restaurant.address}</p>
+            <p className="text-sm text-gray-500">{addressLine}</p>
           </div>
           <span className="rounded-full bg-orange-50 px-3 py-1 text-xs font-semibold text-orange-600">
-            {restaurant.distanceKm.toFixed(1)} km
+            {distance.toFixed(1)} km
           </span>
         </div>
 
-        <RatingStars rating={restaurant.rating} />
+        <RatingStars rating={ratingValue} />
 
         <div className="flex flex-wrap gap-2">
-          {restaurant.tags?.slice(0, 3).map((tag) => (
+          {tags.slice(0, 3).map((tag) => (
             <span
               key={tag}
               className="rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-600"
@@ -79,3 +95,20 @@ const RestaurantCard = ({ restaurant, variant = "default" }) => {
 };
 
 export default RestaurantCard;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

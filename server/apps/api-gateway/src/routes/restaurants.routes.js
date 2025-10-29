@@ -12,8 +12,10 @@ router.post('/resend-verification', controller.resendVerification);
 
 // Catalog & branch management (product-service)
 router.post('/', controller.createRestaurant);
+router.get('/catalog', controller.listCatalog);
 router.get('/owner/:ownerId', controller.getRestaurantByOwner);
 router.get('/owner/:ownerId/list', controller.listRestaurantsByOwner);
+router.get('/:restaurantId/catalog', controller.getCatalog);
 router.get('/:restaurantId', controller.getRestaurant);
 router.put('/:restaurantId', controller.updateRestaurant);
 router.post('/:restaurantId/branches', controller.createBranch);

@@ -108,6 +108,34 @@ async function resendVerification(req, res, next) {
   }
 }
 
+async function listCatalog(req, res, next) {
+  try {
+    const params = { ...(req.query || {}) };
+    const result = await restaurantClient.listCatalog(params, {
+      headers: { 'x-request-id': req.id },
+    });
+    return res.json(result);
+  } catch (error) {
+    return handleServiceError(error, res, next);
+  }
+}
+
+async function getCatalog(req, res, next) {
+  try {
+    const { restaurantId } = req.params;
+    if (!restaurantId) {
+      return badRequest(res, 'restaurantId is required');
+    }
+    const params = { ...(req.query || {}) };
+    const result = await restaurantClient.getCatalog(restaurantId, params, {
+      headers: { 'x-request-id': req.id },
+    });
+    return res.json(result);
+  } catch (error) {
+    return handleServiceError(error, res, next);
+  }
+}
+
 async function getRestaurant(req, res, next) {
   try {
     const { restaurantId } = req.params;
@@ -479,6 +507,8 @@ module.exports = {
   ownerLogin,
   ownerStatus,
   resendVerification,
+  listCatalog,
+  getCatalog,
   getRestaurant,
   getRestaurantByOwner,
   listRestaurantsByOwner,

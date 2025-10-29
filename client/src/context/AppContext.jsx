@@ -65,6 +65,86 @@ const toNumberOr = (value, fallback = 0) => {
 
 const ensureArray = (value) => (Array.isArray(value) ? value : value ? [value] : []);
 
+const adaptOptionValueFromApi = (item) => {
+    if (!item) return null;
+    const priceDelta =
+        item.price_delta !== undefined && item.price_delta !== null
+            ? toNumberOr(item.price_delta, 0)
+            : item.priceDelta !== undefined && item.priceDelta !== null
+                ? toNumberOr(item.priceDelta, 0)
+                : 0;
+    const branchOverrides = Array.isArray(item.branch_overrides)
+        ? item.branch_overrides.map((override) => ({
+            branchId: override.branch_id || override.branchId || null,
+            isAvailable: override.is_available !== false,
+            isVisible: override.is_visible !== false,
+            priceDelta:
+                override.price_delta_override === undefined || override.price_delta_override === null
+                    ? null
+                    : toNumberOr(override.price_delta_override, null),
+        }))
+        : [];
+    const label = item.name || item.label || 'Option';
+    return {
+        id: item.id,
+        label,
+        name: label,
+        description: item.description || '',
+        priceDelta,
+        branchOverrides,
+    };
+};
+
+const adaptOptionGroupFromApi = (group) => {
+    if (!group) return null;
+    const selectionTypeRaw = group.selection_type || group.selectionType || 'multiple';
+    const selectionType =
+        typeof selectionTypeRaw === 'string' && selectionTypeRaw.toLowerCase() === 'single'
+            ? 'single'
+            : 'multiple';
+    const minRaw =
+        group.min_select !== undefined && group.min_select !== null
+            ? group.min_select
+            : group.minSelect;
+    const maxRaw =
+        group.max_select !== undefined && group.max_select !== null
+            ? group.max_select
+            : group.maxSelect;
+    const minSelect =
+        minRaw === undefined || minRaw === null
+            ? selectionType === 'single'
+                ? 1
+                : 0
+            : toNumberOr(minRaw, 0);
+    const maxSelect =
+        maxRaw === undefined || maxRaw === null
+            ? selectionType === 'single'
+                ? 1
+                : null
+            : toNumberOr(maxRaw, null);
+    const values = Array.isArray(group.items)
+        ? group.items.map(adaptOptionValueFromApi).filter(Boolean)
+        : [];
+    const label = group.name || group.label || 'Customization';
+    const required =
+        group.is_required !== undefined && group.is_required !== null
+            ? Boolean(group.is_required)
+            : group.isRequired !== undefined && group.isRequired !== null
+                ? Boolean(group.isRequired)
+                : minSelect > 0;
+    return {
+        id: group.id,
+        name: label,
+        label,
+        description: group.description || '',
+        type: selectionType,
+        minSelect,
+        maxSelect,
+        required,
+        values,
+    };
+};
+
 const adaptRestaurantFromApi = (restaurant) => {
     if (!restaurant) return null;
     const images = ensureArray(restaurant.images).filter(Boolean);
@@ -81,10 +161,21 @@ const adaptRestaurantFromApi = (restaurant) => {
 
     const branchList = Array.isArray(restaurant.branches)
         ? restaurant.branches.map((branch) => {
-            const branchImages = ensureArray(branch.images).filter(Boolean);
+            const rawBranchImages = ensureArray(branch.images);
+            const branchImages = rawBranchImages.filter(Boolean);
+            const branchLogoFallback = ensureArray(restaurant.logo).filter(Boolean);
+            const displayImages = branchImages.length
+                ? branchImages
+                : branchLogoFallback.length
+                    ? branchLogoFallback
+                    : images;
+            const branchHeroImage = displayImages[0] || heroImage;
+            const branchCoverImage = displayImages[1] || branchHeroImage;
+
             const addressParts = [branch.street, branch.ward, branch.district, branch.city]
                 .filter(Boolean)
                 .join(', ');
+
             const branchProductsRaw = Array.isArray(branch.products) ? branch.products : [];
             const branchProducts = branchProductsRaw
                 .map((item) => {
@@ -101,12 +192,28 @@ const adaptRestaurantFromApi = (restaurant) => {
                         }
                     }
                     adapted.branchId = branch.id;
+                    adapted.restaurantId = branch.id;
+                    adapted.brandRestaurantId = restaurant.id;
+                    adapted.brandName = restaurant.name || null;
+                    adapted.branchName = branch.name || restaurant.name || null;
                     return adapted;
                 })
                 .filter(Boolean);
+
+            const branchCategoriesRaw = Array.isArray(branch.categories) ? branch.categories : [];
+            const branchCategoryNames = branchCategoriesRaw
+                .map((category) => {
+                    if (!category) return null;
+                    if (typeof category === 'string') return category;
+                    return category.name || category.label || null;
+                })
+                .filter(Boolean);
+
+            const branchCombos = Array.isArray(branch.combos) ? branch.combos : [];
+
             return {
                 id: branch.id,
-                name: branch.name || 'Branch',
+                name: branch.name || restaurant.name || 'Branch',
                 number: branch.branchNumber ?? branch.branch_number ?? null,
                 address: addressParts || branch.street || '',
                 isPrimary: branch.isPrimary ?? branch.is_primary ?? false,
@@ -115,8 +222,15 @@ const adaptRestaurantFromApi = (restaurant) => {
                 ratingCount: branch.ratingSummary?.totalRatings ?? branch.ratingCount ?? null,
                 phone: branch.branchPhone || branch.phone || null,
                 email: branch.branchEmail || branch.email || null,
-                images: branchImages.length ? branchImages : [restaurantPlaceholderImage],
+                images: displayImages.length ? displayImages : [restaurantPlaceholderImage],
+                heroImage: branchHeroImage,
+                coverImage: branchCoverImage,
                 products: branchProducts,
+                categories: branchCategoryNames,
+                categoryAssignments: branchCategoriesRaw,
+                combos: branchCombos,
+                tags: Array.from(new Set([restaurant.cuisine, ...branchCategoryNames].filter(Boolean))),
+                distanceKm: toNumberOr(branch.distance_km, toNumberOr(restaurant.distance_km, 0)),
             };
         })
         : [];
@@ -178,6 +292,10 @@ const adaptProductFromApi = (product) => {
         }
         : null;
 
+    const optionGroups = Array.isArray(product.options)
+        ? product.options.map(adaptOptionGroupFromApi).filter(Boolean)
+        : [];
+
     const inStock =
         inventoryQuantity === null || inventoryQuantity === undefined
             ? true
@@ -203,7 +321,7 @@ const adaptProductFromApi = (product) => {
         rating: toNumberOr(product.rating, 0),
         reviewCount: toNumberOr(product.review_count, 0),
         toppings: [],
-        options: [],
+        options: optionGroups,
         preparation: {
             prepMinutes: toNumberOr(product.prep_minutes, 5),
             cookMinutes: toNumberOr(product.cook_minutes, 15),
@@ -215,6 +333,106 @@ const adaptProductFromApi = (product) => {
         updatedAt,
     };
 };
+
+function buildBranchCatalog(brands = []) {
+    const branches = [];
+    const branchProducts = [];
+
+    brands.forEach((brand) => {
+        const branchList = Array.isArray(brand.branches) ? brand.branches : [];
+        branchList.forEach((branch) => {
+            let productsForBranch = Array.isArray(branch.products)
+                ? branch.products.map((product) => ({
+                    ...product,
+                    restaurantId: branch.id,
+                    branchId: branch.id,
+                    brandRestaurantId: brand.id,
+                    brandName: brand.name,
+                    cuisine: brand.cuisine,
+                }))
+                : [];
+
+            if (!productsForBranch.length && Array.isArray(brand.products) && brand.products.length) {
+                productsForBranch = brand.products.map((product) => ({
+                    ...product,
+                    restaurantId: branch.id,
+                    branchId: branch.id,
+                    brandRestaurantId: brand.id,
+                    brandName: brand.name,
+                    cuisine: brand.cuisine,
+                }));
+            }
+
+            branchProducts.push(...productsForBranch);
+
+            const priceCandidates = productsForBranch
+                .map((item) => toNumberOr(item.basePrice ?? item.base_price, 0))
+                .filter((value) => Number.isFinite(value) && value >= 0);
+            const priceRange = {
+                min: priceCandidates.length ? Math.min(...priceCandidates) : 0,
+                max: priceCandidates.length ? Math.max(...priceCandidates) : 0,
+            };
+
+            const branchCategories = Array.isArray(branch.categories) && branch.categories.length
+                ? branch.categories
+                : Array.isArray(brand.categories)
+                    ? brand.categories
+                    : [];
+
+            const tagSet = new Set(
+                [
+                    brand.cuisine,
+                    ...(Array.isArray(branch.tags) ? branch.tags : []),
+                    ...branchCategories,
+                ].filter(Boolean),
+            );
+
+            const displayImages = Array.isArray(branch.images) && branch.images.length
+                ? branch.images
+                : Array.isArray(brand.images) && brand.images.length
+                    ? brand.images
+                    : Array.isArray(brand.logo) && brand.logo.length
+                        ? brand.logo
+                        : [restaurantPlaceholderImage];
+
+            branches.push({
+                ...branch,
+                id: branch.id,
+                branchId: branch.id,
+                restaurantId: branch.id,
+                name: branch.name || brand.name || 'Restaurant',
+                displayName: branch.name ? `${brand.name} • ${branch.name}` : brand.name,
+                description: branch.description || brand.description || '',
+                cuisine: brand.cuisine,
+                tags: Array.from(tagSet),
+                heroImage: branch.heroImage || brand.heroImage,
+                coverImage: branch.coverImage || brand.coverImage,
+                images: displayImages,
+                logo: Array.isArray(brand.logo) ? brand.logo : [],
+                distanceKm: toNumberOr(branch.distanceKm, toNumberOr(brand.distanceKm, 0)),
+                rating: toNumberOr(branch.rating, brand.rating),
+                reviewCount: toNumberOr(branch.ratingCount, brand.reviewCount),
+                categories: branchCategories,
+                categoryAssignments: branch.categoryAssignments || [],
+                combos: Array.isArray(branch.combos) ? branch.combos : [],
+                products: productsForBranch,
+                priceRange,
+                brand: {
+                    id: brand.id,
+                    name: brand.name,
+                    cuisine: brand.cuisine,
+                    phone: brand.phone,
+                    email: brand.email,
+                    images: brand.images,
+                    logo: brand.logo,
+                    description: brand.description,
+                },
+            });
+        });
+    });
+
+    return { branches, branchProducts };
+}
 
 const adaptAddressFromApi = (address) => {
     if (!address) return null;
@@ -390,6 +608,7 @@ export const AppContextProvider = ({ children }) => {
     // --- States ---
     const [products, setProducts] = useState([]);
     const [restaurants, setRestaurants] = useState([]);
+    const [restaurantBrands, setRestaurantBrands] = useState([]);
     const [catalogLoading, setCatalogLoading] = useState(false);
     const [catalogError, setCatalogError] = useState(null);
     const [activeOrders, setActiveOrders] = useState([]);
@@ -442,12 +661,16 @@ export const AppContextProvider = ({ children }) => {
             const adaptedRestaurants = Array.isArray(restaurantData)
                 ? restaurantData.map(adaptRestaurantFromApi).filter(Boolean)
                 : [];
-            const adaptedProducts = Array.isArray(productData)
+
+            const { branches: flattenedBranches, branchProducts } = buildBranchCatalog(adaptedRestaurants);
+
+            const globalProducts = Array.isArray(productData)
                 ? productData.map(adaptProductFromApi).filter(Boolean)
                 : [];
 
-            setRestaurants(adaptedRestaurants);
-            setProducts(adaptedProducts);
+            setRestaurantBrands(adaptedRestaurants);
+            setRestaurants(flattenedBranches);
+            setProducts(branchProducts.length ? branchProducts : globalProducts);
 
             return { success: true };
         } catch (error) {
@@ -455,9 +678,67 @@ export const AppContextProvider = ({ children }) => {
                 return { cancelled: true };
             }
             console.error('Failed to load catalog data from product-service', error);
-            setCatalogError(error?.message || 'Không thể tải dữ liệu món ăn / nhà hàng.');
-            setRestaurants(prev => (prev.length ? prev : FALLBACK_RESTAURANTS));
-            setProducts(prev => (prev.length ? prev : FALLBACK_PRODUCTS));
+            setCatalogError(error?.message || 'Unable to load restaurant catalog.');
+
+            const fallbackBrands = FALLBACK_RESTAURANTS
+                .map(adaptRestaurantFromApi)
+                .filter(Boolean);
+            const { branches: fallbackBranchesRaw, branchProducts: fallbackBranchProductsRaw } =
+                buildBranchCatalog(fallbackBrands);
+
+            const safeFallbackBranches = fallbackBranchesRaw.length
+                ? fallbackBranchesRaw
+                : fallbackBrands.map((brand) => {
+                    const fallbackBranchProducts = Array.isArray(brand.products)
+                        ? brand.products.map((product) => ({
+                            ...product,
+                            restaurantId: brand.id,
+                            branchId: brand.id,
+                            brandRestaurantId: brand.id,
+                            brandName: brand.name,
+                        }))
+                        : [];
+                    return {
+                        id: brand.id,
+                        branchId: brand.id,
+                        restaurantId: brand.id,
+                        name: brand.name,
+                        displayName: brand.name,
+                        description: brand.description || '',
+                        cuisine: brand.cuisine,
+                        tags: Array.isArray(brand.tags) ? brand.tags : brand.cuisine ? [brand.cuisine] : [],
+                        heroImage: brand.heroImage,
+                        coverImage: brand.coverImage,
+                        images: brand.images,
+                        logo: brand.logo,
+                        distanceKm: brand.distanceKm ?? 0,
+                        rating: brand.rating ?? 0,
+                        reviewCount: brand.reviewCount ?? 0,
+                        categories: Array.isArray(brand.categories) ? brand.categories : [],
+                        categoryAssignments: [],
+                        combos: [],
+                        products: fallbackBranchProducts,
+                        priceRange: { min: 0, max: 0 },
+                        brand: {
+                            id: brand.id,
+                            name: brand.name,
+                            cuisine: brand.cuisine,
+                            phone: brand.phone,
+                            email: brand.email,
+                            images: brand.images,
+                            logo: brand.logo,
+                            description: brand.description,
+                        },
+                    };
+                });
+
+            const safeFallbackProducts = fallbackBranchProductsRaw.length
+                ? fallbackBranchProductsRaw
+                : safeFallbackBranches.flatMap((branch) => branch.products || []);
+
+            setRestaurantBrands((prev) => (prev.length ? prev : fallbackBrands));
+            setRestaurants((prev) => (prev.length ? prev : safeFallbackBranches));
+            setProducts((prev) => (prev.length ? prev : safeFallbackProducts.length ? safeFallbackProducts : FALLBACK_PRODUCTS));
             return { success: false, error };
         } finally {
             if (!signal?.aborted) {
@@ -487,6 +768,39 @@ export const AppContextProvider = ({ children }) => {
         try { return JSON.parse(localStorage.getItem('restaurant_profile') || 'null'); } catch { return null; }
     });
 
+    const refreshOrders = useCallback(async () => {
+        if (!authToken) {
+            setActiveOrders([]);
+            setPastOrders([]);
+            setOrdersLoading(false);
+            return { success: false, reason: 'unauthenticated' };
+        }
+
+        setOrdersLoading(true);
+        try {
+            const response = await ordersService.list();
+            const rawList = Array.isArray(response)
+                ? response
+                : Array.isArray(response?.orders)
+                    ? response.orders
+                    : Array.isArray(response?.data)
+                        ? response.data
+                        : [];
+            const adapted = rawList.map(adaptOrderFromApi).filter(Boolean);
+            const { active, past } = splitOrdersByStatus(adapted);
+            setActiveOrders(active);
+            setPastOrders(past);
+            return { success: true, active, past };
+        } catch (error) {
+            console.error('Failed to refresh orders', error);
+            setActiveOrders([]);
+            setPastOrders([]);
+            return { success: false, error };
+        } finally {
+            setOrdersLoading(false);
+        }
+    }, [authToken]);
+
     const refreshAddresses = useCallback(async () => {
         if (!authToken && !authProfileId) {
             setAddresses([]);
@@ -495,9 +809,14 @@ export const AppContextProvider = ({ children }) => {
         }
         try {
             const data = await authService.listAddresses({ userId: authProfileId || undefined });
-            const adapted = Array.isArray(data)
-                ? data.map((item) => adaptAddressFromApi(item)).filter(Boolean)
-                : [];
+            const rawList = Array.isArray(data)
+                ? data
+                : Array.isArray(data?.data)
+                    ? data.data
+                    : Array.isArray(data?.addresses)
+                        ? data.addresses
+                        : [];
+            const adapted = rawList.map(adaptAddressFromApi).filter(Boolean);
             setAddresses(adapted);
             if (adapted.length) {
                 const defaultAddress = adapted.find((addr) => addr.isDefault) || adapted[0];
@@ -507,67 +826,62 @@ export const AppContextProvider = ({ children }) => {
             }
             return adapted;
         } catch (error) {
+            const status = error?.response?.status;
+            if (status === 401 || status === 403) {
+                setAddresses([]);
+                setSelectedAddressId(null);
+                return [];
+            }
             console.error('Failed to load addresses', error);
-            setAddresses([]);
-            setSelectedAddressId(null);
+            toast.error('Unable to load saved addresses. Please try again later.');
             return [];
         }
     }, [authToken, authProfileId]);
 
     const refreshBankAccounts = useCallback(async () => {
-        const userId = authProfileId || undefined;
-        if (!authToken && !userId) {
+        if (!authToken && !authProfileId) {
             setBankAccounts([]);
             return [];
         }
         try {
-            const data = await paymentsService.listBankAccounts({ userId });
-            const accounts = Array.isArray(data) ? data : [];
-            setBankAccounts(accounts);
-            return accounts;
+            const data = await paymentsService.listBankAccounts({ userId: authProfileId || undefined });
+            const rawList = Array.isArray(data)
+                ? data
+                : Array.isArray(data?.data)
+                    ? data.data
+                    : Array.isArray(data?.items)
+                        ? data.items
+                        : [];
+            setBankAccounts(rawList);
+            return rawList;
         } catch (error) {
+            const status = error?.response?.status;
+            if (status === 401 || status === 403) {
+                setBankAccounts([]);
+                return [];
+            }
             console.error('Failed to load bank accounts', error);
+            toast.error('Unable to load bank accounts. Please try again later.');
             setBankAccounts([]);
             return [];
         }
     }, [authToken, authProfileId]);
 
-    const linkBankAccount = useCallback(async (payload) => {
-        const account = await paymentsService.linkBankAccount({
-            ...payload,
-            user_id: payload?.user_id || authProfileId || undefined,
-        });
-        setBankAccounts(prev => [account, ...prev.filter(item => item.id !== account.id)]);
-        return account;
-    }, [authProfileId]);
-
-
-    const refreshOrders = useCallback(async () => {
-        if (!authToken) {
-            setActiveOrders([]);
-            setPastOrders([]);
-            return { cancelled: true };
-        }
-
-        setOrdersLoading(true);
-        try {
-            const data = await ordersService.list();
-            const adapted = Array.isArray(data)
-                ? data.map(adaptOrderFromApi).filter(Boolean)
-                : [];
-            const { active, past } = splitOrdersByStatus(adapted);
-            setActiveOrders(active);
-            setPastOrders(past);
-            return { success: true, active, past };
-        } catch (error) {
-            console.error('Failed to load orders from order-service', error);
-            setActiveOrders([]);
-            setPastOrders([]);
-            return { success: false, error };
-        } finally {
-            setOrdersLoading(false);
-        }
-    }, [authToken]);
+    const linkBankAccount = useCallback(
+        async (payload = {}) => {
+            if (!authToken && !authProfileId) {
+                throw new Error('Please sign in to link a bank account.');
+            }
+            const requestPayload = { ...payload };
+            if (!requestPayload.user_id && authProfileId) {
+                requestPayload.user_id = authProfileId;
+            }
+            const record = await paymentsService.linkBankAccount(requestPayload);
+            await refreshBankAccounts();
+            return record;
+        },
+        [authToken, authProfileId, refreshBankAccounts],
+    );
 
     useEffect(() => {
         refreshOrders();
@@ -1135,6 +1449,7 @@ export const AppContextProvider = ({ children }) => {
 
     // --- Restaurant Helpers ---
     const getRestaurantById = (restaurantId) => restaurants.find(restaurant => restaurant.id === restaurantId);
+    const getBrandById = (brandId) => restaurantBrands.find((restaurant) => restaurant.id === brandId);
     const getDishById = (dishId) => products.find(item => item._id === dishId);
     const getDishesByRestaurant = (restaurantId) =>
         products.filter(item => item.restaurantId === restaurantId);
@@ -1306,10 +1621,12 @@ export const AppContextProvider = ({ children }) => {
         isOwner,
         setIsOwner,
         restaurants,
+        restaurantBrands,
         catalogLoading,
         catalogError,
         refreshCatalog,
         getRestaurantById,
+        getBrandById,
         getDishesByRestaurant,
         getDishById,
         activeOrders,
@@ -1360,6 +1677,8 @@ export const AppContextProvider = ({ children }) => {
 };
 
 export const useAppContext = () => useContext(AppContext);
+
+
 
 
 

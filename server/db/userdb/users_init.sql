@@ -1,77 +1,3 @@
--- CREATE EXTENSION IF NOT EXISTS "pgcrypto";
-
--- -- users table
--- CREATE TABLE IF NOT EXISTS users (
---   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
---   first_name VARCHAR(50),
---   last_name VARCHAR(50),
---   email VARCHAR(150) UNIQUE NOT NULL,
---   password_hash VARCHAR(255),
---   phone VARCHAR(30),
---   role VARCHAR(30) NOT NULL DEFAULT 'customer',
---   tier VARCHAR(30) DEFAULT 'Bronze',
---   is_active BOOLEAN DEFAULT TRUE,
---   is_verified BOOLEAN DEFAULT FALSE,
---   is_approved BOOLEAN DEFAULT FALSE,
---   otp_code VARCHAR(10),
---   otp_expires TIMESTAMP,
---   email_verified BOOLEAN DEFAULT FALSE,
---   restaurant_name VARCHAR(150),
---   company_address VARCHAR(255),
---   tax_code VARCHAR(50),
---   manager_name VARCHAR(150),
---   restaurant_status VARCHAR(30) DEFAULT 'pending',
---   created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
---   updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
--- );
-
--- CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
--- CREATE INDEX IF NOT EXISTS idx_users_created_at ON users(created_at);
-
--- -- user addresses
--- CREATE TABLE IF NOT EXISTS user_addresses (
---   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
---   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
---   label VARCHAR(50),
---   recipient VARCHAR(150),
---   phone VARCHAR(30),
---   street VARCHAR(200) NOT NULL,
---   ward VARCHAR(100),
---   district VARCHAR(100),
---   city VARCHAR(100),
---   instructions TEXT,
---   is_primary BOOLEAN DEFAULT FALSE,
---   created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
---   updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
--- );
-
--- CREATE INDEX IF NOT EXISTS idx_user_addresses_user ON user_addresses(user_id);
--- CREATE INDEX IF NOT EXISTS idx_user_addresses_primary ON user_addresses(user_id, is_primary);
-
--- ALTER TABLE user_addresses
---   ADD COLUMN IF NOT EXISTS label VARCHAR(50),
---   ADD COLUMN IF NOT EXISTS recipient VARCHAR(150),
---   ADD COLUMN IF NOT EXISTS phone VARCHAR(30),
---   ADD COLUMN IF NOT EXISTS instructions TEXT;
-
--- -- refresh tokens
--- CREATE TABLE IF NOT EXISTS refresh_tokens (
---   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
---   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
---   token_hash TEXT NOT NULL,
---   expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
---   revoked BOOLEAN DEFAULT FALSE,
---   created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
--- );
-
--- CREATE INDEX IF NOT EXISTS idx_refresh_user ON refresh_tokens(user_id);
--- CREATE INDEX IF NOT EXISTS idx_refresh_expires_at ON refresh_tokens(expires_at);
-
--- =====================================================================
--- USER-SERVICE DDL (PostgreSQL)
--- Phân quyền restaurant: owner_main / owner / manager / staff
--- =====================================================================
-
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 -- =====================================================================
@@ -436,3 +362,154 @@ SELECT u.id, 'System Administrator', 'Super Admin', '{"all": true}'::jsonb
 FROM users u
 WHERE u.email = 'admin@foodfast.vn'
 ON CONFLICT (user_id) DO NOTHING;
+
+-- =====================================================================
+-- SEED SAMPLE OWNER ACCOUNTS AND RESTAURANT CONSOLE ACCESS
+-- =====================================================================
+
+INSERT INTO roles (code, description)
+VALUES
+  ('owner', 'Restaurant owner with console access')
+ON CONFLICT (code) DO NOTHING;
+
+DROP TABLE IF EXISTS tmp_owner_seed;
+CREATE TEMP TABLE tmp_owner_seed (
+  user_id UUID,
+  restaurant_id UUID,
+  account_id UUID,
+  email TEXT,
+  first_name TEXT,
+  last_name TEXT,
+  phone TEXT,
+  legal_name TEXT,
+  tax_code TEXT,
+  company_address TEXT,
+  manager_name TEXT,
+  login_email TEXT,
+  display_name TEXT,
+  account_phone TEXT
+);
+
+INSERT INTO tmp_owner_seed (
+  user_id,
+  restaurant_id,
+  account_id,
+  email,
+  first_name,
+  last_name,
+  phone,
+  legal_name,
+  tax_code,
+  company_address,
+  manager_name,
+  login_email,
+  display_name,
+  account_phone
+)
+VALUES
+  ('11111111-1111-4111-8111-000000000101'::uuid, '21111111-1111-4111-8111-000000000101'::uuid, '51111111-1111-4111-8111-000000000101'::uuid, 'lotte.owner@foodfast.vn', 'Minji', 'Park', '0901000101', 'Lotte Vietnam Co., Ltd.', '0101234561', '469 Le Loi, District 1, Ho Chi Minh City', 'Minji Park', 'owner@lottefoodhall.vn', 'Lotte Food Hall Owner', '02836223344'),
+  ('11111111-1111-4111-8111-000000000102'::uuid, '21111111-1111-4111-8111-000000000102'::uuid, '51111111-1111-4111-8111-000000000102'::uuid, 'kfc.owner@foodfast.vn', 'David', 'Nguyen', '0902000202', 'KFC Vietnam JSC', '0301234562', '94 Nguyen Trai, District 5, Ho Chi Minh City', 'David Nguyen', 'owner@kfcvietnam.vn', 'KFC Vietnam Owner', '19006886'),
+  ('11111111-1111-4111-8111-000000000103'::uuid, '21111111-1111-4111-8111-000000000103'::uuid, '51111111-1111-4111-8111-000000000103'::uuid, 'jollibee.owner@foodfast.vn', 'Maria', 'Tran', '0903000303', 'Jollibee Vietnam Co., Ltd.', '0301234563', '5 Tran Hung Dao, District 1, Ho Chi Minh City', 'Maria Tran', 'owner@jollibee.vn', 'Jollibee Vietnam Owner', '19001533'),
+  ('11111111-1111-4111-8111-000000000104'::uuid, '21111111-1111-4111-8111-000000000104'::uuid, '51111111-1111-4111-8111-000000000104'::uuid, 'busan.owner@foodfast.vn', 'Jiho', 'Lee', '0904000404', 'Busan Bistro Company Limited', '0311234564', '12 Nguyen Hue, District 1, Ho Chi Minh City', 'Jiho Lee', 'owner@busanbistro.vn', 'Busan Bistro Owner', '02822997788'),
+  ('11111111-1111-4111-8111-000000000105'::uuid, '21111111-1111-4111-8111-000000000105'::uuid, '51111111-1111-4111-8111-000000000105'::uuid, 'sasin.owner@foodfast.vn', 'Phuong', 'Le', '0905000505', 'Sasin Hotpot Vietnam', '0311234565', '88 Tran Hung Dao, District 5, Ho Chi Minh City', 'Phuong Le', 'owner@sasinhotpot.vn', 'Sasin Hotpot Owner', '02822112211'),
+  ('11111111-1111-4111-8111-000000000106'::uuid, '21111111-1111-4111-8111-000000000106'::uuid, '51111111-1111-4111-8111-000000000106'::uuid, 'highlands.owner@foodfast.vn', 'Lan', 'Pham', '0906000606', 'Highlands Coffee Service JSC', '0311234566', '44 Ngo Duc Ke, District 1, Ho Chi Minh City', 'Lan Pham', 'owner@highlandscoffee.vn', 'Highlands Coffee Owner', '02862744444'),
+  ('11111111-1111-4111-8111-000000000107'::uuid, '21111111-1111-4111-8111-000000000107'::uuid, '51111111-1111-4111-8111-000000000107'::uuid, 'katinat.owner@foodfast.vn', 'Bao', 'Vo', '0907000707', 'Katinat Saigon Kafe', '0311234567', '58 Ly Tu Trong, District 1, Ho Chi Minh City', 'Bao Vo', 'owner@katinat.vn', 'Katinat Owner', '02866886688'),
+  ('11111111-1111-4111-8111-000000000108'::uuid, '21111111-1111-4111-8111-000000000108'::uuid, '51111111-1111-4111-8111-000000000108'::uuid, 'bonchon.owner@foodfast.vn', 'Hana', 'Kim', '0908000808', 'Bonchon Vietnam Ltd.', '0311234568', '5B Nguyen Thi Minh Khai, District 1, Ho Chi Minh City', 'Hana Kim', 'owner@bonchon.vn', 'Bonchon Owner', '02839393939'),
+  ('11111111-1111-4111-8111-000000000109'::uuid, '21111111-1111-4111-8111-000000000109'::uuid, '51111111-1111-4111-8111-000000000109'::uuid, 'texas.owner@foodfast.vn', 'Quang', 'Pham', '0909000909', 'Texas Chicken Vietnam', '0311234569', '250 Le Loi, District 1, Ho Chi Minh City', 'Quang Pham', 'owner@texaschicken.vn', 'Texas Chicken Owner', '02838486666'),
+  ('11111111-1111-4111-8111-000000000110'::uuid, '21111111-1111-4111-8111-000000000110'::uuid, '51111111-1111-4111-8111-000000000110'::uuid, 'pizza4ps.owner@foodfast.vn', 'Yuki', 'Matsumoto', '0910000100', 'Pizza 4Ps Corporation', '0311234570', '8/15 Le Thanh Ton, District 1, Ho Chi Minh City', 'Yuki Matsumoto', 'owner@pizza4ps.vn', 'Pizza 4Ps Owner', '02836229988');
+
+INSERT INTO users (id, email, first_name, last_name, phone, is_active, email_verified)
+SELECT user_id, email, first_name, last_name, phone, TRUE, TRUE
+FROM tmp_owner_seed
+ON CONFLICT (email) DO NOTHING;
+
+WITH admin_user AS (
+  SELECT id
+  FROM users
+  WHERE email = 'admin@foodfast.vn'
+  LIMIT 1
+)
+INSERT INTO owner_profiles (
+  user_id,
+  legal_name,
+  tax_code,
+  company_address,
+  manager_name,
+  status,
+  approved_by,
+  approved_at
+)
+SELECT
+  seed.user_id,
+  seed.legal_name,
+  seed.tax_code,
+  seed.company_address,
+  seed.manager_name,
+  'approved',
+  admin_user.id,
+  now()
+FROM tmp_owner_seed seed
+CROSS JOIN admin_user
+ON CONFLICT (user_id) DO NOTHING;
+
+WITH owner_role AS (
+  SELECT id
+  FROM roles
+  WHERE code = 'owner'
+  LIMIT 1
+)
+INSERT INTO user_roles (user_id, role_id)
+SELECT seed.user_id, owner_role.id
+FROM tmp_owner_seed seed
+CROSS JOIN owner_role
+ON CONFLICT DO NOTHING;
+
+WITH owner_role AS (
+  SELECT id
+  FROM roles
+  WHERE code = 'owner'
+  LIMIT 1
+)
+INSERT INTO user_credentials (user_id, role_id, password_hash, is_temp)
+SELECT seed.user_id, owner_role.id, '$2b$10$fYqtZDmpJFbpSCE3OVaXMuOTBnbK.icYOjHM6gpDZsOibTEEq7mca', FALSE
+FROM tmp_owner_seed seed
+CROSS JOIN owner_role
+ON CONFLICT (user_id, role_id) DO NOTHING;
+
+INSERT INTO restaurant_accounts (id, restaurant_id, login_email, display_name, phone, user_id, is_active)
+SELECT account_id, restaurant_id, login_email, display_name, account_phone, user_id, TRUE
+FROM tmp_owner_seed
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO restaurant_account_credentials (account_id, password_hash, is_temp)
+SELECT account_id, '$2b$10$fYqtZDmpJFbpSCE3OVaXMuOTBnbK.icYOjHM6gpDZsOibTEEq7mca', FALSE
+FROM tmp_owner_seed
+ON CONFLICT (account_id) DO NOTHING;
+
+INSERT INTO restaurant_account_memberships (
+  account_id,
+  restaurant_id,
+  branch_id,
+  role_in_restaurant,
+  can_manage_branch,
+  can_manage_menu,
+  can_manage_orders,
+  can_manage_finance,
+  can_manage_staff,
+  is_active
+)
+SELECT
+  account_id,
+  restaurant_id,
+  NULL,
+  'owner_main',
+  TRUE,
+  TRUE,
+  TRUE,
+  TRUE,
+  TRUE,
+  TRUE
+FROM tmp_owner_seed
+ON CONFLICT (account_id, branch_id) DO NOTHING;
+
+DROP TABLE tmp_owner_seed;

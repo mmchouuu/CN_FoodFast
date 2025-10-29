@@ -290,6 +290,62 @@ async function overrideBranchProductTax({
   return result.rows[0];
 }
 
+async function listRestaurantTaxAssignments(restaurantId, client) {
+  if (!restaurantId) return [];
+  const executor = getExecutor(client);
+  const result = await executor.query(
+    `
+      SELECT *
+      FROM restaurant_tax_assignments
+      WHERE restaurant_id = $1
+        AND is_active = TRUE
+      ORDER BY priority ASC
+    `,
+    [restaurantId],
+  );
+  return result.rows;
+}
+
+async function listBranchTaxAssignments(branchIds = [], client) {
+  if (!Array.isArray(branchIds) || !branchIds.length) return [];
+  const executor = getExecutor(client);
+  const result = await executor.query(
+    `
+      SELECT *
+      FROM branch_tax_assignments
+      WHERE branch_id = ANY($1::uuid[])
+        AND is_active = TRUE
+      ORDER BY branch_id, priority ASC
+    `,
+    [branchIds],
+  );
+  return result.rows;
+}
+
+async function listBranchProductTaxOverrides(branchIds = [], productIds = [], client) {
+  if (
+    !Array.isArray(branchIds) ||
+    !branchIds.length ||
+    !Array.isArray(productIds) ||
+    !productIds.length
+  ) {
+    return [];
+  }
+  const executor = getExecutor(client);
+  const result = await executor.query(
+    `
+      SELECT *
+      FROM branch_product_tax_overrides
+      WHERE branch_id = ANY($1::uuid[])
+        AND product_id = ANY($2::uuid[])
+        AND is_active = TRUE
+      ORDER BY branch_id, product_id, priority ASC
+    `,
+    [branchIds, productIds],
+  );
+  return result.rows;
+}
+
 module.exports = {
   createTaxTemplate,
   createCalendar,
@@ -298,4 +354,7 @@ module.exports = {
   assignTaxToBranch,
   overrideProductTax,
   overrideBranchProductTax,
+  listRestaurantTaxAssignments,
+  listBranchTaxAssignments,
+  listBranchProductTaxOverrides,
 };

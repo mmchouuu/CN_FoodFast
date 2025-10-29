@@ -147,9 +147,92 @@ async function upsertBranchOptionOverride({
   return result.rows[0];
 }
 
+async function listOptionGroupsForProducts(productIds = [], client) {
+  if (!Array.isArray(productIds) || !productIds.length) return [];
+  const executor = getExecutor(client);
+  const result = await executor.query(
+    `
+      SELECT
+        pog.id,
+        pog.product_id,
+        pog.group_id,
+        pog.min_select,
+        pog.max_select,
+        pog.is_required,
+        pog.display_order,
+        pog.is_active,
+        og.restaurant_id,
+        og.name,
+        og.description,
+        og.selection_type,
+        og.min_select AS group_min_select,
+        og.max_select AS group_max_select,
+        og.is_required AS group_is_required,
+        og.is_active AS group_is_active
+      FROM product_option_groups pog
+      JOIN option_groups og ON og.id = pog.group_id
+      WHERE pog.product_id = ANY($1::uuid[])
+        AND pog.is_active = TRUE
+        AND og.is_active = TRUE
+      ORDER BY pog.product_id, COALESCE(pog.display_order, 32767), og.name
+    `,
+    [productIds],
+  );
+  return result.rows;
+}
+
+async function listOptionItemsForGroups(groupIds = [], client) {
+  if (!Array.isArray(groupIds) || !groupIds.length) return [];
+  const executor = getExecutor(client);
+  const result = await executor.query(
+    `
+      SELECT
+        oi.id,
+        oi.group_id,
+        oi.name,
+        oi.description,
+        oi.price_delta,
+        oi.is_active,
+        oi.display_order
+      FROM option_items oi
+      WHERE oi.group_id = ANY($1::uuid[])
+        AND oi.is_active = TRUE
+      ORDER BY COALESCE(oi.display_order, 32767), oi.name
+    `,
+    [groupIds],
+  );
+  return result.rows;
+}
+
+async function listBranchOptionOverrides(branchIds = [], productIds = [], client) {
+  if (
+    !Array.isArray(branchIds) ||
+    !branchIds.length ||
+    !Array.isArray(productIds) ||
+    !productIds.length
+  ) {
+    return [];
+  }
+  const executor = getExecutor(client);
+  const result = await executor.query(
+    `
+      SELECT
+        bpoi.*
+      FROM branch_product_option_items bpoi
+      WHERE bpoi.branch_id = ANY($1::uuid[])
+        AND bpoi.product_id = ANY($2::uuid[])
+    `,
+    [branchIds, productIds],
+  );
+  return result.rows;
+}
+
 module.exports = {
   createOptionGroup,
   createOptionItem,
   attachGroupToProduct,
   upsertBranchOptionOverride,
+  listOptionGroupsForProducts,
+  listOptionItemsForGroups,
+  listBranchOptionOverrides,
 };

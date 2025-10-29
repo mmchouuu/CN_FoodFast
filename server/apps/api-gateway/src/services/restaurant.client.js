@@ -11,12 +11,16 @@ const catalogClient = createAxiosInstance({
   timeout: config.requestTimeout,
 });
 
-function withHeaders(req, opts = {}) {
+function toRequestHeaders(req, opts = {}) {
   const headers = { ...(opts.headers || {}) };
   if (req?.id && !headers['x-request-id']) {
     headers['x-request-id'] = req.id;
   }
   return headers;
+}
+
+function withHeaders(req, opts = {}) {
+  return toRequestHeaders(req, opts);
 }
 
 async function signupOwner(payload, opts = {}) {
@@ -44,6 +48,22 @@ async function ownerStatus(email, opts = {}) {
 
 async function resendVerification(payload, opts = {}) {
   const res = await ownerClient.post('/resend-verification', payload, {
+    headers: opts.headers,
+  });
+  return res.data;
+}
+
+async function listCatalog(params = {}, opts = {}) {
+  const res = await catalogClient.get('/catalog', {
+    params,
+    headers: opts.headers,
+  });
+  return res.data;
+}
+
+async function getCatalog(restaurantId, params = {}, opts = {}) {
+  const res = await catalogClient.get(`/${restaurantId}/catalog`, {
+    params,
     headers: opts.headers,
   });
   return res.data;
@@ -216,6 +236,8 @@ module.exports = {
   ownerLogin,
   ownerStatus,
   resendVerification,
+  listCatalog,
+  getCatalog,
   createRestaurant,
   getRestaurant,
   getRestaurantByOwner,

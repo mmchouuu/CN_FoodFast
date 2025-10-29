@@ -1,12 +1,15 @@
 ﻿const express = require('express');
 const restaurantController = require('../controllers/restaurant.controller');
 const menuController = require('../controllers/menu.controller');
+const catalogController = require('../controllers/catalog.controller');
 
 const router = express.Router();
 
 router.post('/', restaurantController.createRestaurant);
+router.get('/catalog', catalogController.listCatalog);
 router.get('/owner/:ownerId', restaurantController.getByOwner);
 router.get('/owner/:ownerId/list', restaurantController.listByOwner);
+router.get('/:restaurantId/catalog', catalogController.getCatalog);
 router.get('/:restaurantId', restaurantController.getRestaurant);
 router.put('/:restaurantId', restaurantController.updateRestaurant);
 router.post('/:restaurantId/branches', restaurantController.createBranch);

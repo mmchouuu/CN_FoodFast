@@ -4,20 +4,66 @@ function getExecutor(client) {
   return client || pool;
 }
 
-async function ensureCategory({ name, description = null }, client) {
+async function ensureCategory({ restaurantId, name, description = null, isActive = true }, client) {
+  if (!restaurantId) {
+    throw new Error('restaurantId is required to ensure category');
+  }
   const executor = getExecutor(client);
   const result = await executor.query(
     `
-      INSERT INTO categories (name, description)
-      VALUES ($1, $2)
-      ON CONFLICT (name) DO UPDATE SET
+      INSERT INTO categories (restaurant_id, name, description, is_active)
+      VALUES ($1, $2, $3, $4)
+      ON CONFLICT (restaurant_id, name) DO UPDATE SET
         description = EXCLUDED.description,
+        is_active = EXCLUDED.is_active,
         updated_at = now()
       RETURNING *
     `,
-    [name, description],
+    [restaurantId, name, description, isActive !== false],
   );
   return result.rows[0];
+}
+
+async function assignCategoryToBranch(
+  { branchId, categoryId, isVisible = true, isActive = true, displayOrder = null },
+  client,
+) {
+  const executor = getExecutor(client);
+  const result = await executor.query(
+    `
+      INSERT INTO branch_category_assignments (
+        branch_id,
+        category_id,
+        is_visible,
+        is_active,
+        display_order
+      )
+      VALUES ($1, $2, $3, $4, $5)
+      ON CONFLICT (branch_id, category_id) DO UPDATE SET
+        is_visible = EXCLUDED.is_visible,
+        is_active = EXCLUDED.is_active,
+        display_order = EXCLUDED.display_order,
+        updated_at = now()
+      RETURNING *
+    `,
+    [branchId, categoryId, isVisible !== false, isActive !== false, displayOrder],
+  );
+  return result.rows[0];
+}
+
+async function findCategoryById(categoryId, client) {
+  if (!categoryId) return null;
+  const executor = getExecutor(client);
+  const result = await executor.query(
+    `
+      SELECT *
+      FROM categories
+      WHERE id = $1
+      LIMIT 1
+    `,
+    [categoryId],
+  );
+  return result.rows[0] || null;
 }
 
 async function createProduct({
@@ -140,15 +186,27 @@ async function listCategoriesForRestaurant(restaurantId, client) {
   const result = await executor.query(
     `
       SELECT
-        c.id,
-        c.name,
-        c.description,
-        COUNT(p.id) AS product_count
+        c.*,
+        COUNT(DISTINCT p.id) AS product_count,
+        COALESCE(
+          jsonb_agg(
+            DISTINCT jsonb_build_object(
+              'branch_id', bca.branch_id,
+              'is_visible', bca.is_visible,
+              'is_active', bca.is_active,
+              'display_order', bca.display_order
+            )
+          ) FILTER (WHERE bca.branch_id IS NOT NULL),
+          '[]'::jsonb
+        ) AS branch_assignments
       FROM categories c
       LEFT JOIN products p
         ON p.category_id = c.id
         AND p.restaurant_id = $1
-      GROUP BY c.id, c.name, c.description
+      LEFT JOIN branch_category_assignments bca
+        ON bca.category_id = c.id
+      WHERE c.restaurant_id = $1
+      GROUP BY c.id
       ORDER BY c.name ASC
     `,
     [restaurantId],
@@ -223,7 +281,7 @@ async function listProductsByRestaurant(restaurantId, filters = {}, client) {
         p.*,
         c.name AS category_name
       FROM products p
-      LEFT JOIN categories c ON c.id = p.category_id
+      LEFT JOIN categories c ON c.id = p.category_id AND c.restaurant_id = $1
       ${whereClause}
       ORDER BY p.created_at DESC
     `,
@@ -417,6 +475,8 @@ async function upsertInventory(branchProductId, payload = {}, client) {
 
 module.exports = {
   ensureCategory,
+  assignCategoryToBranch,
+  findCategoryById,
   createProduct,
   assignProductToBranch,
   listCategoriesForRestaurant,

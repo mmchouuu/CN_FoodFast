@@ -412,6 +412,19 @@ async function getBranchSpecialHours(branchId, client) {
   return result.rows;
 }
 
+async function listAllRestaurants(client) {
+  const executor = getExecutor(client);
+  const result = await executor.query(
+    `
+      SELECT *
+      FROM restaurants
+      WHERE is_active = TRUE
+      ORDER BY created_at DESC
+    `,
+  );
+  return result.rows;
+}
+
 module.exports = {
   createRestaurant,
   createBranch,
@@ -427,4 +440,5 @@ module.exports = {
   deleteBranch,
   getBranchOpeningHours,
   getBranchSpecialHours,
+  listAllRestaurants,
 };

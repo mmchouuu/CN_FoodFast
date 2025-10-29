@@ -255,7 +255,7 @@ const RestaurantDetail = () => {
                 {restaurant.shortHours}
               </span>
               <span className="rounded-full bg-white/20 px-3 py-1 font-semibold uppercase tracking-wide">
-                {restaurant.distanceKm.toFixed(1)} km away
+                {restaurant.distanceKm ? restaurant.distanceKm.toFixed(1) : "—"} km away
               </span>
               <a
                 href="#customer-reviews"
