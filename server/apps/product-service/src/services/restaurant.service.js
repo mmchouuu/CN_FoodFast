@@ -1,573 +1,440 @@
-const pool = require('../db');
+const { withTransaction } = require('../db');
+const restaurantRepository = require('../repositories/restaurant.repository');
+const taxRepository = require('../repositories/tax.repository');
+const { generatePassword } = require('../utils/password');
+const { publishSocketEvent } = require('../utils/rabbitmq');
+const {
+  createOwnerMainAccount,
+  createRestaurantMember,
+} = require('../utils/userServiceClient');
 
-function toNumber(value, fallback = 0) {
-  if (value === null || value === undefined) return fallback;
-  const numeric = Number(value);
-  return Number.isFinite(numeric) ? numeric : fallback;
+function assert(value, message) {
+  if (!value) {
+    const error = new Error(message);
+    error.status = 400;
+    throw error;
+  }
 }
 
-function toBoolean(value, fallback = false) {
-  if (typeof value === 'boolean') return value;
-  if (typeof value === 'string') {
-    const token = value.trim().toLowerCase();
-    if (['true', '1', 'yes', 'y', 'on'].includes(token)) return true;
-    if (['false', '0', 'no', 'n', 'off'].includes(token)) return false;
-  }
-  if (typeof value === 'number') {
-    if (value === 1) return true;
-    if (value === 0) return false;
-  }
-  return fallback;
+function normaliseString(value) {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed.length ? trimmed : null;
 }
 
-function toArray(value) {
-  if (!value) return [];
-  if (Array.isArray(value)) {
-    return value.filter((item) => typeof item === 'string' && item.trim());
-  }
-  if (typeof value === 'string' && value.trim()) {
-    return [value.trim()];
-  }
-  return [];
+const DEFAULT_TAX_CONFIG = {
+  templateCode: 'VAT7_DEFAULT',
+  templateName: 'VAT 7%',
+  templateDescription: 'Default VAT 7% applied automatically to new restaurants and branches',
+  ratePercent: 7,
+  priority: 10,
+};
+
+async function ensureDefaultTaxTemplate(client) {
+  return taxRepository.createTaxTemplate(
+    {
+      code: DEFAULT_TAX_CONFIG.templateCode,
+      name: DEFAULT_TAX_CONFIG.templateName,
+      description: DEFAULT_TAX_CONFIG.templateDescription,
+    },
+    client,
+  );
 }
 
-function mapRestaurantRow(row) {
-  if (!row) return null;
+async function ensureRestaurantDefaultTax(restaurantId, client) {
+  const template = await ensureDefaultTaxTemplate(client);
+  const assignment = await taxRepository.assignTaxToRestaurant(
+    {
+      restaurantId,
+      taxTemplateId: template.id,
+      ratePercent: DEFAULT_TAX_CONFIG.ratePercent,
+      isDefault: true,
+      priority: DEFAULT_TAX_CONFIG.priority,
+      isActive: true,
+    },
+    client,
+  );
+  return { template, assignment };
+}
+
+async function ensureBranchDefaultTax(restaurantId, branchId, client) {
+  const { template, assignment: restaurantAssignment } = await ensureRestaurantDefaultTax(
+    restaurantId,
+    client,
+  );
+  const branchAssignment = await taxRepository.assignTaxToBranch(
+    {
+      branchId,
+      taxTemplateId: template.id,
+      ratePercent: DEFAULT_TAX_CONFIG.ratePercent,
+      isDefault: true,
+      priority: DEFAULT_TAX_CONFIG.priority,
+      isActive: true,
+    },
+    client,
+  );
+  return { template, restaurantAssignment, branchAssignment };
+}
+
+async function createRestaurant(payload = {}) {
+  const ownerUserId = payload.ownerUserId || payload.owner_id || payload.ownerId;
+  assert(ownerUserId, 'ownerUserId is required');
+  assert(payload.name, 'Restaurant name is required');
+
+  const ownerMainAccount = { ...(payload.ownerMainAccount || payload.ownerMain || {}) };
+  if (!ownerMainAccount.loginEmail) {
+    ownerMainAccount.loginEmail =
+      payload.ownerLoginEmail ||
+      payload.ownerEmail ||
+      payload.loginEmail ||
+      payload.email ||
+      null;
+  }
+  if (typeof ownerMainAccount.loginEmail === 'string') {
+    ownerMainAccount.loginEmail = ownerMainAccount.loginEmail.trim().toLowerCase();
+  }
+  assert(ownerMainAccount.loginEmail, 'ownerMainAccount.loginEmail is required');
+
+  const { restaurant, defaultTax } = await withTransaction(async (client) => {
+    const restaurant = await restaurantRepository.createRestaurant({
+      ownerUserId,
+      name: payload.name,
+      description: normaliseString(payload.description),
+      about: normaliseString(payload.about),
+      cuisine: normaliseString(payload.cuisine),
+      phone: normaliseString(payload.phone),
+      email: normaliseString(payload.email),
+      logo: Array.isArray(payload.logo) ? payload.logo : [],
+      images: Array.isArray(payload.images) ? payload.images : [],
+      isActive: payload.isActive !== false,
+    }, client);
+
+    const defaultTax = await ensureRestaurantDefaultTax(restaurant.id, client);
+
+    return { restaurant, defaultTax };
+  });
+
+  const tempPassword = ownerMainAccount.temporaryPassword || generatePassword(12);
+
+  let ownerAccountResponse = null;
+  try {
+    ownerAccountResponse = await createOwnerMainAccount({
+      restaurantId: restaurant.id,
+      ownerUserId,
+      loginEmail: ownerMainAccount.loginEmail,
+      displayName: ownerMainAccount.displayName || restaurant.name,
+      phone: ownerMainAccount.phone || payload.phone || null,
+      temporaryPassword: tempPassword,
+    });
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error('[product-service] Failed to create owner main account:', error.message);
+  }
+
+  publishSocketEvent(
+    'restaurant.created',
+    {
+      restaurant,
+      branches: [],
+      ownerUserId,
+      defaultTax,
+    },
+    [
+      'admin:restaurants',
+      'catalog:restaurants',
+      `restaurant-owner:${ownerUserId}`,
+      `restaurant:${restaurant.id}`,
+    ],
+  );
+
   return {
-    ...row,
-    images: toArray(row.images),
-    logo: toArray(row.logo),
-    is_active: row.is_active !== false,
-    avg_branch_rating: toNumber(row.avg_branch_rating, 0),
-    total_branch_ratings: toNumber(row.total_branch_ratings, 0),
-  };
-}
-
-function mapBranchRow(row) {
-  if (!row) return null;
-  return {
-    ...row,
-    images: toArray(row.images),
-    is_primary: row.is_primary === true,
-    is_open: row.is_open === true,
-    rating: row.rating !== null && row.rating !== undefined ? Number(row.rating) : null,
-    ratingSummary: row.avg_rating || row.total_ratings
-      ? {
-          avgRating: row.avg_rating !== null && row.avg_rating !== undefined
-            ? Number(row.avg_rating)
-            : null,
-          totalRatings: row.total_ratings !== null && row.total_ratings !== undefined
-            ? Number(row.total_ratings)
-            : null,
-        }
-      : undefined,
-  };
-}
-
-function mapProductRow(row) {
-  if (!row) return null;
-  const basePrice = toNumber(row.base_price, 0);
-  return {
-    ...row,
-    images: toArray(row.images),
-    base_price: basePrice,
-    tax_rate: row.tax_rate !== null && row.tax_rate !== undefined
-      ? Number(row.tax_rate)
-      : null,
-    tax_amount: row.tax_amount !== null && row.tax_amount !== undefined
-      ? Number(row.tax_amount)
-      : null,
-    price_with_tax: row.price_with_tax !== null && row.price_with_tax !== undefined
-      ? Number(row.price_with_tax)
-      : basePrice,
-    popular: toBoolean(row.popular, false),
-    available: toBoolean(row.available, true),
-    is_visible: toBoolean(row.is_visible, true),
-    category: row.category_name || row.category || null,
-    inventory_summary: {
-      quantity: row.total_quantity !== undefined && row.total_quantity !== null
-        ? Number(row.total_quantity)
-        : null,
-      reserved_qty: row.total_reserved !== undefined && row.total_reserved !== null
-        ? Number(row.total_reserved)
-        : null,
+    restaurant,
+    branches: [],
+    defaultTax,
+    ownerMainAccount: ownerAccountResponse || {
+      loginEmail: ownerMainAccount.loginEmail,
+      temporaryPassword: tempPassword,
     },
   };
 }
 
-async function fetchRestaurants(options = {}) {
-  const {
-    restaurantIds,
-    ownerId,
-    includeBranches = false,
-    includeProducts = false,
-    includeBranchProducts = false,
-    limit,
-    offset,
-  } = options;
+async function createBranch(restaurantId, payload = {}) {
+  assert(restaurantId, 'restaurantId is required');
+  assert(payload.street, 'Branch street is required');
 
-  const filters = [];
-  const params = [];
-  let paramIndex = 1;
-
-  if (Array.isArray(restaurantIds) && restaurantIds.length) {
-    filters.push(`id = ANY($${paramIndex++})`);
-    params.push(restaurantIds);
-  }
-  if (ownerId) {
-    filters.push(`owner_id = $${paramIndex++}`);
-    params.push(ownerId);
-  }
-
-  let query = `
-    SELECT
-      id,
-      owner_id,
-      name,
-      description,
-      about,
-      cuisine,
-      phone,
-      email,
-      logo,
-      images,
-      is_active,
-      avg_branch_rating,
-      total_branch_ratings,
-      created_at,
-      updated_at
-    FROM restaurants
-  `;
-
-  if (filters.length) {
-    query += ` WHERE ${filters.join(' AND ')}`;
-  }
-
-  query += ' ORDER BY created_at DESC';
-
-  if (typeof limit === 'number') {
-    query += ` LIMIT $${paramIndex++}`;
-    params.push(limit);
-  }
-  if (typeof offset === 'number') {
-    query += ` OFFSET $${paramIndex++}`;
-    params.push(offset);
-  }
-
-  const result = await pool.query(query, params);
-  const restaurants = result.rows.map(mapRestaurantRow);
-
-  if (!restaurants.length) {
-    return restaurants;
-  }
-
-  const restaurantMap = new Map();
-  const restaurantIdsList = [];
-  restaurants.forEach((restaurant) => {
-    restaurant.products = [];
-    restaurant.branches = [];
-    restaurantMap.set(restaurant.id, restaurant);
-    restaurantIdsList.push(restaurant.id);
-  });
-
-  const branchMap = new Map();
-
-  if (includeBranches) {
-    const branchRes = await pool.query(
-      `
-        SELECT
-          b.*,
-          avg.avg_rating,
-          avg.total_ratings
-        FROM restaurant_branches b
-        LEFT JOIN branch_rating_avg avg ON avg.branch_id = b.id
-        WHERE b.restaurant_id = ANY($1)
-        ORDER BY b.restaurant_id, b.branch_number, b.created_at
-      `,
-      [restaurantIdsList],
+  const { branch, defaultTax } = await withTransaction(async (client) => {
+    const branchPhone = normaliseString(
+      payload.branchPhone !== undefined ? payload.branchPhone : payload.phone,
+    );
+    const branchEmail = normaliseString(
+      payload.branchEmail !== undefined ? payload.branchEmail : payload.email,
     );
 
-    branchRes.rows.forEach((row) => {
-      const branch = mapBranchRow(row);
-      branch.products = [];
-      branchMap.set(branch.id, branch);
-      const parent = restaurantMap.get(branch.restaurant_id);
-      if (parent) {
-        parent.branches.push(branch);
-      }
-    });
-  }
+    const created = await restaurantRepository.createBranch({
+      restaurantId,
+      branchNumber: payload.branchNumber,
+      name: payload.name || null,
+      branchPhone,
+      branchEmail,
+      images: Array.isArray(payload.images) ? payload.images : [],
+      street: payload.street,
+      ward: normaliseString(payload.ward),
+      district: normaliseString(payload.district),
+      city: normaliseString(payload.city),
+      latitude: payload.latitude || null,
+      longitude: payload.longitude || null,
+      isPrimary: payload.isPrimary === true,
+      isOpen: payload.isOpen === true,
+    }, client);
 
-  const productMap = new Map();
-
-  if (includeProducts) {
-    const productRes = await pool.query(
-      `
-        SELECT
-          p.*,
-          c.name AS category_name,
-          inv.total_quantity,
-          inv.total_reserved
-        FROM products p
-        LEFT JOIN categories c ON c.id = p.category_id
-        LEFT JOIN (
-          SELECT
-            product_id,
-            SUM(quantity) AS total_quantity,
-            SUM(reserved_qty) AS total_reserved
-          FROM inventory
-          GROUP BY product_id
-        ) inv ON inv.product_id = p.id
-        WHERE p.restaurant_id = ANY($1)
-        ORDER BY p.created_at DESC
-      `,
-      [restaurantIdsList],
-    );
-
-    productRes.rows.forEach((row) => {
-      const product = mapProductRow(row);
-      productMap.set(product.id, product);
-      const parent = restaurantMap.get(product.restaurant_id);
-      if (parent) {
-        parent.products.push(product);
-      }
-    });
-
-    if (includeBranchProducts && branchMap.size && productMap.size) {
-      const branchIds = Array.from(branchMap.keys());
-      const productIds = Array.from(productMap.keys());
-
-      const inventoryRes = await pool.query(
-        `
-          SELECT
-            branch_id,
-            product_id,
-            quantity,
-            reserved_qty
-          FROM inventory
-          WHERE branch_id = ANY($1) AND product_id = ANY($2)
-        `,
-        [branchIds, productIds],
-      );
-
-      inventoryRes.rows.forEach((row) => {
-        const branch = branchMap.get(row.branch_id);
-        const product = productMap.get(row.product_id);
-        if (!branch || !product) return;
-        branch.products.push({
-          ...product,
-          inventory: {
-            branch_id: row.branch_id,
-            branchId: row.branch_id,
-            quantity: row.quantity !== null && row.quantity !== undefined
-              ? Number(row.quantity)
-              : null,
-            reserved_qty: row.reserved_qty !== null && row.reserved_qty !== undefined
-              ? Number(row.reserved_qty)
-              : null,
-          },
-        });
-      });
+    if (Array.isArray(payload.openingHours) && payload.openingHours.length) {
+      await restaurantRepository.setOpeningHours(created.id, payload.openingHours, client);
     }
-  }
 
-  return restaurants;
-}
+    if (Array.isArray(payload.specialHours) && payload.specialHours.length) {
+      await restaurantRepository.setSpecialHours(created.id, payload.specialHours, client);
+    }
 
-async function getAllRestaurants(options = {}) {
-  return fetchRestaurants(options);
-}
+    const defaultTax = await ensureBranchDefaultTax(restaurantId, created.id, client);
 
-async function getRestaurantById(id, options = {}) {
-  const rows = await fetchRestaurants({
-    ...options,
-    restaurantIds: [id],
+    return { branch: created, defaultTax };
   });
-  return rows[0] || null;
-}
 
-async function getRestaurantsByOwner(ownerId, options = {}) {
-  return fetchRestaurants({
-    ...options,
-    ownerId,
-  });
-}
-
-async function getRestaurantByOwner(ownerId, options = {}) {
-  const rows = await fetchRestaurants({
-    ...options,
-    ownerId,
-  });
-  return rows[0] || null;
-}
-
-async function createRestaurant(payload = {}) {
-  const images = toArray(payload.images);
-  const logo = toArray(payload.logo);
-
-  const res = await pool.query(
-    `
-      INSERT INTO restaurants (
-        owner_id,
-        name,
-        description,
-        about,
-        cuisine,
-        phone,
-        email,
-        logo,
-        images,
-        is_active
-      ) VALUES (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10
-      )
-      RETURNING *
-    `,
-    [
-      payload.owner_id || payload.ownerId,
-      payload.name,
-      payload.description || null,
-      payload.about || null,
-      payload.cuisine || null,
-      payload.phone || null,
-      payload.email || null,
-      logo,
-      images,
-      payload.is_active !== undefined ? toBoolean(payload.is_active, true) : true,
-    ],
+  publishSocketEvent(
+    'restaurant.branch.created',
+    {
+      restaurantId,
+      branch,
+      defaultTax,
+    },
+    [`restaurant:${restaurantId}`, `restaurant-branch:${branch.id}`],
   );
 
-  return mapRestaurantRow(res.rows[0]);
+  return {
+    ...branch,
+    defaultTax,
+  };
 }
 
-async function updateRestaurant(id, payload = {}) {
-  const fields = [];
-  const values = [];
-  let idx = 1;
+async function upsertBranchSchedules(restaurantId, branchId, payload = {}) {
+  assert(restaurantId, 'restaurantId is required');
+  assert(branchId, 'branchId is required');
 
-  const mapping = {
-    owner_id: payload.owner_id ?? payload.ownerId,
+  await withTransaction(async (client) => {
+    if (Array.isArray(payload.openingHours)) {
+      await restaurantRepository.setOpeningHours(branchId, payload.openingHours, client);
+    }
+    if (Array.isArray(payload.specialHours)) {
+      await restaurantRepository.setSpecialHours(branchId, payload.specialHours, client);
+    }
+  });
+
+  publishSocketEvent(
+    'restaurant.branch.schedules.updated',
+    {
+      restaurantId,
+      branchId,
+      openingHours: Array.isArray(payload.openingHours) ? payload.openingHours : [],
+      specialHours: Array.isArray(payload.specialHours) ? payload.specialHours : [],
+    },
+    [`restaurant:${restaurantId}`, `restaurant-branch:${branchId}`],
+  );
+
+  return { message: 'Branch schedules updated' };
+}
+
+async function inviteRestaurantMember(restaurantId, payload = {}) {
+  assert(restaurantId, 'restaurantId is required');
+  assert(payload.role, 'role is required');
+  assert(payload.loginEmail, 'loginEmail is required');
+
+  const temporaryPassword = payload.temporaryPassword || generatePassword(10);
+  const body = {
+    restaurantId,
+    payload: {
+      branchId: payload.branchId || null,
+      role: payload.role,
+      loginEmail: payload.loginEmail,
+      displayName: payload.displayName || null,
+      phone: payload.phone || null,
+      permissions: payload.permissions || {},
+      temporaryPassword,
+    },
+  };
+
+  const response = await createRestaurantMember(body);
+
+  publishSocketEvent(
+    'restaurant.member.invited',
+    {
+      restaurantId,
+      role: payload.role,
+      account: response.account || null,
+      membership: response.membership || null,
+    },
+    [`restaurant:${restaurantId}`],
+  );
+
+  return {
+    response,
+    temporaryPassword,
+  };
+}
+
+function mapOpeningHourRow(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    dayOfWeek: row.day_of_week,
+    openTime: row.open_time,
+    closeTime: row.close_time,
+    isClosed: row.is_closed,
+    overnight: row.overnight,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+function mapSpecialHourRow(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    date: row.on_date,
+    openTime: row.open_time,
+    closeTime: row.close_time,
+    isClosed: row.is_closed,
+    overnight: row.overnight,
+    note: row.note,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+async function hydrateBranch(branch, client) {
+  if (!branch) return null;
+  const [openingRows, specialRows] = await Promise.all([
+    restaurantRepository.getBranchOpeningHours(branch.id, client),
+    restaurantRepository.getBranchSpecialHours(branch.id, client),
+  ]);
+  return {
+    ...branch,
+    openingHours: openingRows.map(mapOpeningHourRow).filter(Boolean),
+    specialHours: specialRows.map(mapSpecialHourRow).filter(Boolean),
+  };
+}
+
+async function buildRestaurantPayload(restaurant, client) {
+  if (!restaurant) return null;
+  const branchRows = await restaurantRepository.listBranches(restaurant.id, client);
+  const branches = await Promise.all(branchRows.map((branch) => hydrateBranch(branch, client)));
+  return {
+    ...restaurant,
+    branches,
+  };
+}
+
+async function getRestaurantDetailsByOwner(ownerUserId) {
+  if (!ownerUserId) return null;
+  const restaurant = await restaurantRepository.findRestaurantByOwner(ownerUserId);
+  if (!restaurant) return null;
+  return buildRestaurantPayload(restaurant);
+}
+
+async function listRestaurantsByOwner(ownerUserId) {
+  if (!ownerUserId) return [];
+  const list = await restaurantRepository.listRestaurantsByOwner(ownerUserId);
+  return Promise.all(list.map((restaurant) => buildRestaurantPayload(restaurant)));
+}
+
+async function getRestaurantById(restaurantId) {
+  if (!restaurantId) return null;
+  const restaurant = await restaurantRepository.findRestaurantById(restaurantId);
+  if (!restaurant) return null;
+  return buildRestaurantPayload(restaurant);
+}
+
+async function updateRestaurantDetails(restaurantId, payload = {}) {
+  if (!restaurantId) {
+    throw new Error('restaurantId is required');
+  }
+  const fields = {
     name: payload.name,
-    description: Object.prototype.hasOwnProperty.call(payload, 'description')
-      ? payload.description
-      : undefined,
-    about: Object.prototype.hasOwnProperty.call(payload, 'about')
-      ? payload.about
-      : undefined,
+    description: payload.description,
+    about: payload.about,
     cuisine: payload.cuisine,
     phone: payload.phone,
     email: payload.email,
-    logo: Object.prototype.hasOwnProperty.call(payload, 'logo')
-      ? toArray(payload.logo)
-      : undefined,
-    images: Object.prototype.hasOwnProperty.call(payload, 'images')
-      ? toArray(payload.images)
-      : undefined,
-    is_active: Object.prototype.hasOwnProperty.call(payload, 'is_active')
-      ? toBoolean(payload.is_active, true)
-      : undefined,
+    logo: payload.logo,
+    images: payload.images,
+    isActive: payload.isActive,
   };
+  const updated = await restaurantRepository.updateRestaurant(restaurantId, fields);
+  if (!updated) return null;
+  return buildRestaurantPayload(updated);
+}
 
-  for (const [column, value] of Object.entries(mapping)) {
-    if (typeof value === 'undefined') continue;
-    fields.push(`${column} = $${idx++}`);
-    values.push(value);
+async function listRestaurantBranches(restaurantId) {
+  if (!restaurantId) return [];
+  const rows = await restaurantRepository.listBranches(restaurantId);
+  return Promise.all(rows.map((branch) => hydrateBranch(branch)));
+}
+
+async function updateBranchDetails(restaurantId, branchId, payload = {}) {
+  if (!restaurantId || !branchId) {
+    throw new Error('restaurantId and branchId are required');
   }
 
-  if (!fields.length) {
-    return getRestaurantById(id);
-  }
-
-  fields.push(`updated_at = now()`);
-
-  const res = await pool.query(
-    `UPDATE restaurants SET ${fields.join(', ')} WHERE id = $${idx} RETURNING *`,
-    [...values, id],
-  );
-
-  return mapRestaurantRow(res.rows[0] || null);
-}
-
-async function deleteRestaurant(id) {
-  const res = await pool.query('DELETE FROM restaurants WHERE id = $1 RETURNING id', [id]);
-  return res.rows[0] || null;
-}
-
-async function getBranchesForRestaurant(restaurantId) {
-  const res = await pool.query(
-    `
-      SELECT
-        b.*,
-        avg.avg_rating,
-        avg.total_ratings
-      FROM restaurant_branches b
-      LEFT JOIN branch_rating_avg avg ON avg.branch_id = b.id
-      WHERE b.restaurant_id = $1
-      ORDER BY b.branch_number, b.created_at
-    `,
-    [restaurantId],
-  );
-
-  return res.rows.map((row) => {
-    const branch = mapBranchRow(row);
-    branch.products = [];
-    return branch;
-  });
-}
-
-async function createRestaurantBranch(restaurantId, payload = {}) {
-  const images = toArray(payload.images || payload.imageUrl);
-  const res = await pool.query(
-    `
-      INSERT INTO restaurant_branches (
-        restaurant_id,
-        branch_number,
-        name,
-        branch_phone,
-        branch_email,
-        street,
-        ward,
-        district,
-        city,
-        latitude,
-        longitude,
-        images,
-        is_primary,
-        is_open
-      ) VALUES (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14
-      )
-      RETURNING *
-    `,
-    [
-      restaurantId,
-      Number(payload.branch_number ?? payload.branchNumber ?? 1),
-      payload.name || null,
-      payload.branch_phone || payload.branchPhone || null,
-      payload.branch_email || payload.branchEmail || null,
-      payload.street || null,
-      payload.ward || null,
-      payload.district || null,
-      payload.city || null,
-      payload.latitude !== undefined && payload.latitude !== null ? Number(payload.latitude) : null,
-      payload.longitude !== undefined && payload.longitude !== null ? Number(payload.longitude) : null,
-      images,
-      toBoolean(payload.is_primary ?? payload.isPrimary, false),
-      toBoolean(payload.is_open ?? payload.isOpen, false),
-    ],
-  );
-
-  return mapBranchRow(res.rows[0]);
-}
-
-async function updateRestaurantBranch(restaurantId, branchId, payload = {}) {
-  const fields = [];
-  const values = [];
-  let idx = 1;
-
-  const mapping = {
-    branch_number: payload.branch_number ?? payload.branchNumber,
+  const fields = {
     name: payload.name,
-    branch_phone: payload.branch_phone ?? payload.branchPhone,
-    branch_email: payload.branch_email ?? payload.branchEmail,
+    branchNumber: payload.branchNumber,
+    branchPhone: payload.branchPhone || payload.phone,
+    branchEmail: payload.branchEmail || payload.email,
+    images: payload.images,
     street: payload.street,
     ward: payload.ward,
     district: payload.district,
     city: payload.city,
-    latitude: payload.latitude !== undefined ? Number(payload.latitude) : undefined,
-    longitude: payload.longitude !== undefined ? Number(payload.longitude) : undefined,
-    images: Object.prototype.hasOwnProperty.call(payload, 'images') || Object.prototype.hasOwnProperty.call(payload, 'imageUrl')
-      ? toArray(payload.images || payload.imageUrl)
-      : undefined,
-    is_primary: Object.prototype.hasOwnProperty.call(payload, 'is_primary') || Object.prototype.hasOwnProperty.call(payload, 'isPrimary')
-      ? toBoolean(payload.is_primary ?? payload.isPrimary, false)
-      : undefined,
-    is_open: Object.prototype.hasOwnProperty.call(payload, 'is_open') || Object.prototype.hasOwnProperty.call(payload, 'isOpen')
-      ? toBoolean(payload.is_open ?? payload.isOpen, false)
-      : undefined,
+    latitude: payload.latitude,
+    longitude: payload.longitude,
+    isPrimary: payload.isPrimary,
+    isOpen: payload.isOpen,
   };
 
-  for (const [column, value] of Object.entries(mapping)) {
-    if (typeof value === 'undefined') continue;
-    fields.push(`${column} = $${idx++}`);
-    values.push(value);
-  }
-
-  if (!fields.length) {
-    const res = await pool.query(
-      'SELECT b.*, avg.avg_rating, avg.total_ratings FROM restaurant_branches b LEFT JOIN branch_rating_avg avg ON avg.branch_id = b.id WHERE b.restaurant_id = $1 AND b.id = $2',
-      [restaurantId, branchId],
-    );
-    return res.rows[0] ? mapBranchRow(res.rows[0]) : null;
-  }
-
-  fields.push('updated_at = now()');
-
-  const res = await pool.query(
-    `
-      UPDATE restaurant_branches
-      SET ${fields.join(', ')}
-      WHERE restaurant_id = $${idx} AND id = $${idx + 1}
-      RETURNING *
-    `,
-    [...values, restaurantId, branchId],
-  );
-
-  return res.rows[0] ? mapBranchRow(res.rows[0]) : null;
-}
-
-async function deleteRestaurantBranch(restaurantId, branchId) {
-  const res = await pool.query(
-    'DELETE FROM restaurant_branches WHERE restaurant_id = $1 AND id = $2 RETURNING id',
-    [restaurantId, branchId],
-  );
-  return res.rows[0] || null;
-}
-
-async function create(payload = {}) {
-  return createRestaurant(payload);
-}
-
-async function list(params = {}) {
-  const limit = params.limit !== undefined ? Number(params.limit) : undefined;
-  const offset = params.offset !== undefined ? Number(params.offset) : undefined;
-  return fetchRestaurants({
-    ownerId: params.ownerId || params.owner_id,
-    includeBranches: params.includeBranches ?? false,
-    includeProducts: params.includeProducts ?? false,
-    includeBranchProducts: params.includeBranchProducts ?? false,
-    limit,
-    offset,
+  const updatedBranch = await withTransaction(async (client) => {
+    const branch = await restaurantRepository.updateBranch(restaurantId, branchId, fields, client);
+    if (!branch) {
+      return null;
+    }
+    if (Array.isArray(payload.openingHours)) {
+      await restaurantRepository.setOpeningHours(branch.id, payload.openingHours, client);
+    }
+    if (Array.isArray(payload.specialHours)) {
+      await restaurantRepository.setSpecialHours(branch.id, payload.specialHours, client);
+    }
+    return branch;
   });
+
+  if (!updatedBranch) return null;
+  return hydrateBranch(updatedBranch);
 }
 
-async function get(id, options = {}) {
-  return getRestaurantById(id, options);
-}
-
-async function remove(id) {
-  return deleteRestaurant(id);
-}
-
-async function update(id, payload = {}) {
-  return updateRestaurant(id, payload);
+async function deleteBranch(restaurantId, branchId) {
+  if (!restaurantId || !branchId) {
+    throw new Error('restaurantId and branchId are required');
+  }
+  return restaurantRepository.deleteBranch(restaurantId, branchId);
 }
 
 module.exports = {
   createRestaurant,
-  createRestaurantBranch,
-  deleteRestaurant,
-  deleteRestaurantBranch,
-  getAllRestaurants,
-  getBranchesForRestaurant,
+  createBranch,
+  upsertBranchSchedules,
+  inviteRestaurantMember,
   getRestaurantById,
-  getRestaurantByOwner,
-  getRestaurantsByOwner,
-  updateRestaurant,
-  updateRestaurantBranch,
-  create,
-  list,
-  get,
-  update,
-  remove,
+  getRestaurantDetailsByOwner,
+  listRestaurantsByOwner,
+  updateRestaurantDetails,
+  listRestaurantBranches,
+  updateBranchDetails,
+  deleteBranch,
 };

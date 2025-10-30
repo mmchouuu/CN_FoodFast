@@ -1,13 +1,15 @@
-// user-service/routes/restaurant.routes.js
-
-const express = require('express');
-const router = express.Router();
+﻿const express = require('express');
 const restaurantController = require('../controllers/restaurant.controller');
 
-router.get('/status', restaurantController.getStatus);
-router.get('/owners/:id', restaurantController.getOwnerAccount);
-router.post('/register', restaurantController.register); // { first_name,last_name,email,phone,password }
-router.post('/verify', restaurantController.verify);     // { email, otp }
-router.post('/login', restaurantController.login);       // { email, password }
+const router = express.Router();
+
+router.post('/signup', restaurantController.register);
+router.post('/verify', restaurantController.verify);
+router.post('/password', restaurantController.setPassword);
+router.post('/login', restaurantController.login);
+router.get('/status', restaurantController.status);
+router.post('/:restaurantId/accounts/owner-main', restaurantController.createOwnerMainAccount);
+router.post('/:restaurantId/accounts/members', restaurantController.createMember);
+router.post('/resend-verification', restaurantController.resendVerification);
 
 module.exports = router;

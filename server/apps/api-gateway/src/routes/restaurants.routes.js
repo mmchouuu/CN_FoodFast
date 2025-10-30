@@ -1,32 +1,40 @@
-// api-gateway/src/routes/restaurants.routes.js
-const express = require('express');
-const router = express.Router();
+﻿const express = require('express');
 const controller = require('../controllers/restaurants.controller');
 
-router.get('/status', controller.status);
-router.get('/owners/:id', controller.ownerAccount);
-router.post('/register', controller.register);
-router.post('/verify', controller.verify);
-router.post('/login', controller.login);
-router.get('/', controller.listRestaurants);
-router.get('/owner/:ownerId/list', controller.getOwnerRestaurants);
-router.get('/owner/:ownerId', controller.getOwnerRestaurantDetail);
-router.get('/:id/branches', controller.listBranches);
-router.post('/:id/branches', controller.createBranch);
-router.put('/:id/branches/:branchId', controller.updateBranch);
-router.delete('/:id/branches/:branchId', controller.deleteBranch);
-router.get('/:id/products', controller.listRestaurantProducts);
-router.post('/:id/products', controller.createRestaurantProduct);
-router.patch('/:id/products/:productId', controller.updateRestaurantProduct);
-router.delete('/:id/products/:productId', controller.deleteRestaurantProduct);
-router.get('/:id/inventory', controller.listRestaurantInventory);
-router.get('/:id/products/:productId/inventory', controller.listProductInventory);
-router.get('/:id/branches/:branchId/inventory', controller.listBranchInventory);
-router.put('/:id/branches/:branchId/inventory/:productId', controller.upsertBranchInventory);
-router.get('/:id/categories', controller.listCategories);
+const router = express.Router();
+
+// Owner account flows (user-service)
+router.post('/signup', controller.ownerSignup);
+router.post('/verify', controller.ownerVerify);
+router.post('/login', controller.ownerLogin);
+router.get('/status', controller.ownerStatus);
+router.post('/resend-verification', controller.resendVerification);
+
+// Catalog & branch management (product-service)
 router.post('/', controller.createRestaurant);
-router.put('/:id', controller.updateRestaurant);
-router.delete('/:id', controller.deleteRestaurant);
-router.get('/:id', controller.getRestaurant);
+router.get('/catalog', controller.listCatalog);
+router.get('/owner/:ownerId', controller.getRestaurantByOwner);
+router.get('/owner/:ownerId/list', controller.listRestaurantsByOwner);
+router.get('/:restaurantId/catalog', controller.getCatalog);
+router.get('/:restaurantId', controller.getRestaurant);
+router.put('/:restaurantId', controller.updateRestaurant);
+router.post('/:restaurantId/branches', controller.createBranch);
+router.get('/:restaurantId/branches', controller.listBranches);
+router.put('/:restaurantId/branches/:branchId', controller.updateBranch);
+router.put('/:restaurantId/branches/:branchId/schedules', controller.updateBranchSchedules);
+router.delete('/:restaurantId/branches/:branchId', controller.deleteBranch);
+router.post('/:restaurantId/members', controller.inviteMember);
+
+router.post('/:restaurantId/categories', controller.createCategory);
+router.get('/:restaurantId/categories', controller.listCategories);
+router.post('/:restaurantId/products', controller.createProduct);
+router.get('/:restaurantId/products', controller.listProducts);
+router.patch('/:restaurantId/products/:productId', controller.updateProduct);
+router.delete('/:restaurantId/products/:productId', controller.deleteProduct);
+router.get('/:restaurantId/products/:productId/inventory', controller.listInventory);
+router.put('/:restaurantId/branches/:branchId/inventory/:productId', controller.updateInventory);
+router.post('/:restaurantId/products/:productId/options', controller.createOptionGroup);
+router.post('/:restaurantId/combos', controller.createCombo);
+router.post('/:restaurantId/promotions', controller.createPromotion);
 
 module.exports = router;

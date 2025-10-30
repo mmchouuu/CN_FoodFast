@@ -8,7 +8,7 @@ const client = createAxiosInstance({
 });
 
 async function register(payload, opts = {}) {
-  const res = await client.post('/register', payload, { headers: opts.headers });
+  const res = await client.post('/signup', payload, { headers: opts.headers });
   return res.data;
 }
 
@@ -23,17 +23,22 @@ async function login(payload, opts = {}) {
 }
 
 async function listAddresses(opts = {}) {
-  const res = await client.get('/addresses', { headers: opts.headers });
+  const res = await client.get('/me/addresses', { headers: opts.headers });
   return res.data;
 }
 
 async function createAddress(payload, opts = {}) {
-  const res = await client.post('/addresses', payload, { headers: opts.headers });
+  const res = await client.post('/me/addresses', payload, { headers: opts.headers });
+  return res.data;
+}
+
+async function updateAddress(id, payload, opts = {}) {
+  const res = await client.put(`/me/addresses/${id}`, payload, { headers: opts.headers });
   return res.data;
 }
 
 async function deleteAddress(id, opts = {}) {
-  const res = await client.delete(`/addresses/${id}`, { headers: opts.headers });
+  const res = await client.delete(`/me/addresses/${id}`, { headers: opts.headers });
   return res.data;
 }
 
@@ -47,4 +52,14 @@ async function resetPassword(payload, opts = {}) {
   return res.data;
 }
 
-module.exports = { register, verify, login, listAddresses, createAddress, deleteAddress, requestPasswordReset, resetPassword };
+module.exports = {
+  register,
+  verify,
+  login,
+  listAddresses,
+  createAddress,
+  updateAddress,
+  deleteAddress,
+  requestPasswordReset,
+  resetPassword,
+};

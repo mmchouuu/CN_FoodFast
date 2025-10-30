@@ -12,9 +12,6 @@ function mapRow(row) {
     ward: row.ward,
     district: row.district,
     city: row.city,
-    recipient: row.recipient,
-    phone: row.phone,
-    instructions: row.instructions,
     label: row.label,
     is_primary: row.is_primary,
     created_at: row.created_at,
@@ -39,14 +36,11 @@ async function createAddress(userId, payload = {}) {
     const fields = {
       street: payload.street?.trim(),
       ward: payload.ward?.trim() || null,
-      district: payload.district?.trim() || null,
-      city: payload.city?.trim() || null,
-      label: payload.label?.trim() || 'Home',
-      recipient: payload.recipient?.trim() || null,
-      phone: payload.phone?.trim() || null,
-      instructions: payload.instructions?.trim() || null,
-      is_primary: Boolean(payload.is_primary || payload.is_default),
-    };
+    district: payload.district?.trim() || null,
+    city: payload.city?.trim() || null,
+    label: payload.label?.trim() || 'Home',
+    is_primary: Boolean(payload.is_primary || payload.is_default),
+  };
 
     if (!fields.street) {
       const error = new Error('street is required');
@@ -70,22 +64,24 @@ async function createAddress(userId, payload = {}) {
 
     const insertRes = await client.query(
       `INSERT INTO user_addresses (
-        user_id, street, ward, district, city, recipient, phone, instructions,
-        is_primary, label
+        user_id,
+        label,
+        street,
+        ward,
+        district,
+        city,
+        is_primary
       )
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+      VALUES ($1,$2,$3,$4,$5,$6,$7)
       RETURNING *`,
       [
         userId,
+        fields.label,
         fields.street,
         fields.ward,
         fields.district,
         fields.city,
-        fields.recipient,
-        fields.phone,
-        fields.instructions,
         fields.is_primary,
-        fields.label,
       ]
     );
 
@@ -120,7 +116,7 @@ async function updateAddress(userId, addressId, payload = {}) {
 
     const updates = [];
     const values = [];
-    const allowedFields = ['street', 'ward', 'district', 'city', 'recipient', 'phone', 'instructions', 'label'];
+    const allowedFields = ['street', 'ward', 'district', 'city', 'label'];
     allowedFields.forEach((field) => {
       if (Object.prototype.hasOwnProperty.call(payload, field)) {
         updates.push(`${field} = $${updates.length + 1}`);

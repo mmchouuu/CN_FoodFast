@@ -1,19 +1,28 @@
-const pkg = require('pg');
-
-const { Pool } = pkg;
-
-const pool = new Pool({
-  host: process.env.DB_HOST || 'productdb',
-  user: process.env.DB_USER || 'postgres',
-  password: process.env.DB_PASSWORD || '123',
-  port: Number(process.env.DB_PORT || 5432),
-  database: process.env.DB_NAME || 'productdb',
-});
+const { Pool } = require('pg');
+const config = require('../config');
+const pool = new Pool(config.db);
 
 pool.on('error', (error) => {
+  // eslint-disable-next-line no-console
   console.error('[product-service] Unexpected database error:', error);
 });
 
-module.exports = pool;
-module.exports.default = pool;
-module.exports.pool = pool;
+async function withTransaction(callback) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await callback(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+module.exports = {
+  pool,
+  withTransaction,
+};

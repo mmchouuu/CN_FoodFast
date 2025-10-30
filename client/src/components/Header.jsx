@@ -39,9 +39,11 @@ const Header = () => {
     setSearchQuery,
     notifications,
     user,
+    customerProfileOpen,
+    openCustomerProfilePanel,
+    closeCustomerProfilePanel,
   } = useAppContext();
   const [menuOpen, setMenuOpen] = useState(false);
-  const [profileOpen, setProfileOpen] = useState(false);
 
   const unreadNotifications = useMemo(
     () => notifications.filter((notification) => !notification.read).length,
@@ -50,8 +52,8 @@ const Header = () => {
 
   useEffect(() => {
     setMenuOpen(false);
-    setProfileOpen(false);
-  }, [location.pathname]);
+    closeCustomerProfilePanel();
+  }, [location.pathname, closeCustomerProfilePanel]);
 
   const isActive = (href) =>
     href === "/"
@@ -162,7 +164,7 @@ const Header = () => {
             {isAuthenticated ? (
               <div className="hidden items-center gap-2 md:flex">
                 <button
-                  onClick={() => setProfileOpen(true)}
+                  onClick={openCustomerProfilePanel}
                   className="flex h-10 w-10 items-center justify-center rounded-full bg-orange-500 text-sm font-semibold text-white transition hover:bg-orange-600"
                   aria-label="Open profile"
                 >
@@ -255,7 +257,7 @@ const Header = () => {
                 <>
                   <button
                     onClick={() => {
-                      setProfileOpen(true);
+                      openCustomerProfilePanel();
                       setMenuOpen(false);
                     }}
                     className="rounded-2xl border border-orange-100 px-4 py-3 text-left text-gray-700 transition hover:border-orange-300 hover:text-orange-500"
@@ -281,10 +283,11 @@ const Header = () => {
 
       {isAuthenticated ? (
         <CustomerProfilePanel
-          open={profileOpen}
-          onClose={() => setProfileOpen(false)}
+          open={customerProfileOpen}
+          onClose={closeCustomerProfilePanel}
           onLogout={() => {
             logoutLocal?.();
+            closeCustomerProfilePanel();
             if (logoutAuth0) {
               try {
                 logoutAuth0({ returnTo: window.location.origin });

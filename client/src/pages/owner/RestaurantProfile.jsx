@@ -34,6 +34,19 @@ const emptyRestaurantForm = {
 const buildBranchForm = (nextNumber, preset = {}) => {
   const rawImage = preset.imageUrl || "";
   const isDataUri = typeof rawImage === "string" && rawImage.startsWith("data:image");
+  const presetIsPrimary =
+    preset.isPrimary !== undefined
+      ? Boolean(preset.isPrimary)
+      : preset.is_primary !== undefined
+      ? Boolean(preset.is_primary)
+      : false;
+  const presetIsOpen =
+    preset.isOpen !== undefined
+      ? Boolean(preset.isOpen)
+      : preset.is_open !== undefined
+      ? Boolean(preset.is_open)
+      : false;
+
   return {
     id: preset.id || null,
     name: preset.name || "",
@@ -50,8 +63,8 @@ const buildBranchForm = (nextNumber, preset = {}) => {
       preset.longitude !== undefined && preset.longitude !== null ? String(preset.longitude) : "",
     imageUrl: rawImage,
     imageSource: rawImage ? (isDataUri ? "file" : "url") : "none",
-    isPrimary: Boolean(preset.isPrimary),
-    isOpen: Boolean(preset.isOpen),
+    isPrimary: presetIsPrimary,
+    isOpen: presetIsOpen,
   };
 };
 
@@ -70,15 +83,47 @@ const mapBranchData = (branch) => {
   if (!branch) return null;
   const images = Array.isArray(branch.images) ? branch.images : null;
   const imageUrl = images && images.length ? images[0] : branch.imageUrl || "";
-  const phone = branch.branchPhone ?? branch.brandPhone ?? "";
-  const email = branch.branchEmail ?? branch.brandEmail ?? "";
+  const normalizeText = (value) =>
+    typeof value === "string" ? value.trim() : value ?? "";
+
+  const phone = normalizeText(
+    branch.branchPhone ??
+    branch.brandPhone ??
+    branch.branch_phone ??
+    branch.phone ??
+    branch.phone_number ??
+    branch.contactPhone ??
+    "",
+  );
+  const email = normalizeText(
+    branch.branchEmail ??
+    branch.brandEmail ??
+    branch.branch_email ??
+    branch.email ??
+    branch.contact_email ??
+    "",
+  );
   const branchNumber = Number(branch.branchNumber ?? branch.branch_number ?? 0) || 0;
+  const isPrimary =
+    branch.isPrimary !== undefined
+      ? Boolean(branch.isPrimary)
+      : branch.is_primary !== undefined
+      ? Boolean(branch.is_primary)
+      : false;
+  const isOpen =
+    branch.isOpen !== undefined
+      ? Boolean(branch.isOpen)
+      : branch.is_open !== undefined
+      ? Boolean(branch.is_open)
+      : false;
   return {
     ...branch,
     branchNumber,
     branchPhone: phone,
     branchEmail: email,
     imageUrl,
+    isPrimary,
+    isOpen,
     openingHours: Array.isArray(branch.openingHours) ? branch.openingHours : [],
     specialHours: Array.isArray(branch.specialHours) ? branch.specialHours : [],
   };
@@ -260,7 +305,6 @@ const RestaurantProfile = () => {
     }
 
     const payload = {
-      ownerId,
       name: restaurantForm.name.trim(),
       description: restaurantForm.description.trim(),
       about: restaurantForm.about.trim(),
@@ -271,6 +315,32 @@ const RestaurantProfile = () => {
       images: restaurantForm.coverPhoto ? [restaurantForm.coverPhoto] : [],
     };
 
+    if (!restaurantExists) {
+      payload.ownerUserId = ownerId;
+      const fallbackDisplayName = [
+        restaurantProfile?.first_name || restaurantProfile?.firstName || "",
+        restaurantProfile?.last_name || restaurantProfile?.lastName || "",
+      ]
+        .map((part) => (part || "").trim())
+        .filter(Boolean)
+        .join(" ");
+      payload.ownerMainAccount = {
+        loginEmail:
+          restaurantProfile?.email ||
+          restaurantProfile?.profile?.ownerEmail ||
+          restaurantProfile?.profile?.contact_email ||
+          restaurantForm.email.trim() ||
+          undefined,
+        displayName: fallbackDisplayName || restaurantForm.name.trim(),
+        phone: restaurantProfile?.phone || restaurantForm.phone.trim() || undefined,
+      };
+      if (!payload.ownerMainAccount.loginEmail) {
+        setSavingRestaurant(false);
+        setError("Unable to detect owner email. Please sign out and sign in again.");
+        return;
+      }
+    }
+
     setSavingRestaurant(true);
     setError("");
     try {
@@ -280,9 +350,15 @@ const RestaurantProfile = () => {
       } else {
         response = await restaurantManagerService.createRestaurant(payload);
       }
-      const mappedRestaurant = mapRestaurantData(response);
-      const mappedBranches = Array.isArray(response?.branches)
-        ? response.branches.map((branch) => mapBranchData(branch))
+      const rawRestaurant = response?.restaurant || response;
+      const mappedRestaurant = mapRestaurantData(rawRestaurant);
+      const sourceBranches = Array.isArray(response?.branches)
+        ? response.branches
+        : Array.isArray(rawRestaurant?.branches)
+        ? rawRestaurant.branches
+        : null;
+      const mappedBranches = Array.isArray(sourceBranches)
+        ? sourceBranches.map((branch) => mapBranchData(branch))
         : branches;
       setRestaurant(mappedRestaurant);
       setBranches(mappedBranches);
@@ -1211,6 +1287,19 @@ const BranchCard = ({ branch, onToggleStatus, onEdit }) => {
     branch.ratingSummary?.avgRating ?? branch.rating ?? branch.ratingSummary?.avg_branch_rating ?? 0,
   );
   const ratingCount = Number(branch.ratingSummary?.totalRatings ?? branch.totalRatings ?? 0);
+  const displayPhone =
+    branch.branchPhone ||
+    branch.branch_phone ||
+    branch.phone ||
+    branch.phone_number ||
+    branch.contactPhone ||
+    "";
+  const displayEmail =
+    branch.branchEmail ||
+    branch.branch_email ||
+    branch.email ||
+    branch.contact_email ||
+    "";
 
   return (
     <div className="relative flex flex-col gap-4 rounded-2xl border border-slate-100 bg-white p-5 shadow-sm lg:flex-row lg:items-center">
@@ -1241,11 +1330,11 @@ const BranchCard = ({ branch, onToggleStatus, onEdit }) => {
             </span>
             <span className="inline-flex items-center gap-2">
               <span className="font-semibold">Phone:</span>
-              {branch.branchPhone || "Updating"}
+              {displayPhone || "Updating"}
             </span>
             <span className="inline-flex items-center gap-2">
               <span className="font-semibold">Email:</span>
-              {branch.branchEmail || "Updating"}
+              {displayEmail || "Updating"}
             </span>
             <span className="inline-flex items-center gap-2">
               <span className="font-semibold">Address:</span>
@@ -1683,16 +1772,3 @@ const FieldInput = ({ label, as = "input", className = "", ...props }) => {
 };
 
 export default RestaurantProfile;
-
-
-
-
-
-
-
-
-
-
-
-
-

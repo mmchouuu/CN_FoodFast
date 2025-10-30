@@ -24,6 +24,9 @@ const CustomerProfilePanel = ({ open, onClose, onLogout }) => {
     bankAccounts,
     refreshBankAccounts,
     linkBankAccount,
+    cardAccounts,
+    linkCard,
+    removeCard,
     pastOrders,
     restaurantReviews,
     restaurants,
@@ -57,6 +60,16 @@ const CustomerProfilePanel = ({ open, onClose, onLogout }) => {
   }));
   const [savingBankAccount, setSavingBankAccount] = useState(false);
   const [loadingBankAccounts, setLoadingBankAccounts] = useState(false);
+  const [showCardForm, setShowCardForm] = useState(false);
+  const [savingCard, setSavingCard] = useState(false);
+  const [cardForm, setCardForm] = useState(() => ({
+    cardholderName: defaultFullName,
+    cardNumber: "",
+    expiryMonth: "",
+    expiryYear: "",
+    cvv: "",
+    isDefault: cardAccounts.length === 0,
+  }));
 
   const [profileForm, setProfileForm] = useState({
     fullName: defaultFullName,
@@ -87,6 +100,13 @@ const CustomerProfilePanel = ({ open, onClose, onLogout }) => {
   }, [open]);
 
   useEffect(() => {
+    if (!open) {
+      setShowBankForm(false);
+      setShowCardForm(false);
+    }
+  }, [open]);
+
+  useEffect(() => {
     setProfileForm({
       fullName: defaultFullName,
       email: defaultEmail,
@@ -101,6 +121,14 @@ const CustomerProfilePanel = ({ open, onClose, onLogout }) => {
       isDefault: bankAccounts.length === 0 ? true : prev.isDefault,
     }));
   }, [defaultFullName, bankAccounts.length]);
+
+  useEffect(() => {
+    setCardForm((prev) => ({
+      ...prev,
+      cardholderName: defaultFullName,
+      isDefault: cardAccounts.length === 0 ? true : prev.isDefault,
+    }));
+  }, [defaultFullName, cardAccounts.length]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -233,6 +261,14 @@ const CustomerProfilePanel = ({ open, onClose, onLogout }) => {
     }));
   };
 
+  const handleCardFieldChange = (event) => {
+    const { name, value, type, checked } = event.target;
+    setCardForm((prev) => ({
+      ...prev,
+      [name]: type === "checkbox" ? checked : value,
+    }));
+  };
+
   const handleRemoveAddress = async (addressId) => {
     try {
       await removeAddress(addressId);
@@ -290,6 +326,46 @@ const CustomerProfilePanel = ({ open, onClose, onLogout }) => {
     }
   };
 
+  const handleCardSubmit = async (event) => {
+    event.preventDefault();
+    if (
+      !cardForm.cardholderName.trim() ||
+      !cardForm.cardNumber.trim() ||
+      !cardForm.expiryMonth.trim() ||
+      !cardForm.expiryYear.trim() ||
+      !cardForm.cvv.trim()
+    ) {
+      toast.error("Please complete all required card fields.");
+      return;
+    }
+    setSavingCard(true);
+    try {
+      await linkCard({
+        cardholderName: cardForm.cardholderName,
+        cardNumber: cardForm.cardNumber,
+        expiryMonth: cardForm.expiryMonth,
+        expiryYear: cardForm.expiryYear,
+        cvv: cardForm.cvv,
+        isDefault: cardForm.isDefault,
+      });
+      toast.success("Card added successfully.");
+      setShowCardForm(false);
+      setCardForm({
+        cardholderName: defaultFullName,
+        cardNumber: "",
+        expiryMonth: "",
+        expiryYear: "",
+        cvv: "",
+        isDefault: false,
+      });
+    } catch (error) {
+      const message = error?.message || "Unable to link card.";
+      toast.error(message);
+    } finally {
+      setSavingCard(false);
+    }
+  };
+
   const handleCancelBankForm = () => {
     setShowBankForm(false);
     setBankForm({
@@ -299,6 +375,28 @@ const CustomerProfilePanel = ({ open, onClose, onLogout }) => {
       accountNumber: "",
       isDefault: bankAccounts.length === 0,
     });
+  };
+
+  const handleCancelCardForm = () => {
+    setShowCardForm(false);
+    setCardForm({
+      cardholderName: defaultFullName,
+      cardNumber: "",
+      expiryMonth: "",
+      expiryYear: "",
+      cvv: "",
+      isDefault: cardAccounts.length === 0,
+    });
+  };
+
+  const handleRemoveCard = (cardId) => {
+    try {
+      removeCard?.(cardId);
+      toast.success("Card removed.");
+    } catch (error) {
+      const message = error?.message || "Unable to remove card.";
+      toast.error(message);
+    }
   };
 
   const renderProfileSection = () => (
@@ -636,6 +734,7 @@ const CustomerProfilePanel = ({ open, onClose, onLogout }) => {
 
   const renderPaymentSection = () => {
     const hasLinkedBank = bankAccounts.length > 0;
+    const hasLinkedCard = cardAccounts.length > 0;
     return (
       <div className="space-y-4 rounded-3xl bg-white p-6 shadow">
         <p className="text-sm text-gray-500">
@@ -655,10 +754,13 @@ const CustomerProfilePanel = ({ open, onClose, onLogout }) => {
             </div>
             <button
               type="button"
-              onClick={() => setShowBankForm(true)}
+              onClick={() => {
+                setShowBankForm((prev) => !prev);
+                setShowCardForm(false);
+              }}
               className="rounded-full border border-orange-300 px-3 py-1 text-xs font-semibold text-orange-500 transition hover:bg-orange-100"
             >
-              + Add bank
+              {showBankForm ? "Close" : "+ Add bank"}
             </button>
           </div>
           <div className="mt-3 space-y-2">
@@ -712,14 +814,57 @@ const CustomerProfilePanel = ({ open, onClose, onLogout }) => {
             </div>
             <button
               type="button"
-              onClick={() => toast("Card linking is coming soon.")}
+              onClick={() => {
+                setShowCardForm((prev) => !prev);
+                setShowBankForm(false);
+              }}
               className="rounded-full border border-orange-300 px-3 py-1 text-xs font-semibold text-orange-500 transition hover:bg-orange-100"
             >
-              + Add card
+              {showCardForm ? "Close" : "+ Add card"}
             </button>
           </div>
           <div className="mt-3 space-y-2">
-            <p className="text-xs text-gray-500">No cards linked yet.</p>
+            {hasLinkedCard ? (
+              cardAccounts.map((card) => (
+                <div
+                  key={card.id}
+                  className="flex items-center justify-between rounded-xl border border-orange-100 bg-white px-3 py-2 text-sm text-gray-700"
+                >
+                  <div>
+                    <p className="font-semibold text-gray-900">
+                      {card.cardholderName || "Saved card"}
+                      {card.isDefault ? (
+                        <span className="ml-2 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-600">
+                          Default
+                        </span>
+                      ) : null}
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      **** {card.last4} • Exp {card.expiryMonth || "--"}/
+                      {card.expiryYear || "--"}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {card.brand ? (
+                      <span className="text-[10px] uppercase tracking-wide text-orange-500">
+                        {card.brand}
+                      </span>
+                    ) : null}
+                    {typeof removeCard === "function" ? (
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveCard(card.id)}
+                        className="text-xs font-semibold text-gray-400 transition hover:text-red-500"
+                      >
+                        Remove
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              ))
+            ) : (
+              <p className="text-xs text-gray-500">No cards linked yet.</p>
+            )}
           </div>
         </div>
 
@@ -802,6 +947,112 @@ const CustomerProfilePanel = ({ open, onClose, onLogout }) => {
               <button
                 type="button"
                 onClick={handleCancelBankForm}
+                className="rounded-full border border-orange-200 px-5 py-2 text-sm font-semibold text-orange-500 transition hover:bg-orange-100"
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        ) : null}
+
+        {showCardForm ? (
+          <form
+            onSubmit={handleCardSubmit}
+            className="space-y-4 rounded-2xl border border-orange-100 bg-white p-4"
+          >
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="space-y-2">
+                <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                  Cardholder name
+                </label>
+                <input
+                  name="cardholderName"
+                  value={cardForm.cardholderName}
+                  onChange={handleCardFieldChange}
+                  placeholder="e.g. PHAM NGUYEN MINH CHAU"
+                  className="w-full rounded-xl border border-orange-100 px-3 py-2 text-sm outline-none transition focus:border-orange-300 focus:ring-1 focus:ring-orange-200"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                  Card number
+                </label>
+                <input
+                  name="cardNumber"
+                  value={cardForm.cardNumber}
+                  onChange={handleCardFieldChange}
+                  placeholder="4111 1111 1111 1111"
+                  maxLength={19}
+                  className="w-full rounded-xl border border-orange-100 px-3 py-2 text-sm outline-none transition focus:border-orange-300 focus:ring-1 focus:ring-orange-200"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                  Expiry month (MM)
+                </label>
+                <input
+                  name="expiryMonth"
+                  value={cardForm.expiryMonth}
+                  onChange={handleCardFieldChange}
+                  placeholder="04"
+                  maxLength={2}
+                  className="w-full rounded-xl border border-orange-100 px-3 py-2 text-sm outline-none transition focus:border-orange-300 focus:ring-1 focus:ring-orange-200"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                  Expiry year (YY)
+                </label>
+                <input
+                  name="expiryYear"
+                  value={cardForm.expiryYear}
+                  onChange={handleCardFieldChange}
+                  placeholder="27"
+                  maxLength={2}
+                  className="w-full rounded-xl border border-orange-100 px-3 py-2 text-sm outline-none transition focus:border-orange-300 focus:ring-1 focus:ring-orange-200"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                  CVV
+                </label>
+                <input
+                  name="cvv"
+                  type="password"
+                  value={cardForm.cvv}
+                  onChange={handleCardFieldChange}
+                  placeholder="3 digits"
+                  maxLength={3}
+                  className="w-full rounded-xl border border-orange-100 px-3 py-2 text-sm outline-none transition focus:border-orange-300 focus:ring-1 focus:ring-orange-200"
+                  required
+                />
+              </div>
+            </div>
+            <label className="flex items-center gap-2 text-xs text-gray-600">
+              <input
+                type="checkbox"
+                name="isDefault"
+                checked={cardForm.isDefault}
+                onChange={handleCardFieldChange}
+                className="h-4 w-4 rounded border-orange-200 text-orange-500 focus:ring-orange-300"
+              />
+              Set as default card for checkout
+            </label>
+            <div className="flex flex-wrap gap-3">
+              <button
+                type="submit"
+                disabled={savingCard}
+                className="rounded-full bg-orange-500 px-5 py-2 text-sm font-semibold text-white transition hover:bg-orange-600 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {savingCard ? "Linking..." : "Add card"}
+              </button>
+              <button
+                type="button"
+                onClick={handleCancelCardForm}
                 className="rounded-full border border-orange-200 px-5 py-2 text-sm font-semibold text-orange-500 transition hover:bg-orange-100"
               >
                 Cancel

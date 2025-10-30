@@ -1,28 +1,51 @@
 import api from './api';
 
-const basePath = '/api/customer-addresses';
+const basePath = '/api/customers/addresses';
 
-async function listAddresses() {
-  const { data } = await api.get(basePath);
+const withUserOverride = (config = {}, userId) => {
+  if (!userId) return { ...config };
+  return {
+    ...config,
+    params: { ...(config.params || {}), user_id: userId },
+  };
+};
+
+const unwrapItems = (payload) => {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.items)) return payload.items;
+  if (Array.isArray(payload?.data)) return payload.data;
+  return [];
+};
+
+async function listAddresses(options = {}) {
+  const config = withUserOverride({}, options.userId);
+  const { data } = await api.get(basePath, config);
+  return unwrapItems(data);
+}
+
+async function createAddress(payload, options = {}) {
+  const userId = options.userId ?? payload?.user_id;
+  const config = withUserOverride({}, userId);
+  const { data } = await api.post(basePath, payload, config);
   return data;
 }
 
-async function createAddress(payload) {
-  const { data } = await api.post(basePath, payload);
+async function updateAddress(addressId, payload, options = {}) {
+  const userId = options.userId ?? payload?.user_id;
+  const config = withUserOverride({}, userId);
+  const { data } = await api.put(`${basePath}/${addressId}`, payload, config);
   return data;
 }
 
-async function updateAddress(addressId, payload) {
-  const { data } = await api.put(`${basePath}/${addressId}`, payload);
-  return data;
+async function deleteAddress(addressId, options = {}) {
+  const config = withUserOverride({}, options.userId);
+  await api.delete(`${basePath}/${addressId}`, config);
+  return true;
 }
 
-async function deleteAddress(addressId) {
-  await api.delete(`${basePath}/${addressId}`);
-}
-
-async function setDefault(addressId) {
-  const { data } = await api.post(`${basePath}/${addressId}/default`);
+async function setDefault(addressId, options = {}) {
+  const config = withUserOverride({}, options.userId);
+  const { data } = await api.post(`${basePath}/${addressId}/default`, null, config);
   return data;
 }
 

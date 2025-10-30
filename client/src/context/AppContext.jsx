@@ -57,6 +57,7 @@ const FALLBACK_RESTAURANTS = restaurantList;
 const DEFAULT_PAYMENT_METHOD = paymentOptionList[0]?.id || 'wallet';
 const ORDER_HISTORY_STATUSES = new Set(['delivered', 'completed', 'cancelled']);
 const ORDER_REVIEWABLE_STATUSES = new Set(['delivered', 'completed']);
+const CARD_STORAGE_KEY = 'customer_payment_cards';
 
 const toNumberOr = (value, fallback = 0) => {
     const parsed = Number(value);
@@ -64,6 +65,152 @@ const toNumberOr = (value, fallback = 0) => {
 };
 
 const ensureArray = (value) => (Array.isArray(value) ? value : value ? [value] : []);
+
+const generateCardId = () => {
+    try {
+        if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+            return crypto.randomUUID();
+        }
+    } catch (error) {
+        // ignore generation errors, fallback below
+    }
+    return `card_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+};
+
+const readStoredCardsMap = () => {
+    if (typeof window === 'undefined') {
+        return {};
+    }
+    try {
+        const raw = localStorage.getItem(CARD_STORAGE_KEY);
+        if (!raw) return {};
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch (error) {
+        console.warn('Failed to parse stored cards', error);
+        return {};
+    }
+};
+
+const loadCardsForUser = (userId) => {
+    if (!userId) return [];
+    const map = readStoredCardsMap();
+    const list = map?.[userId];
+    return Array.isArray(list) ? list : [];
+};
+
+const persistCardsForUser = (userId, cards) => {
+    if (!userId || typeof window === 'undefined') {
+        return;
+    }
+    try {
+        const map = readStoredCardsMap();
+        map[userId] = cards;
+        localStorage.setItem(CARD_STORAGE_KEY, JSON.stringify(map));
+    } catch (error) {
+        console.warn('Failed to persist stored cards', error);
+    }
+};
+
+const detectCardBrand = (digitString = '') => {
+    if (!digitString) return 'card';
+    const digits = digitString.replace(/\D/g, '');
+    if (!digits) return 'card';
+    if (digits.startsWith('4')) return 'visa';
+    if (/^5[1-5]/.test(digits)) return 'mastercard';
+    if (/^3[47]/.test(digits)) return 'amex';
+    if (digits.startsWith('6')) return 'discover';
+    return 'card';
+};
+
+const adaptOptionValueFromApi = (item) => {
+    if (!item) return null;
+    const priceDelta =
+        item.price_delta !== undefined && item.price_delta !== null
+            ? toNumberOr(item.price_delta, 0)
+            : item.priceDelta !== undefined && item.priceDelta !== null
+                ? toNumberOr(item.priceDelta, 0)
+                : 0;
+    const branchOverrides = Array.isArray(item.branch_overrides)
+        ? item.branch_overrides.map((override) => ({
+            branchId: override.branch_id || override.branchId || null,
+            branchProductId: override.branch_product_id || override.branchProductId || null,
+            isAvailable:
+                override.is_available !== undefined && override.is_available !== null
+                    ? override.is_available !== false
+                    : override.is_active !== false,
+            isVisible:
+                override.is_visible !== undefined && override.is_visible !== null
+                    ? override.is_visible !== false
+                    : override.is_active !== false,
+            priceDelta:
+                override.price_delta_override !== undefined && override.price_delta_override !== null
+                    ? toNumberOr(override.price_delta_override, null)
+                    : override.price_delta !== undefined && override.price_delta !== null
+                        ? toNumberOr(override.price_delta, null)
+                        : null,
+        }))
+        : [];
+    const label = item.name || item.label || 'Option';
+    return {
+        id: item.id,
+        label,
+        name: label,
+        description: item.description || '',
+        priceDelta,
+        branchOverrides,
+    };
+};
+
+const adaptOptionGroupFromApi = (group) => {
+    if (!group) return null;
+    const selectionTypeRaw = group.selection_type || group.selectionType || 'multiple';
+    const selectionType =
+        typeof selectionTypeRaw === 'string' && selectionTypeRaw.toLowerCase() === 'single'
+            ? 'single'
+            : 'multiple';
+    const minRaw =
+        group.min_select !== undefined && group.min_select !== null
+            ? group.min_select
+            : group.minSelect;
+    const maxRaw =
+        group.max_select !== undefined && group.max_select !== null
+            ? group.max_select
+            : group.maxSelect;
+    const minSelect =
+        minRaw === undefined || minRaw === null
+            ? selectionType === 'single'
+                ? 1
+                : 0
+            : toNumberOr(minRaw, 0);
+    const maxSelect =
+        maxRaw === undefined || maxRaw === null
+            ? selectionType === 'single'
+                ? 1
+                : null
+            : toNumberOr(maxRaw, null);
+    const values = Array.isArray(group.items)
+        ? group.items.map(adaptOptionValueFromApi).filter(Boolean)
+        : [];
+    const label = group.name || group.label || 'Customization';
+    const required =
+        group.is_required !== undefined && group.is_required !== null
+            ? Boolean(group.is_required)
+            : group.isRequired !== undefined && group.isRequired !== null
+                ? Boolean(group.isRequired)
+                : minSelect > 0;
+    return {
+        id: group.id,
+        name: label,
+        label,
+        description: group.description || '',
+        type: selectionType,
+        minSelect,
+        maxSelect,
+        required,
+        values,
+    };
+};
 
 const adaptRestaurantFromApi = (restaurant) => {
     if (!restaurant) return null;
@@ -81,7 +228,17 @@ const adaptRestaurantFromApi = (restaurant) => {
 
     const branchList = Array.isArray(restaurant.branches)
         ? restaurant.branches.map((branch) => {
-            const branchImages = ensureArray(branch.images).filter(Boolean);
+            const rawBranchImages = ensureArray(branch.images);
+            const branchImages = rawBranchImages.filter(Boolean);
+            const branchLogoFallback = ensureArray(restaurant.logo).filter(Boolean);
+            const displayImages = branchImages.length
+                ? branchImages
+                : branchLogoFallback.length
+                    ? branchLogoFallback
+                    : images;
+            const branchHeroImage = displayImages[0] || heroImage;
+            const branchCoverImage = displayImages[1] || branchHeroImage;
+
             const addressParts = [branch.street, branch.ward, branch.district, branch.city]
                 .filter(Boolean)
                 .join(', ');
@@ -101,12 +258,28 @@ const adaptRestaurantFromApi = (restaurant) => {
                         }
                     }
                     adapted.branchId = branch.id;
+                    adapted.restaurantId = branch.id;
+                    adapted.brandRestaurantId = restaurant.id;
+                    adapted.brandName = restaurant.name || null;
+                    adapted.branchName = branch.name || restaurant.name || null;
                     return adapted;
                 })
                 .filter(Boolean);
+
+            const branchCategoriesRaw = Array.isArray(branch.categories) ? branch.categories : [];
+            const branchCategoryNames = branchCategoriesRaw
+                .map((category) => {
+                    if (!category) return null;
+                    if (typeof category === 'string') return category;
+                    return category.name || category.label || null;
+                })
+                .filter(Boolean);
+
+            const branchCombos = Array.isArray(branch.combos) ? branch.combos : [];
+
             return {
                 id: branch.id,
-                name: branch.name || 'Branch',
+                name: branch.name || restaurant.name || 'Branch',
                 number: branch.branchNumber ?? branch.branch_number ?? null,
                 address: addressParts || branch.street || '',
                 isPrimary: branch.isPrimary ?? branch.is_primary ?? false,
@@ -115,8 +288,15 @@ const adaptRestaurantFromApi = (restaurant) => {
                 ratingCount: branch.ratingSummary?.totalRatings ?? branch.ratingCount ?? null,
                 phone: branch.branchPhone || branch.phone || null,
                 email: branch.branchEmail || branch.email || null,
-                images: branchImages.length ? branchImages : [restaurantPlaceholderImage],
+                images: displayImages.length ? displayImages : [restaurantPlaceholderImage],
+                heroImage: branchHeroImage,
+                coverImage: branchCoverImage,
                 products: branchProducts,
+                categories: branchCategoryNames,
+                categoryAssignments: branchCategoriesRaw,
+                combos: branchCombos,
+                tags: Array.from(new Set([restaurant.cuisine, ...branchCategoryNames].filter(Boolean))),
+                distanceKm: toNumberOr(branch.distance_km, toNumberOr(restaurant.distance_km, 0)),
             };
         })
         : [];
@@ -152,7 +332,8 @@ const adaptProductFromApi = (product) => {
     const images = ensureArray(product.images).filter(Boolean);
     const basePrice = toNumberOr(product.base_price, 0);
     const priceWithTax = toNumberOr(product.price_with_tax, basePrice);
-
+    const taxAmount = Math.max(priceWithTax - basePrice, 0);
+    const taxRate = basePrice > 0 ? taxAmount / basePrice : 0;
     const inventorySource =
         (product.inventory_summary && typeof product.inventory_summary === 'object')
             ? product.inventory_summary
@@ -178,6 +359,10 @@ const adaptProductFromApi = (product) => {
         }
         : null;
 
+    const optionGroups = Array.isArray(product.options)
+        ? product.options.map(adaptOptionGroupFromApi).filter(Boolean)
+        : [];
+
     const inStock =
         inventoryQuantity === null || inventoryQuantity === undefined
             ? true
@@ -197,13 +382,14 @@ const adaptProductFromApi = (product) => {
         price: { Standard: basePrice },
         basePrice,
         priceWithTax,
+        taxRate,
         images: images.length ? images : [dishPlaceholderImage],
         tags: product.popular ? ['Popular'] : [],
         popular: Boolean(product.popular),
         rating: toNumberOr(product.rating, 0),
         reviewCount: toNumberOr(product.review_count, 0),
         toppings: [],
-        options: [],
+        options: optionGroups,
         preparation: {
             prepMinutes: toNumberOr(product.prep_minutes, 5),
             cookMinutes: toNumberOr(product.cook_minutes, 15),
@@ -215,6 +401,106 @@ const adaptProductFromApi = (product) => {
         updatedAt,
     };
 };
+
+function buildBranchCatalog(brands = []) {
+    const branches = [];
+    const branchProducts = [];
+
+    brands.forEach((brand) => {
+        const branchList = Array.isArray(brand.branches) ? brand.branches : [];
+        branchList.forEach((branch) => {
+            let productsForBranch = Array.isArray(branch.products)
+                ? branch.products.map((product) => ({
+                    ...product,
+                    restaurantId: branch.id,
+                    branchId: branch.id,
+                    brandRestaurantId: brand.id,
+                    brandName: brand.name,
+                    cuisine: brand.cuisine,
+                }))
+                : [];
+
+            if (!productsForBranch.length && Array.isArray(brand.products) && brand.products.length) {
+                productsForBranch = brand.products.map((product) => ({
+                    ...product,
+                    restaurantId: branch.id,
+                    branchId: branch.id,
+                    brandRestaurantId: brand.id,
+                    brandName: brand.name,
+                    cuisine: brand.cuisine,
+                }));
+            }
+
+            branchProducts.push(...productsForBranch);
+
+            const priceCandidates = productsForBranch
+                .map((item) => toNumberOr(item.basePrice ?? item.base_price, 0))
+                .filter((value) => Number.isFinite(value) && value >= 0);
+            const priceRange = {
+                min: priceCandidates.length ? Math.min(...priceCandidates) : 0,
+                max: priceCandidates.length ? Math.max(...priceCandidates) : 0,
+            };
+
+            const branchCategories = Array.isArray(branch.categories) && branch.categories.length
+                ? branch.categories
+                : Array.isArray(brand.categories)
+                    ? brand.categories
+                    : [];
+
+            const tagSet = new Set(
+                [
+                    brand.cuisine,
+                    ...(Array.isArray(branch.tags) ? branch.tags : []),
+                    ...branchCategories,
+                ].filter(Boolean),
+            );
+
+            const displayImages = Array.isArray(branch.images) && branch.images.length
+                ? branch.images
+                : Array.isArray(brand.images) && brand.images.length
+                    ? brand.images
+                    : Array.isArray(brand.logo) && brand.logo.length
+                        ? brand.logo
+                        : [restaurantPlaceholderImage];
+
+            branches.push({
+                ...branch,
+                id: branch.id,
+                branchId: branch.id,
+                restaurantId: branch.id,
+                name: branch.name || brand.name || 'Restaurant',
+                displayName: branch.name ? `${brand.name} • ${branch.name}` : brand.name,
+                description: branch.description || brand.description || '',
+                cuisine: brand.cuisine,
+                tags: Array.from(tagSet),
+                heroImage: branch.heroImage || brand.heroImage,
+                coverImage: branch.coverImage || brand.coverImage,
+                images: displayImages,
+                logo: Array.isArray(brand.logo) ? brand.logo : [],
+                distanceKm: toNumberOr(branch.distanceKm, toNumberOr(brand.distanceKm, 0)),
+                rating: toNumberOr(branch.rating, brand.rating),
+                reviewCount: toNumberOr(branch.ratingCount, brand.reviewCount),
+                categories: branchCategories,
+                categoryAssignments: branch.categoryAssignments || [],
+                combos: Array.isArray(branch.combos) ? branch.combos : [],
+                products: productsForBranch,
+                priceRange,
+                brand: {
+                    id: brand.id,
+                    name: brand.name,
+                    cuisine: brand.cuisine,
+                    phone: brand.phone,
+                    email: brand.email,
+                    images: brand.images,
+                    logo: brand.logo,
+                    description: brand.description,
+                },
+            });
+        });
+    });
+
+    return { branches, branchProducts };
+}
 
 const adaptAddressFromApi = (address) => {
     if (!address) return null;
@@ -390,6 +676,7 @@ export const AppContextProvider = ({ children }) => {
     // --- States ---
     const [products, setProducts] = useState([]);
     const [restaurants, setRestaurants] = useState([]);
+    const [restaurantBrands, setRestaurantBrands] = useState([]);
     const [catalogLoading, setCatalogLoading] = useState(false);
     const [catalogError, setCatalogError] = useState(null);
     const [activeOrders, setActiveOrders] = useState([]);
@@ -399,6 +686,11 @@ export const AppContextProvider = ({ children }) => {
     const [addresses, setAddresses] = useState([]);
 
     const [bankAccounts, setBankAccounts] = useState([]);
+    const [cardAccounts, setCardAccounts] = useState([]);
+    const [customerProfileOpen, setCustomerProfileOpen] = useState(false);
+
+    const openCustomerProfilePanel = useCallback(() => setCustomerProfileOpen(true), []);
+    const closeCustomerProfilePanel = useCallback(() => setCustomerProfileOpen(false), []);
 
     const [selectedAddressId, setSelectedAddressId] = useState(null);
     const selectedAddress = useMemo(
@@ -418,6 +710,7 @@ export const AppContextProvider = ({ children }) => {
     });
     const [searchQuery, setSearchQuery] = useState("");
     const [cartItems, setCartItems] = useState({});
+    const [cartItemDetails, setCartItemDetails] = useState({});
     const currency = import.meta.env.VITE_CURRENCY || "VND ";
     const delivery_charges = 15000;
 
@@ -442,12 +735,16 @@ export const AppContextProvider = ({ children }) => {
             const adaptedRestaurants = Array.isArray(restaurantData)
                 ? restaurantData.map(adaptRestaurantFromApi).filter(Boolean)
                 : [];
-            const adaptedProducts = Array.isArray(productData)
+
+            const { branches: flattenedBranches, branchProducts } = buildBranchCatalog(adaptedRestaurants);
+
+            const globalProducts = Array.isArray(productData)
                 ? productData.map(adaptProductFromApi).filter(Boolean)
                 : [];
 
-            setRestaurants(adaptedRestaurants);
-            setProducts(adaptedProducts);
+            setRestaurantBrands(adaptedRestaurants);
+            setRestaurants(flattenedBranches);
+            setProducts(branchProducts.length ? branchProducts : globalProducts);
 
             return { success: true };
         } catch (error) {
@@ -455,9 +752,67 @@ export const AppContextProvider = ({ children }) => {
                 return { cancelled: true };
             }
             console.error('Failed to load catalog data from product-service', error);
-            setCatalogError(error?.message || 'Không thể tải dữ liệu món ăn / nhà hàng.');
-            setRestaurants(prev => (prev.length ? prev : FALLBACK_RESTAURANTS));
-            setProducts(prev => (prev.length ? prev : FALLBACK_PRODUCTS));
+            setCatalogError(error?.message || 'Unable to load restaurant catalog.');
+
+            const fallbackBrands = FALLBACK_RESTAURANTS
+                .map(adaptRestaurantFromApi)
+                .filter(Boolean);
+            const { branches: fallbackBranchesRaw, branchProducts: fallbackBranchProductsRaw } =
+                buildBranchCatalog(fallbackBrands);
+
+            const safeFallbackBranches = fallbackBranchesRaw.length
+                ? fallbackBranchesRaw
+                : fallbackBrands.map((brand) => {
+                    const fallbackBranchProducts = Array.isArray(brand.products)
+                        ? brand.products.map((product) => ({
+                            ...product,
+                            restaurantId: brand.id,
+                            branchId: brand.id,
+                            brandRestaurantId: brand.id,
+                            brandName: brand.name,
+                        }))
+                        : [];
+                    return {
+                        id: brand.id,
+                        branchId: brand.id,
+                        restaurantId: brand.id,
+                        name: brand.name,
+                        displayName: brand.name,
+                        description: brand.description || '',
+                        cuisine: brand.cuisine,
+                        tags: Array.isArray(brand.tags) ? brand.tags : brand.cuisine ? [brand.cuisine] : [],
+                        heroImage: brand.heroImage,
+                        coverImage: brand.coverImage,
+                        images: brand.images,
+                        logo: brand.logo,
+                        distanceKm: brand.distanceKm ?? 0,
+                        rating: brand.rating ?? 0,
+                        reviewCount: brand.reviewCount ?? 0,
+                        categories: Array.isArray(brand.categories) ? brand.categories : [],
+                        categoryAssignments: [],
+                        combos: [],
+                        products: fallbackBranchProducts,
+                        priceRange: { min: 0, max: 0 },
+                        brand: {
+                            id: brand.id,
+                            name: brand.name,
+                            cuisine: brand.cuisine,
+                            phone: brand.phone,
+                            email: brand.email,
+                            images: brand.images,
+                            logo: brand.logo,
+                            description: brand.description,
+                        },
+                    };
+                });
+
+            const safeFallbackProducts = fallbackBranchProductsRaw.length
+                ? fallbackBranchProductsRaw
+                : safeFallbackBranches.flatMap((branch) => branch.products || []);
+
+            setRestaurantBrands((prev) => (prev.length ? prev : fallbackBrands));
+            setRestaurants((prev) => (prev.length ? prev : safeFallbackBranches));
+            setProducts((prev) => (prev.length ? prev : safeFallbackProducts.length ? safeFallbackProducts : FALLBACK_PRODUCTS));
             return { success: false, error };
         } finally {
             if (!signal?.aborted) {
@@ -487,6 +842,48 @@ export const AppContextProvider = ({ children }) => {
         try { return JSON.parse(localStorage.getItem('restaurant_profile') || 'null'); } catch { return null; }
     });
 
+
+    useEffect(() => {
+        if (!authProfileId) {
+            setCardAccounts([]);
+            return;
+        }
+        setCardAccounts(loadCardsForUser(authProfileId));
+    }, [authProfileId]);
+
+    const refreshOrders = useCallback(async () => {
+        if (!authToken) {
+            setActiveOrders([]);
+            setPastOrders([]);
+            setOrdersLoading(false);
+            return { success: false, reason: 'unauthenticated' };
+        }
+
+        setOrdersLoading(true);
+        try {
+            const response = await ordersService.list();
+            const rawList = Array.isArray(response)
+                ? response
+                : Array.isArray(response?.orders)
+                    ? response.orders
+                    : Array.isArray(response?.data)
+                        ? response.data
+                        : [];
+            const adapted = rawList.map(adaptOrderFromApi).filter(Boolean);
+            const { active, past } = splitOrdersByStatus(adapted);
+            setActiveOrders(active);
+            setPastOrders(past);
+            return { success: true, active, past };
+        } catch (error) {
+            console.error('Failed to refresh orders', error);
+            setActiveOrders([]);
+            setPastOrders([]);
+            return { success: false, error };
+        } finally {
+            setOrdersLoading(false);
+        }
+    }, [authToken]);
+
     const refreshAddresses = useCallback(async () => {
         if (!authToken && !authProfileId) {
             setAddresses([]);
@@ -495,9 +892,14 @@ export const AppContextProvider = ({ children }) => {
         }
         try {
             const data = await authService.listAddresses({ userId: authProfileId || undefined });
-            const adapted = Array.isArray(data)
-                ? data.map((item) => adaptAddressFromApi(item)).filter(Boolean)
-                : [];
+            const rawList = Array.isArray(data)
+                ? data
+                : Array.isArray(data?.data)
+                    ? data.data
+                    : Array.isArray(data?.addresses)
+                        ? data.addresses
+                        : [];
+            const adapted = rawList.map(adaptAddressFromApi).filter(Boolean);
             setAddresses(adapted);
             if (adapted.length) {
                 const defaultAddress = adapted.find((addr) => addr.isDefault) || adapted[0];
@@ -507,67 +909,123 @@ export const AppContextProvider = ({ children }) => {
             }
             return adapted;
         } catch (error) {
+            const status = error?.response?.status;
+            if (status === 401 || status === 403) {
+                setAddresses([]);
+                setSelectedAddressId(null);
+                return [];
+            }
             console.error('Failed to load addresses', error);
-            setAddresses([]);
-            setSelectedAddressId(null);
+            toast.error('Unable to load saved addresses. Please try again later.');
             return [];
         }
     }, [authToken, authProfileId]);
 
     const refreshBankAccounts = useCallback(async () => {
-        const userId = authProfileId || undefined;
-        if (!authToken && !userId) {
+        if (!authToken && !authProfileId) {
             setBankAccounts([]);
             return [];
         }
         try {
-            const data = await paymentsService.listBankAccounts({ userId });
-            const accounts = Array.isArray(data) ? data : [];
-            setBankAccounts(accounts);
-            return accounts;
+            const data = await paymentsService.listBankAccounts({ userId: authProfileId || undefined });
+            const rawList = Array.isArray(data)
+                ? data
+                : Array.isArray(data?.data)
+                    ? data.data
+                    : Array.isArray(data?.items)
+                        ? data.items
+                        : [];
+            setBankAccounts(rawList);
+            return rawList;
         } catch (error) {
+            const status = error?.response?.status;
+            if (status === 401 || status === 403) {
+                setBankAccounts([]);
+                return [];
+            }
+            const errorMessage = String(error?.response?.data?.message || '').toLowerCase();
+            if (
+                status === 404 ||
+                status === 400 ||
+                error?.response?.data?.code === 'BANK_ACCOUNT_NOT_FOUND' ||
+                errorMessage.includes('not linked') ||
+                errorMessage.includes('no bank account')
+            ) {
+                setBankAccounts([]);
+                return [];
+            }
             console.error('Failed to load bank accounts', error);
+            toast.error('Unable to load bank accounts. Please try again later.');
             setBankAccounts([]);
             return [];
         }
     }, [authToken, authProfileId]);
 
-    const linkBankAccount = useCallback(async (payload) => {
-        const account = await paymentsService.linkBankAccount({
-            ...payload,
-            user_id: payload?.user_id || authProfileId || undefined,
-        });
-        setBankAccounts(prev => [account, ...prev.filter(item => item.id !== account.id)]);
-        return account;
-    }, [authProfileId]);
+    const linkBankAccount = useCallback(
+        async (payload = {}) => {
+            if (!authToken && !authProfileId) {
+                throw new Error('Please sign in to link a bank account.');
+            }
+            const requestPayload = { ...payload };
+            if (!requestPayload.user_id && authProfileId) {
+                requestPayload.user_id = authProfileId;
+            }
+            const record = await paymentsService.linkBankAccount(requestPayload);
+            await refreshBankAccounts();
+            return record;
+        },
+        [authToken, authProfileId, refreshBankAccounts],
+    );
 
+    const linkPaymentCard = useCallback(
+        async (payload = {}) => {
+            if (!authProfileId) {
+                throw new Error('Please sign in to link a card.');
+            }
+            const rawNumber = String(payload.cardNumber || '').replace(/\D/g, '');
+            if (!rawNumber || rawNumber.length < 4) {
+                throw new Error('Please provide a valid card number.');
+            }
+            const normalizedMonth = payload.expiryMonth ? String(payload.expiryMonth).padStart(2, '0') : '';
+            const normalizedYear = payload.expiryYear ? String(payload.expiryYear).padStart(2, '0') : '';
+            const cardRecord = {
+                id: payload.id || generateCardId(),
+                cardholderName: (payload.cardholderName || '').trim(),
+                last4: rawNumber.slice(-4),
+                expiryMonth: normalizedMonth,
+                expiryYear: normalizedYear,
+                brand: detectCardBrand(rawNumber),
+                isDefault: Boolean(payload.isDefault),
+            };
+            setCardAccounts((prev) => {
+                const filtered = prev.filter((card) => card.id !== cardRecord.id);
+                const updated = cardRecord.isDefault
+                    ? [
+                        cardRecord,
+                        ...filtered.map((card) => ({ ...card, isDefault: false })),
+                    ]
+                    : [...filtered, cardRecord];
+                persistCardsForUser(authProfileId, updated);
+                return updated;
+            });
+            return cardRecord;
+        },
+        [authProfileId],
+    );
 
-    const refreshOrders = useCallback(async () => {
-        if (!authToken) {
-            setActiveOrders([]);
-            setPastOrders([]);
-            return { cancelled: true };
-        }
-
-        setOrdersLoading(true);
-        try {
-            const data = await ordersService.list();
-            const adapted = Array.isArray(data)
-                ? data.map(adaptOrderFromApi).filter(Boolean)
-                : [];
-            const { active, past } = splitOrdersByStatus(adapted);
-            setActiveOrders(active);
-            setPastOrders(past);
-            return { success: true, active, past };
-        } catch (error) {
-            console.error('Failed to load orders from order-service', error);
-            setActiveOrders([]);
-            setPastOrders([]);
-            return { success: false, error };
-        } finally {
-            setOrdersLoading(false);
-        }
-    }, [authToken]);
+    const removePaymentCard = useCallback(
+        (cardId) => {
+            if (!authProfileId) {
+                return;
+            }
+            setCardAccounts((prev) => {
+                const updated = prev.filter((card) => card.id !== cardId);
+                persistCardsForUser(authProfileId, updated);
+                return updated;
+            });
+        },
+        [authProfileId],
+    );
 
     useEffect(() => {
         refreshOrders();
@@ -592,13 +1050,13 @@ export const AppContextProvider = ({ children }) => {
 
     useEffect(() => {
         if (method === 'bank' && bankAccounts.length === 0) {
-            const fallbackMethod =
-                paymentOptionList.find(option => option.id !== 'bank')?.id || DEFAULT_PAYMENT_METHOD;
-            if (fallbackMethod !== method) {
-                setMethod(fallbackMethod);
-            }
+            setMethod(DEFAULT_PAYMENT_METHOD);
+            return;
         }
-    }, [method, bankAccounts.length]);
+        if (method === 'card' && cardAccounts.length === 0) {
+            setMethod(DEFAULT_PAYMENT_METHOD);
+        }
+    }, [method, bankAccounts.length, cardAccounts.length, setMethod]);
 
     // --- Unified user object ---
 
@@ -648,44 +1106,149 @@ export const AppContextProvider = ({ children }) => {
     }, [userFullName, userPhoneNumber]);
 
     // --- Cart Functions ---
-    const addToCart = (itemId, size, quantity = 1) => {
-        const dish = products.find(item => item._id === itemId);
-        if (!dish) {
-            toast.error("Dish not found.");
+    const generateCartSignature = (value) => (value ? String(value) : 'base');
+
+    const resolveCartKey = (sizeLabel, signature = 'base') => {
+        const normalizedSize = (sizeLabel || 'Standard').replace(/::/g, '--');
+        const normalizedSignature = generateCartSignature(signature).replace(/::/g, '--');
+        return `${normalizedSize}::${normalizedSignature}`;
+    };
+
+    const buildDetailKey = (productId, cartKey) => `${productId}:${cartKey}`;
+
+    const addToCart = (reference, maybeSize, maybeQuantity = 1, config = {}) => {
+        const payload = typeof reference === 'object' && reference !== null
+            ? reference
+            : {
+                productId: reference,
+                size: maybeSize,
+                quantity: maybeQuantity,
+                ...config,
+            };
+
+        const {
+            productId,
+            size,
+            quantity = 1,
+            signature,
+            options = [],
+            basePrice: providedBasePrice,
+            sizePriceDelta: providedSizeDelta,
+            optionPriceTotal: providedOptionTotal,
+            subtotal: providedSubtotal,
+            taxRate: providedTaxRate,
+            taxAmount: providedTaxAmount,
+            unitPrice: providedUnitPrice,
+        } = payload;
+
+        const product = products.find((item) => item._id === productId);
+        if (!product) {
+            toast.error('Dish not found.');
             return;
         }
-        if (dish.sizes?.length && !size) {
-            toast.error("Please choose a size before adding this dish.");
+
+        if (product.sizes?.length && !size && !payload.sizeOptional) {
+            toast.error('Please choose a size before adding this dish.');
             return;
         }
-        const effectiveSize = size || dish.sizes?.[0] || "Default";
-        setCartItems(prev => {
+
+        const sizeLabel = size || product.sizes?.[0] || 'Standard';
+        const cartSignature = signature || generateCartSignature(
+            options
+                .flatMap((group) => group.values || [])
+                .map((value) => value.id || value.label)
+                .sort()
+                .join('|'),
+        );
+        const cartKey = resolveCartKey(sizeLabel, cartSignature);
+        const detailKey = buildDetailKey(productId, cartKey);
+
+        const basePriceCandidate =
+            providedBasePrice ??
+            product.basePrice ??
+            product.price?.Standard ??
+            product.price?.[sizeLabel] ??
+            0;
+
+        const sizePriceDelta =
+            providedSizeDelta ??
+            (() => {
+                const sizeSpecificPrice = product.price?.[sizeLabel];
+                if (
+                    typeof sizeSpecificPrice === 'number' &&
+                    typeof basePriceCandidate === 'number'
+                ) {
+                    return sizeSpecificPrice - basePriceCandidate;
+                }
+                return 0;
+            })();
+        const optionPriceTotal = providedOptionTotal ?? 0;
+
+        const subtotal =
+            providedSubtotal ?? basePriceCandidate + sizePriceDelta + optionPriceTotal;
+
+        const taxRate = providedTaxRate ?? product.taxRate ?? 0;
+        const taxAmount =
+            providedTaxAmount ?? (taxRate > 0 ? subtotal * taxRate : 0);
+        const unitPrice =
+            providedUnitPrice ?? Math.max(subtotal + taxAmount, 0);
+
+        setCartItems((prev) => {
             const updated = structuredClone(prev);
-            updated[itemId] = updated[itemId] || {};
-            updated[itemId][effectiveSize] = (updated[itemId][effectiveSize] || 0) + Math.max(quantity, 1);
+            updated[productId] = updated[productId] || {};
+            updated[productId][cartKey] =
+                (updated[productId][cartKey] || 0) + Math.max(quantity, 1);
             return updated;
         });
-        toast.success(`${dish.title} was added to your cart.`);
+
+        setCartItemDetails((prev) => ({
+            ...prev,
+            [detailKey]: {
+                displaySize: sizeLabel,
+                signature: cartSignature,
+                options,
+                basePrice: basePriceCandidate,
+                sizePriceDelta,
+                optionPriceTotal,
+                subtotal,
+                taxRate,
+                taxAmount,
+                unitPrice,
+            },
+        }));
+
+        toast.success(`${product.title} was added to your cart.`);
     };
 
-    const getCartCount = () => {
-        return Object.values(cartItems).reduce((count, sizes) =>
-            count + Object.values(sizes).reduce((sum, qty) => sum + qty, 0), 0);
-    };
+    const getCartCount = () =>
+        Object.values(cartItems).reduce(
+            (count, sizeMap) =>
+                count +
+                Object.values(sizeMap).reduce(
+                    (sum, qty) => sum + qty,
+                    0,
+                ),
+            0,
+        );
 
-    const updateQuantity = (itemId, size, quantity) => {
-        setCartItems(prev => {
+    const updateQuantity = (productId, cartKey, quantity) => {
+        setCartItems((prev) => {
             const updated = structuredClone(prev);
-            if (!updated[itemId]) {
+            if (!updated[productId]) {
                 return prev;
             }
             if (quantity <= 0) {
-                delete updated[itemId][size];
-                if (Object.keys(updated[itemId]).length === 0) {
-                    delete updated[itemId];
+                delete updated[productId][cartKey];
+                if (Object.keys(updated[productId]).length === 0) {
+                    delete updated[productId];
                 }
+                setCartItemDetails((detailPrev) => {
+                    const next = { ...detailPrev };
+                    delete next[buildDetailKey(productId, cartKey)];
+                    return next;
+                });
             } else {
-                updated[itemId][size] = quantity;
+                updated[productId][cartKey] = quantity;
             }
             return updated;
         });
@@ -694,16 +1257,33 @@ export const AppContextProvider = ({ children }) => {
     const getCartAmount = () => {
         let total = 0;
         for (const itemId in cartItems) {
-            const product = products.find(p => p._id === itemId);
-            if (!product) continue;
-            for (const size in cartItems[itemId]) {
-                total += product.price[size] * cartItems[itemId][size];
+            const sizeMap = cartItems[itemId] || {};
+            for (const cartKey in sizeMap) {
+                const quantity = sizeMap[cartKey];
+                if (quantity <= 0) continue;
+                const detail = cartItemDetails[buildDetailKey(itemId, cartKey)];
+                if (detail?.unitPrice != null) {
+                    total += detail.unitPrice * quantity;
+                    continue;
+                }
+                const product = products.find((p) => p._id === itemId);
+                if (!product) continue;
+                const [sizeLabel] = cartKey.split('::');
+                const fallbackPrice =
+                    product.price?.[sizeLabel] ??
+                    product.basePrice ??
+                    product.price?.Standard ??
+                    0;
+                total += fallbackPrice * quantity;
             }
         }
         return total;
     };
 
-    const clearCart = () => setCartItems({});
+    const clearCart = () => {
+        setCartItems({});
+        setCartItemDetails({});
+    };
 
     const getDiscountAmount = useCallback((subtotal) => {
         if (!subtotal || subtotal <= 0) {
@@ -751,10 +1331,24 @@ export const AppContextProvider = ({ children }) => {
             const product = products.find((item) => item._id === itemId);
             if (!product) continue;
             const sizeMap = cartItems[itemId] || {};
-            for (const sizeKey in sizeMap) {
-                const quantity = sizeMap[sizeKey];
+            for (const cartKey in sizeMap) {
+                const quantity = sizeMap[cartKey];
                 if (quantity <= 0) continue;
-                const unitPrice = product.price?.[sizeKey] ?? product.basePrice ?? 0;
+
+                const detail = cartItemDetails[buildDetailKey(itemId, cartKey)] || null;
+                const [rawSizeLabel] = cartKey.split('::');
+                const displaySize = detail?.displaySize || rawSizeLabel || 'Standard';
+                const baseUnitPrice =
+                    detail?.unitPrice ??
+                    product.price?.[displaySize] ??
+                    product.basePrice ??
+                    product.price?.Standard ??
+                    0;
+                const subtotalPerUnit =
+                    detail?.subtotal ??
+                    (baseUnitPrice - (detail?.taxAmount ?? 0));
+                const taxPerUnit = detail?.taxAmount ?? 0;
+                const unitPrice = Math.max(baseUnitPrice, 0);
                 const totalPrice = unitPrice * quantity;
                 const restaurantId = product.restaurantId || null;
 
@@ -796,13 +1390,18 @@ export const AppContextProvider = ({ children }) => {
 
                 orderItems.push({
                     product_id: product._id,
-                    variant_id: sizeKey !== 'Standard' ? sizeKey : null,
+                    variant_id: displaySize !== 'Standard' ? displaySize : null,
                     quantity,
                     unit_price: unitPrice,
                     total_price: totalPrice,
+                    subtotal: subtotalPerUnit * quantity,
+                    tax_amount: taxPerUnit * quantity,
+                    tax_rate: detail?.taxRate ?? product.taxRate ?? 0,
+                    options: detail?.options || [],
+                    option_selections: detail?.options || [],
                     product_snapshot: {
                         title: product.title,
-                        size: sizeKey,
+                        size: displaySize,
                         image: product.images?.[0],
                         restaurant_id: restaurantId,
                         restaurant_name: existingStats.snapshot?.name || restaurantRecord?.name || null,
@@ -966,6 +1565,7 @@ export const AppContextProvider = ({ children }) => {
         authToken,
         user,
         cartItems,
+        cartItemDetails,
         products,
         delivery_charges,
         getDiscountAmount,
@@ -1086,6 +1686,8 @@ export const AppContextProvider = ({ children }) => {
         setAddresses([]);
         setSelectedAddressId(null);
         setBankAccounts([]);
+        setCardAccounts([]);
+        setCustomerProfileOpen(false);
         localStorage.removeItem('auth_token');
         localStorage.removeItem('auth_profile');
         localStorage.removeItem('pending_user_id');
@@ -1135,6 +1737,7 @@ export const AppContextProvider = ({ children }) => {
 
     // --- Restaurant Helpers ---
     const getRestaurantById = (restaurantId) => restaurants.find(restaurant => restaurant.id === restaurantId);
+    const getBrandById = (brandId) => restaurantBrands.find((restaurant) => restaurant.id === brandId);
     const getDishById = (dishId) => products.find(item => item._id === dishId);
     const getDishesByRestaurant = (restaurantId) =>
         products.filter(item => item.restaurantId === restaurantId);
@@ -1296,6 +1899,8 @@ export const AppContextProvider = ({ children }) => {
         setSearchQuery,
         cartItems,
         setCartItems,
+        cartItemDetails,
+        setCartItemDetails,
         addToCart,
         getCartCount,
         updateQuantity,
@@ -1306,10 +1911,12 @@ export const AppContextProvider = ({ children }) => {
         isOwner,
         setIsOwner,
         restaurants,
+        restaurantBrands,
         catalogLoading,
         catalogError,
         refreshCatalog,
         getRestaurantById,
+        getBrandById,
         getDishesByRestaurant,
         getDishById,
         activeOrders,
@@ -1337,6 +1944,9 @@ export const AppContextProvider = ({ children }) => {
         bankAccounts,
         refreshBankAccounts,
         linkBankAccount,
+        cardAccounts,
+        linkCard: linkPaymentCard,
+        removeCard: removePaymentCard,
         paymentOptions: paymentOptionList,
         restaurantReviews,
         addRestaurantReview,
@@ -1345,6 +1955,9 @@ export const AppContextProvider = ({ children }) => {
         updateLocalProfile,
         restaurantProfile,
         setRestaurantProfile,
+        customerProfileOpen,
+        openCustomerProfilePanel,
+        closeCustomerProfilePanel,
 
         // Auth Actions
         isAuthenticated: Boolean(user),

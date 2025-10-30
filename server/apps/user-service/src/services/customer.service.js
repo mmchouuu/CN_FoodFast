@@ -1,136 +1,318 @@
-// user-service/src/services/customer.service.js
-
-const userModel = require('../models/user.model');
-const bcrypt = require('../utils/bcrypt');
+﻿const bcrypt = require('../utils/bcrypt');
 const jwt = require('../utils/jwt');
 const { generateOTP } = require('../utils/otp');
 const { sendOtpEmail } = require('../utils/emailQueue');
+const { withTransaction } = require('../db');
+const roleRepository = require('../repositories/role.repository');
+const userRepository = require('../repositories/user.repository');
+const tokenRepository = require('../repositories/userToken.repository');
+const addressRepository = require('../repositories/address.repository');
 
-const OTP_TTL_MS = 5 * 60 * 1000; // 5 phút
+const OTP_TTL_MS = 5 * 60 * 1000;
+const RESET_TTL_MS = 10 * 60 * 1000;
+
+function sanitizeAddress(address) {
+  if (!address) return address;
+  const { phone, ...rest } = address;
+  return rest;
+}
+
 function createError(message, status = 400) {
-  const err = new Error(message);
-  err.status = status;
-  return err;
+  const error = new Error(message);
+  error.status = status;
+  return error;
+}
+
+async function ensureCustomerRole(client) {
+  await roleRepository.ensureGlobalRoles(client);
+  const role = await roleRepository.getRoleByCode('customer', client);
+  if (!role) {
+    throw createError('customer role missing in database', 500);
+  }
+  return role;
 }
 
 
-const adaptAddress = (record) => ({
-  id: record.id,
-  label: record.label || (record.is_primary ? 'Primary' : 'Address'),
-  recipient: record.recipient || null,
-  phone: record.phone || null,
-  street: record.street,
-  ward: record.ward || null,
-  district: record.district || null,
-  city: record.city || null,
-  instructions: record.instructions || null,
-  isDefault: record.is_primary === true,
-  createdAt: record.created_at,
-  updatedAt: record.updated_at,
-});
+// const adaptAddress = (record) => ({
+//   id: record.id,
+//   label: record.label || (record.is_primary ? 'Primary' : 'Address'),
+//   recipient: record.recipient || null,
+//   phone: record.phone || null,
+//   street: record.street,
+//   ward: record.ward || null,
+//   district: record.district || null,
+//   city: record.city || null,
+//   instructions: record.instructions || null,
+//   isDefault: record.is_primary === true,
+//   createdAt: record.created_at,
+//   updatedAt: record.updated_at,
+// });
 
 
 // Customer register -> gửi OTP để verify email
+
 async function registerCustomer(payload) {
-  const existing = await userModel.findByEmail(payload.email);
-  if (existing) throw createError('Email already used', 409);
+  const { email, password, firstName, lastName, phone } = payload || {};
+  if (!email || !password) {
+    throw createError('Email and password are required');
+  }
 
-  const password_hash = await bcrypt.hash(payload.password);
-  const otp = generateOTP();
-  const expiresAt = new Date(Date.now() + OTP_TTL_MS);
+  const normalizedEmail = email.trim().toLowerCase();
+  const otpCode = generateOTP();
 
-  const user = await userModel.createUser({
-    first_name: payload.first_name,
-    last_name: payload.last_name,
-    email: payload.email,
-    phone: payload.phone,
-    password_hash,
-    role: 'customer',
-    otp_code: otp,
-    otp_expires: expiresAt,
-    is_verified: false,
-    is_approved: true, // customers không cần admin approve
+  let user;
+  await withTransaction(async (client) => {
+    const role = await ensureCustomerRole(client);
+    const existing = await userRepository.findByEmail(normalizedEmail, client);
+
+    if (existing) {
+      const roles = await userRepository.getUserRoleCodes(existing.id, client);
+      if (roles.includes('customer') && existing.email_verified) {
+        throw createError('Email already registered', 409);
+      }
+      user = await userRepository.updateUser(
+        existing.id,
+        {
+          firstName: firstName ?? existing.first_name,
+          lastName: lastName ?? existing.last_name,
+          phone: phone ?? existing.phone,
+          isActive: true,
+        },
+        client,
+      );
+    } else {
+      user = await userRepository.createUser(
+        {
+          email: normalizedEmail,
+          firstName,
+          lastName,
+          phone,
+          isActive: true,
+          emailVerified: false,
+        },
+        client,
+      );
+    }
+
+    await userRepository.assignRole(user.id, role.id, client);
+    const passwordHash = await bcrypt.hash(password);
+    await userRepository.upsertCredential(
+      {
+        userId: user.id,
+        roleId: role.id,
+        passwordHash,
+        isTemp: false,
+      },
+      client,
+    );
+    await userRepository.createCustomerProfile(user.id, client);
+
+    await tokenRepository.createToken(
+      {
+        userId: user.id,
+        purpose: 'verify_email',
+        code: otpCode,
+        ttlMs: OTP_TTL_MS,
+      },
+      client,
+    );
   });
 
-  await sendOtpEmail(user.email, user.first_name || user.email, otp, 'VERIFY');
+  await sendOtpEmail(normalizedEmail, firstName || normalizedEmail, otpCode, 'VERIFY');
   return {
-    message: 'Customer registered. OTP sent to email for verification.',
-    userId: user.id,
+    message: 'Customer registered, please verify email to activate account.',
   };
 }
 
-// Customer verify => set is_verified true
-async function verifyCustomer(email, otp_code) {
-  const user = await userModel.findByEmail(email);
-  if (!user) throw createError('User not found', 404);
-  if (user.role !== 'customer') throw createError('Not a customer account', 403);
-  if (!user.otp_code || !user.otp_expires) throw createError('No OTP found', 400);
-  if (user.otp_code !== otp_code) throw createError('Invalid OTP', 400);
-  if (new Date(user.otp_expires) < new Date()) throw createError('OTP expired', 400);
-
-  const updated = await userModel.updateUser(user.id, { is_verified: true, otp_code: null, otp_expires: null });
-  const token = jwt.sign({ userId: user.id, role: user.role }, { expiresIn: '15m' });
-  const { password_hash, otp_code: _, otp_expires: __, ...publicUser } = updated;
-  return {
-    message: 'Email verified. Welcome back!',
-    user: publicUser,
-    token,
-  };
-}
-
-// Customer login (email + password)
-async function loginCustomer({ email, password }) {
-  const normalizedEmail =
-    typeof email === 'string' ? email.trim().toLowerCase() : '';
-  const plainPassword = typeof password === 'string' ? password : '';
-
-  if (!normalizedEmail || !plainPassword) {
-    throw Object.assign(new Error('Invalid credentials'), { statusCode: 401 });
+async function verifyCustomer(email, otp) {
+  if (!email || !otp) {
+    throw createError('Email and OTP are required');
   }
 
-  const user = await userModel.findByEmail(normalizedEmail);
+  const normalizedEmail = email.trim().toLowerCase();
+  const user = await userRepository.findByEmail(normalizedEmail);
   if (!user) {
-    throw Object.assign(new Error('Invalid credentials'), { statusCode: 401 });
-  }
-  if (user.role !== 'customer') {
-    throw Object.assign(new Error('Not a customer account'), { statusCode: 403 });
-  }
-  if (!user.is_verified) {
-    throw Object.assign(new Error('Customer account not verified'), { statusCode: 403 });
+    throw createError('User not found', 404);
   }
 
-  const ok = await bcrypt.compare(plainPassword, user.password_hash || '');
+  const roles = await userRepository.getUserRoleCodes(user.id);
+  if (!roles.includes('customer')) {
+    throw createError('Account is not a customer', 403);
+  }
+
+  const tokenResult = await tokenRepository.consumeToken({
+    userId: user.id,
+    purpose: 'verify_email',
+    code: otp,
+  });
+
+  if (!tokenResult.success) {
+    if (tokenResult.reason === 'invalid_code') {
+      throw createError('OTP invalid', 400);
+    }
+    throw createError('OTP not found or expired', 400);
+  }
+
+  await userRepository.updateUser(user.id, { emailVerified: true });
+  const accessToken = jwt.sign({ userId: user.id, role: 'customer' }, { expiresIn: '1h' });
+
+  return {
+    message: 'Verification successful',
+    token: accessToken,
+    user: {
+      id: user.id,
+      email: user.email,
+      firstName: user.first_name,
+      lastName: user.last_name,
+      emailVerified: true,
+    },
+  };
+}
+
+async function loginCustomer({ email, password }) {
+  if (!email || !password) {
+    throw createError('Email and password are required', 401);
+  }
+
+  const normalizedEmail = email.trim().toLowerCase();
+  const user = await userRepository.findByEmail(normalizedEmail);
+  if (!user) {
+    throw createError('Invalid credentials', 401);
+  }
+
+  const roles = await userRepository.getUserRoleCodes(user.id);
+  if (!roles.includes('customer')) {
+    throw createError('Invalid credentials', 401);
+  }
+
+  if (!user.email_verified) {
+    throw createError('Account not verified', 403);
+  }
+
+  const role = await roleRepository.getRoleByCode('customer');
+  const credential = await userRepository.getCredential(user.id, role.id);
+  if (!credential) {
+    throw createError('Invalid credentials', 401);
+  }
+
+  const ok = await bcrypt.compare(password, credential.password_hash);
   if (!ok) {
-    throw Object.assign(new Error('Invalid credentials'), { statusCode: 401 });
+    throw createError('Invalid credentials', 401);
   }
 
-  const token = jwt.sign({ userId: user.id, role: user.role }, { expiresIn: '15m' });
-  return { message: 'Login successful', user, token };
+  const token = jwt.sign({ userId: user.id, role: 'customer' }, { expiresIn: '1h' });
+  const profile = await userRepository.getCustomerProfile(user.id);
+
+  return {
+    message: 'Login successful',
+    token,
+    user: {
+      id: user.id,
+      email: user.email,
+      firstName: user.first_name,
+      lastName: user.last_name,
+      phone: user.phone,
+      emailVerified: user.email_verified,
+      profile,
+    },
+  };
 }
 
 async function listAddresses(userId) {
-  const rows = await userModel.getAddressesByUserId(userId);
-  return rows.map(adaptAddress);
+  const addresses = await addressRepository.listByUserId(userId);
+  return addresses.map(sanitizeAddress);
 }
 
 async function createAddress(userId, payload) {
-  const record = await userModel.createAddress(userId, {
-    label: payload.label,
-    recipient: payload.recipient,
-    phone: payload.phone,
-    street: payload.street,
-    ward: payload.ward,
-    district: payload.district,
-    city: payload.city,
-    instructions: payload.instructions,
-    isDefault: payload.isDefault === true,
-  });
-  return adaptAddress(record);
+  if (!payload || !payload.street) {
+    throw createError('Street is required');
+  }
+  const created = await withTransaction((client) =>
+    addressRepository.createAddress(userId, payload, client),
+  );
+  return sanitizeAddress(created);
+}
+
+async function updateAddress(userId, addressId, payload) {
+  if (!addressId) {
+    throw createError('Address id is required');
+  }
+  if (!payload || typeof payload !== 'object' || !Object.keys(payload).length) {
+    throw createError('Update payload is required');
+  }
+
+  const updated = await withTransaction((client) =>
+    addressRepository.updateAddress(userId, addressId, payload, client),
+  );
+  return sanitizeAddress(updated);
 }
 
 async function deleteAddress(userId, addressId) {
-  const deleted = await userModel.deleteAddress(userId, addressId);
-  return deleted;
+  if (!addressId) {
+    throw createError('Address id is required');
+  }
+  return withTransaction((client) => addressRepository.deleteAddress(userId, addressId, client));
+}
+
+async function requestPasswordReset(email) {
+  if (!email) {
+    throw createError('Email is required');
+  }
+  const normalizedEmail = email.trim().toLowerCase();
+  const user = await userRepository.findByEmail(normalizedEmail);
+  if (!user) {
+    return { message: 'If an account exists we have sent instructions.' };
+  }
+
+  const roles = await userRepository.getUserRoleCodes(user.id);
+  if (!roles.includes('customer')) {
+    return { message: 'If an account exists we have sent instructions.' };
+  }
+
+  const otpCode = generateOTP();
+  await tokenRepository.createToken({
+    userId: user.id,
+    purpose: 'reset',
+    code: otpCode,
+    ttlMs: RESET_TTL_MS,
+  });
+
+  await sendOtpEmail(normalizedEmail, user.first_name || normalizedEmail, otpCode, 'RESET');
+  return { message: 'If an account exists we have sent instructions.' };
+}
+
+async function resetPassword({ email, otp, newPassword }) {
+  if (!email || !otp || !newPassword) {
+    throw createError('Email, OTP and new password are required');
+  }
+
+  const normalizedEmail = email.trim().toLowerCase();
+  const user = await userRepository.findByEmail(normalizedEmail);
+  if (!user) {
+    throw createError('User not found', 404);
+  }
+
+  const role = await roleRepository.getRoleByCode('customer');
+
+  const tokenResult = await tokenRepository.consumeToken({
+    userId: user.id,
+    purpose: 'reset',
+    code: otp,
+  });
+
+  if (!tokenResult.success) {
+    throw createError('OTP invalid or expired', 400);
+  }
+
+  const passwordHash = await bcrypt.hash(newPassword);
+  await userRepository.upsertCredential({
+    userId: user.id,
+    roleId: role.id,
+    passwordHash,
+    isTemp: false,
+  });
+
+  return { message: 'Password updated successfully' };
 }
 
 module.exports = {
@@ -139,5 +321,8 @@ module.exports = {
   loginCustomer,
   listAddresses,
   createAddress,
+  updateAddress,
   deleteAddress,
+  requestPasswordReset,
+  resetPassword,
 };

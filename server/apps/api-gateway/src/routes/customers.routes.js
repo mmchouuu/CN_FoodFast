@@ -33,6 +33,7 @@ function authMiddleware(req, res, next) {
 }
 
 router.post('/register', controller.register);
+router.post('/signup', controller.register);
 router.post('/verify', controller.verify);
 router.post('/login', controller.login);
 router.post('/forgot-password', controller.requestPasswordReset);
@@ -40,6 +41,7 @@ router.post('/reset-password', controller.resetPassword);
 
 router.get('/addresses', authMiddleware, controller.listAddresses);
 router.post('/addresses', authMiddleware, controller.createAddress);
+router.put('/addresses/:id', authMiddleware, controller.updateAddress);
 router.delete('/addresses/:id', authMiddleware, controller.deleteAddress);
 
 module.exports = router;

@@ -6,7 +6,8 @@ WORKDIR /app
 
 COPY package*.json ./
 
-RUN npm ci --only=production
+RUN apk add --no-cache curl \
+    && npm ci --only=production
 
 COPY . .
 

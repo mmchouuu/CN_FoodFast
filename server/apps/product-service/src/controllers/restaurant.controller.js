@@ -1,291 +1,139 @@
-const {
-  createRestaurant,
-  createRestaurantBranch,
-  deleteRestaurant,
-  deleteRestaurantBranch,
-  getAllRestaurants,
-  getBranchesForRestaurant,
-  getRestaurantById,
-  getRestaurantByOwner,
-  getRestaurantsByOwner,
-  updateRestaurant,
-  updateRestaurantBranch,
-} = require('../services/restaurant.service');
+const restaurantService = require('../services/restaurant.service');
 
-async function getRestaurants(req, res) {
+async function createRestaurant(req, res, next) {
   try {
-    const includeTokens = typeof req.query.include === 'string'
-      ? req.query.include
-          .split(',')
-          .map((item) => item.trim().toLowerCase())
-          .filter(Boolean)
-      : [];
-
-    const includeBranches =
-      includeTokens.includes('branches') ||
-      includeTokens.includes('branch');
-    const includeMenu =
-      includeTokens.includes('menu') ||
-      includeTokens.includes('products') ||
-      includeTokens.includes('dishes');
-
-    const limit = req.query.limit ? Number(req.query.limit) : undefined;
-    const offset = req.query.offset ? Number(req.query.offset) : undefined;
-    const ownerId = req.query.owner_id || req.query.ownerId || undefined;
-
-    const data = await getAllRestaurants({
-      includeBranches,
-      includeProducts: includeMenu,
-      includeBranchProducts: includeBranches && includeMenu,
-      limit: Number.isFinite(limit) ? limit : undefined,
-      offset: Number.isFinite(offset) ? offset : undefined,
-      ownerId,
-    });
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+    const result = await restaurantService.createRestaurant(req.body || {});
+    res.status(201).json(result);
+  } catch (error) {
+    next(error);
   }
 }
 
-async function getRestaurant(req, res) {
+async function getRestaurant(req, res, next) {
   try {
-    const { id } = req.params;
-    const restaurant = await getRestaurantById(id, {
-      includeBranches: true,
-      includeProducts: true,
-      includeBranchProducts: true,
-    });
-    if (!restaurant) return res.status(404).json({ error: 'Restaurant not found' });
-    res.json(restaurant);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+    const { restaurantId } = req.params;
+    const restaurant = await restaurantService.getRestaurantById(restaurantId);
+    if (!restaurant) {
+      return res.status(404).json({ message: 'Restaurant not found' });
+    }
+    return res.json(restaurant);
+  } catch (error) {
+    next(error);
   }
 }
 
-async function getOwnerRestaurants(req, res) {
+async function getByOwner(req, res, next) {
   try {
     const { ownerId } = req.params;
-    const data = await getRestaurantsByOwner(ownerId);
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+    const restaurant = await restaurantService.getRestaurantDetailsByOwner(ownerId);
+    if (!restaurant) {
+      return res.status(404).json({ message: 'Restaurant not found' });
+    }
+    return res.json(restaurant);
+  } catch (error) {
+    next(error);
   }
 }
 
-async function getOwnerRestaurantDetail(req, res) {
+async function listByOwner(req, res, next) {
   try {
     const { ownerId } = req.params;
-    const restaurant = await getRestaurantByOwner(ownerId);
-    if (!restaurant) return res.status(404).json({ error: 'Restaurant not found' });
-    res.json(restaurant);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+    const items = await restaurantService.listRestaurantsByOwner(ownerId);
+    res.json({ items });
+  } catch (error) {
+    next(error);
   }
 }
 
-async function addRestaurant(req, res) {
+async function updateRestaurant(req, res, next) {
   try {
-    if (!req.body?.ownerId) {
-      return res.status(400).json({ error: 'ownerId is required' });
-    }
-    if (!req.body?.name) {
-      return res.status(400).json({ error: 'name is required' });
-    }
-    const newRestaurant = await createRestaurant(req.body);
-    res.status(201).json(newRestaurant);
-  } catch (err) {
-    const message = err?.message || 'Internal server error';
-    if (message === 'Owner account not found') {
-      return res.status(404).json({ error: message });
-    }
-    if (message === 'ownerId is required' || message === 'Restaurant name is required') {
-      return res.status(400).json({ error: message });
-    }
-    res.status(500).json({ error: message });
-  }
-}
-
-async function editRestaurant(req, res) {
-  try {
-    const { id } = req.params;
-    const updated = await updateRestaurant(id, req.body);
-    res.json(updated);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-}
-
-async function removeRestaurant(req, res) {
-  try {
-    const { id } = req.params;
-    const result = await deleteRestaurant(id);
+    const { restaurantId } = req.params;
+    const result = await restaurantService.updateRestaurantDetails(restaurantId, req.body || {});
     if (!result) {
-      return res.status(404).json({ error: 'Restaurant not found' });
+      return res.status(404).json({ message: 'Restaurant not found' });
     }
     res.json(result);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+  } catch (error) {
+    next(error);
   }
 }
 
-async function listBranches(req, res) {
+async function createBranch(req, res, next) {
   try {
-    const { id } = req.params;
-    const branches = await getBranchesForRestaurant(id);
-    res.json(branches);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-}
-
-async function addBranch(req, res) {
-  try {
-    const { id } = req.params;
-    if (!req.body?.name) {
-      return res.status(400).json({ error: 'Branch name is required' });
-    }
-    const branch = await createRestaurantBranch(id, req.body);
+    const { restaurantId } = req.params;
+    const branch = await restaurantService.createBranch(restaurantId, req.body || {});
     res.status(201).json(branch);
-  } catch (err) {
-    const message = err?.message || 'Internal server error';
-    if (message === 'Restaurant not found') {
-      return res.status(404).json({ error: message });
-    }
-    if (message === 'Branch name is required') {
-      return res.status(400).json({ error: message });
-    }
-    if (message === 'Branch number already exists for this restaurant') {
-      return res.status(409).json({ error: message });
-    }
-    res.status(500).json({ error: message });
+  } catch (error) {
+    next(error);
   }
 }
 
-async function editBranch(req, res) {
+async function listBranches(req, res, next) {
   try {
-    const { id, branchId } = req.params;
-    const branch = await updateRestaurantBranch(id, branchId, req.body);
+    const { restaurantId } = req.params;
+    const branches = await restaurantService.listRestaurantBranches(restaurantId);
+    res.json(branches);
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function updateBranch(req, res, next) {
+  try {
+    const { restaurantId, branchId } = req.params;
+    const branch = await restaurantService.updateBranchDetails(restaurantId, branchId, req.body || {});
     if (!branch) {
-      return res.status(404).json({ error: 'Branch not found' });
+      return res.status(404).json({ message: 'Branch not found' });
     }
     res.json(branch);
-  } catch (err) {
-    const message = err?.message || 'Internal server error';
-    if (message === 'Branch not found for this restaurant') {
-      return res.status(404).json({ error: message });
-    }
-    if (message === 'Branch number already exists for this restaurant') {
-      return res.status(409).json({ error: message });
-    }
-    res.status(500).json({ error: message });
+  } catch (error) {
+    next(error);
   }
 }
 
-async function removeBranch(req, res) {
+async function deleteBranch(req, res, next) {
   try {
-    const { id, branchId } = req.params;
-    const result = await deleteRestaurantBranch(id, branchId);
-    if (!result) {
-      return res.status(404).json({ error: 'Branch not found' });
+    const { restaurantId, branchId } = req.params;
+    const deleted = await restaurantService.deleteBranch(restaurantId, branchId);
+    if (!deleted) {
+      return res.status(404).json({ message: 'Branch not found' });
     }
-    res.json(result);
-  } catch (err) {
-    const message = err?.message || 'Internal server error';
-    if (message === 'Branch not found for this restaurant') {
-      return res.status(404).json({ error: message });
-    }
-    res.status(500).json({ error: message });
-  }
-}
-
-const service = require('../services/restaurant.service');
-
-async function create(req, res, next){
-  try{
-    const { owner_id, name } = req.body || {};
-    if(!owner_id || !name){
-      return res.status(400).json({ error: 'owner_id and name are required' });
-    }
-    const created = await service.create(req.body);
-    res.status(201).json(created);
-  }catch(err){ next(err); }
-}
-
-async function list(req, res, next){
-  try{
-    const limit = parseInt(req.query.limit||20);
-    const offset = parseInt(req.query.offset||0);
-    const params = { limit, offset };
-    if(req.query.owner_id){
-      params.ownerId = req.query.owner_id;
-    }
-    const rows = await service.list(params);
-    res.json({ data: rows });
-  }catch(err){ next(err); }
-}
-
-async function get(req, res, next){
-  try{
-    const restaurant = await service.get(req.params.id);
-    if(!restaurant) return res.status(404).json({ error: 'not found' });
-    res.json(restaurant);
-  }catch(err){ next(err); }
-}
-
-const parseBoolean = (value) => {
-  if (typeof value === 'boolean') return value;
-  if (typeof value === 'string') {
-    return ['true', '1', 'yes'].includes(value.toLowerCase());
-  }
-  if (typeof value === 'number') {
-    return value === 1;
-  }
-  return undefined;
-};
-
-async function update(req, res, next){
-  try{
-    const payload = { ...req.body };
-    if (typeof payload.images === 'string') {
-      payload.images = [payload.images];
-    }
-    if (Object.prototype.hasOwnProperty.call(payload, 'is_active')) {
-      const parsed = parseBoolean(payload.is_active);
-      if (typeof parsed === 'undefined') {
-        delete payload.is_active;
-      } else {
-        payload.is_active = parsed;
-      }
-    }
-    const updated = await service.update(req.params.id, payload);
-    if(!updated) return res.status(404).json({ error: 'not found' });
-    res.json(updated);
-  }catch(err){ next(err); }
-}
-
-async function remove(req, res, next){
-  try{
-    const deleted = await service.remove(req.params.id);
-    if(!deleted) return res.status(404).json({ error: 'not found' });
     res.status(204).end();
-  }catch(err){ next(err); }
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function updateBranchSchedules(req, res, next) {
+  try {
+    const { restaurantId, branchId } = req.params;
+    const result = await restaurantService.upsertBranchSchedules(restaurantId, branchId, req.body || {});
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function inviteMember(req, res, next) {
+  try {
+    const { restaurantId } = req.params;
+    const result = await restaurantService.inviteRestaurantMember(restaurantId, req.body || {});
+    res.status(201).json(result);
+  } catch (error) {
+    next(error);
+  }
 }
 
 module.exports = {
-  getRestaurants,
+  createRestaurant,
   getRestaurant,
-  getOwnerRestaurants,
-  getOwnerRestaurantDetail,
-  addRestaurant,
-  editRestaurant,
-  removeRestaurant,
+  getByOwner,
+  listByOwner,
+  updateRestaurant,
+  createBranch,
   listBranches,
-  addBranch,
-  editBranch,
-  removeBranch,
-  create,
-  list,
-  get,
-  update,
-  remove,
+  updateBranch,
+  deleteBranch,
+  updateBranchSchedules,
+  inviteMember,
 };

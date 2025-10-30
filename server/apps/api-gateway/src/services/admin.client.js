@@ -1,47 +1,85 @@
-// api-gateway/src/services/admin.client.js
-const { createAxiosInstance } = require('../utils/httpClient');
+﻿const { createAxiosInstance } = require('../utils/httpClient');
 const config = require('../config');
 
-const client = createAxiosInstance({
+const userAdminClient = createAxiosInstance({
   baseURL: `${config.userServiceUrl}/api/admin`,
   timeout: config.requestTimeout,
 });
 
-async function approveRestaurant(id, opts = {}) {
-  const res = await client.put(`/approve-restaurant/${id}`, {}, { headers: opts.headers });
-  return res.data;
-}
-
-async function listUsers(opts = {}) {
-  const res = await client.get('/users', { headers: opts.headers });
-  return res.data;
-}
+const catalogAdminClient = createAxiosInstance({
+  baseURL: `${config.productServiceUrl}/api/admin`,
+  timeout: config.requestTimeout,
+});
 
 async function listCustomers(opts = {}) {
-  const res = await client.get('/customers', { headers: opts.headers });
+  const res = await userAdminClient.get('/customers', { headers: opts.headers });
   return res.data;
 }
 
-async function listRestaurants(opts = {}) {
-  const res = await client.get('/restaurants', { headers: opts.headers });
+async function customerDetails(id, opts = {}) {
+  const res = await userAdminClient.get(`/customers/${id}`, { headers: opts.headers });
   return res.data;
 }
 
-async function getUserDetails(id, opts = {}) {
-  const res = await client.get(`/users/${id}`, { headers: opts.headers });
+async function updateCustomerStatus(id, payload, opts = {}) {
+  const res = await userAdminClient.patch(`/customers/${id}/status`, payload, {
+    headers: opts.headers,
+  });
   return res.data;
 }
 
-async function updateUserActiveStatus(id, payload, opts = {}) {
-  const res = await client.patch(`/users/${id}/active`, payload, { headers: opts.headers });
+async function listOwners(opts = {}) {
+  const res = await userAdminClient.get('/owners', { headers: opts.headers });
+  return res.data;
+}
+
+async function approveOwner(id, payload = {}, opts = {}) {
+  const res = await userAdminClient.post(`/owners/${id}/approve`, payload, {
+    headers: opts.headers,
+  });
+  return res.data;
+}
+
+async function rejectOwner(id, payload = {}, opts = {}) {
+  const res = await userAdminClient.post(`/owners/${id}/reject`, payload, {
+    headers: opts.headers,
+  });
+  return res.data;
+}
+
+async function createTaxTemplate(payload, opts = {}) {
+  const res = await catalogAdminClient.post('/taxes', payload, { headers: opts.headers });
+  return res.data;
+}
+
+async function assignTax(payload, opts = {}) {
+  const res = await catalogAdminClient.post('/taxes/assignments', payload, {
+    headers: opts.headers,
+  });
+  return res.data;
+}
+
+async function createCalendar(payload, opts = {}) {
+  const res = await catalogAdminClient.post('/calendars', payload, { headers: opts.headers });
+  return res.data;
+}
+
+async function createGlobalPromotion(payload, opts = {}) {
+  const res = await catalogAdminClient.post('/promotions/global', payload, {
+    headers: opts.headers,
+  });
   return res.data;
 }
 
 module.exports = {
-  approveRestaurant,
-  listUsers,
   listCustomers,
-  listRestaurants,
-  getUserDetails,
-  updateUserActiveStatus,
+  customerDetails,
+  updateCustomerStatus,
+  listOwners,
+  approveOwner,
+  rejectOwner,
+  createTaxTemplate,
+  assignTax,
+  createCalendar,
+  createGlobalPromotion,
 };
