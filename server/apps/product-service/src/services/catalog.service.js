@@ -175,6 +175,123 @@ async function buildOptionMap(productIds = [], branchIds = []) {
   return groupsByProduct;
 }
 
+function applyBranchOverridesToOptions(optionGroups = [], branchId = null, branchProductId = null) {
+  if (!Array.isArray(optionGroups) || !optionGroups.length) {
+    return [];
+  }
+
+  return optionGroups.map((group) => {
+    if (!group) {
+      return group;
+    }
+
+    const originalItems = Array.isArray(group.items) ? group.items : [];
+
+    const mappedItems = originalItems
+      .map((item) => {
+        if (!item) return null;
+
+        const basePriceDelta = toNumber(item.price_delta, 0);
+        const overrides = Array.isArray(item.branch_overrides) ? item.branch_overrides : [];
+
+        let override = null;
+        if (branchProductId) {
+          override =
+            overrides.find(
+              (entry) =>
+                entry &&
+                entry.branch_product_id &&
+                entry.branch_product_id === branchProductId,
+            ) || null;
+        }
+        if (!override && branchId) {
+          override =
+            overrides.find(
+              (entry) => entry && entry.branch_id && entry.branch_id === branchId,
+            ) || null;
+        }
+
+        const hasOverrideVisibility =
+          override &&
+          (override.is_available === false || override.is_visible === false);
+        const overrideInactive = override && override.is_active === false;
+
+        if (hasOverrideVisibility || overrideInactive) {
+          return null;
+        }
+
+        const overridePrice =
+          override && override.price_delta_override !== null && override.price_delta_override !== undefined
+            ? override.price_delta_override
+            : override && override.price_delta !== null && override.price_delta !== undefined
+              ? override.price_delta
+              : null;
+
+        const effectivePriceDelta =
+          overridePrice !== null && overridePrice !== undefined
+            ? toNumber(overridePrice, basePriceDelta)
+            : basePriceDelta;
+
+        const clonedOverrides = overrides.map((entry) => ({ ...entry }));
+
+        return {
+          ...item,
+          branch_overrides: clonedOverrides,
+          base_price_delta: basePriceDelta,
+          price_delta: effectivePriceDelta,
+          effective_price_delta: effectivePriceDelta,
+          applied_branch_override: override
+            ? {
+                branch_id: override.branch_id || null,
+                branch_product_id: override.branch_product_id || null,
+                price_delta:
+                  overridePrice !== null && overridePrice !== undefined
+                    ? toNumber(overridePrice, basePriceDelta)
+                    : null,
+                is_available:
+                  override.is_available !== undefined && override.is_available !== null
+                    ? override.is_available !== false
+                    : override.is_active !== false,
+                is_visible:
+                  override.is_visible !== undefined && override.is_visible !== null
+                    ? override.is_visible !== false
+                    : override.is_active !== false,
+              }
+            : null,
+        };
+      })
+      .filter(Boolean);
+
+    const safeItems =
+      mappedItems.length
+        ? mappedItems
+        : originalItems
+            .map((item) => {
+              if (!item) return null;
+              const basePriceDelta = toNumber(item.price_delta, 0);
+              const overrides = Array.isArray(item.branch_overrides)
+                ? item.branch_overrides.map((entry) => ({ ...entry }))
+                : [];
+              return {
+                ...item,
+                branch_overrides: overrides,
+                base_price_delta: basePriceDelta,
+                price_delta: basePriceDelta,
+                effective_price_delta: basePriceDelta,
+                applied_branch_override: null,
+              };
+            })
+            .filter(Boolean);
+
+    return {
+      ...group,
+      branch_id: branchId,
+      branch_product_id: branchProductId || null,
+      items: safeItems,
+    };
+  });
+}
+
 async function buildComboData(restaurantId, branchIds = []) {
   const combos = await comboRepository.listCombosForRestaurant(restaurantId);
   if (!combos.length) {
@@ -327,7 +444,7 @@ async function getRestaurantCatalog(restaurantId, filters = {}) {
 
   const productsWithOptions = products.map((product) => ({
     ...product,
-    options: optionMap[product.id] || [],
+    options: applyBranchOverridesToOptions(optionMap[product.id] || []),
   }));
 
   const branchProductsMap = branches.reduce((acc, branch) => {
@@ -391,7 +508,11 @@ async function getRestaurantCatalog(restaurantId, filters = {}) {
               ? null
               : toNumber(assignment.daily_limit, null),
         },
-        options: optionMap[product.id] || [],
+        options: applyBranchOverridesToOptions(
+          optionMap[product.id] || [],
+          branchId,
+          assignment.id,
+        ),
         branch_assignment: assignment,
       };
 
@@ -436,7 +557,11 @@ async function getRestaurantCatalog(restaurantId, filters = {}) {
             reserved_qty: null,
             daily_limit: null,
           },
-          options: optionMap[product.id] || [],
+          options: applyBranchOverridesToOptions(
+            optionMap[product.id] || [],
+            branch.id,
+            null,
+          ),
           branch_assignment: {
             id: null,
             branch_id: branch.id,
