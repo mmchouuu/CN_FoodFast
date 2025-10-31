@@ -1,37 +1,33 @@
 const express = require('express');
-const { createProxyMiddleware } = require('http-proxy-middleware');
-const router = express.Router();
 const jwt = require('jsonwebtoken');
+const OrdersController = require('../controllers/orders.controller');
 
-const ORDER_SERVICE = process.env.ORDER_SERVICE_URL || 'http://order-service:3003';
+const router = express.Router();
+const JWT_SECRET = process.env.JWT_SECRET || 'secret';
 
-// auth middleware
 function authMiddleware(req, res, next) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader) return res.status(401).json({error:'no token'});
-  const token = authHeader.split(' ')[1];
+  const authHeader = req.headers.authorization || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+
+  if (!token) {
+    return res.status(401).json({ error: 'no token' });
+  }
+
   try {
-    const payload = jwt.verify(token, process.env.JWT_SECRET || 'secret');
+    const payload = jwt.verify(token, JWT_SECRET);
     req.user = payload;
-    next();
+    return next();
   } catch (err) {
     return res.status(401).json({ error: 'invalid token' });
   }
 }
 
-router.use(
-  '/',
-  authMiddleware,
-  createProxyMiddleware({
-    target: ORDER_SERVICE,
-    changeOrigin: true,
-    pathRewrite: (path) => {
-      const suffix = !path || path === '/' ? '' : path;
-      return `/api/orders${suffix}`;
-    },
-    onError: (err, req, res) =>
-      res.status(502).json({ error: 'bad gateway', detail: err.message }),
-  })
-);
+router.use(authMiddleware);
+
+router.get('/', OrdersController.listOrders);
+router.get('/user/:userId', OrdersController.listOrdersByUser);
+router.get('/:id', OrdersController.getOrderById);
+router.post('/', OrdersController.createOrder);
+router.put('/:id/status', OrdersController.updateOrderStatus);
 
 module.exports = router;

@@ -32,17 +32,31 @@ function authMiddleware(req, res, next) {
   }
 }
 
-router.use('/', authMiddleware, createProxyMiddleware({
-  target: PAYMENT_SERVICE,
-  changeOrigin: true,
-  pathRewrite: { '^/api/payments': '/api/payments' },
-  onProxyReq(proxyReq, req) {
-    if (req.user?.userId) {
-      proxyReq.setHeader('x-user-id', req.user.userId);
-    }
-  },
-  onError: (err, req, res) => res.status(502).json({ error: 'bad gateway', detail: err.message })
-}));
+router.use(
+  '/',
+  authMiddleware,
+  createProxyMiddleware({
+    target: PAYMENT_SERVICE,
+    changeOrigin: true,
+    pathRewrite: (path, req) => {
+      const original = req.originalUrl || path || '';
+      const [pathnameRaw, search = ''] = original.split('?');
+      const pathname = pathnameRaw || '/api/payments';
+      return search ? `${pathname}?${search}` : pathname;
+    },
+
+    onProxyReq(proxyReq, req) {
+      if (req.user?.userId) {
+        proxyReq.setHeader('x-user-id', req.user.userId);
+      }
+    },
+
+    onError: (err, req, res) => {
+      console.error('[Gateway → PaymentService]', err.message);
+      res.status(502).json({ error: 'bad gateway', detail: err.message });
+    },
+  })
+);
 
 
 module.exports = router;

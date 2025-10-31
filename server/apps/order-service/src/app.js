@@ -1,6 +1,6 @@
 const express = require('express');
 const morgan = require('morgan');
-const ordersRouter = require('./routes/orders.routes');
+const ordersRouter = require('./routes/order.routes');
 
 const app = express();
 

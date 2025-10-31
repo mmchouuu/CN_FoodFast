@@ -54,7 +54,7 @@ const sanitizeUser = (rawUser) => {
 
 const FALLBACK_PRODUCTS = menuDishes;
 const FALLBACK_RESTAURANTS = restaurantList;
-const DEFAULT_PAYMENT_METHOD = paymentOptionList[0]?.id || 'wallet';
+const DEFAULT_PAYMENT_METHOD = paymentOptionList[0]?.id || 'cod';
 const ORDER_HISTORY_STATUSES = new Set(['delivered', 'completed', 'cancelled']);
 const ORDER_REVIEWABLE_STATUSES = new Set(['delivered', 'completed']);
 const CARD_STORAGE_KEY = 'customer_payment_cards';
@@ -548,7 +548,19 @@ const adaptOrderFromApi = (order) => {
     const metadata = order.metadata && typeof order.metadata === 'object' ? order.metadata : {};
     const pricing = metadata.pricing && typeof metadata.pricing === 'object' ? metadata.pricing : {};
     const paymentMeta = metadata.payment && typeof metadata.payment === 'object' ? metadata.payment : {};
-    const deliveryAddress = metadata.delivery_address || null;
+    const rawDeliverySnapshot =
+        order.delivery_snapshot ||
+        metadata.delivery_address ||
+        order.shipping_address_snapshot ||
+        null;
+    let deliveryAddress = rawDeliverySnapshot;
+    if (typeof rawDeliverySnapshot === 'string') {
+        try {
+            deliveryAddress = JSON.parse(rawDeliverySnapshot);
+        } catch {
+            deliveryAddress = { formatted: rawDeliverySnapshot };
+        }
+    }
     const restaurantSnapshotsMap =
         metadata.restaurant_snapshots && typeof metadata.restaurant_snapshots === 'object'
             ? metadata.restaurant_snapshots
@@ -575,7 +587,12 @@ const adaptOrderFromApi = (order) => {
     const shippingFee = toNumberOr(pricing.shipping_fee, 0);
     const discount = toNumberOr(pricing.discount, 0);
     const etaMinutes = toNumberOr(metadata.eta_minutes, 30);
-    const paymentMethodRaw = typeof paymentMeta.method === 'string' ? paymentMeta.method : 'cod';
+    const paymentMethodRaw =
+        typeof paymentMeta.method === 'string'
+            ? paymentMeta.method
+            : typeof order.payment_method === 'string'
+                ? order.payment_method
+                : 'cod';
     const paymentMethod = paymentMethodRaw.toUpperCase();
     const restaurantName =
         restaurantSnapshotMeta?.name ||
@@ -619,6 +636,7 @@ const adaptOrderFromApi = (order) => {
         timeline,
         courier: metadata.courier || null,
         deliveryAddress,
+        deliverySnapshot: deliveryAddress,
         restaurantSnapshot: restaurantSnapshotMeta,
         restaurantName,
         restaurantImage,
@@ -852,7 +870,7 @@ export const AppContextProvider = ({ children }) => {
     }, [authProfileId]);
 
     const refreshOrders = useCallback(async () => {
-        if (!authToken) {
+        if (!authToken || !authProfileId) {
             setActiveOrders([]);
             setPastOrders([]);
             setOrdersLoading(false);
@@ -861,7 +879,7 @@ export const AppContextProvider = ({ children }) => {
 
         setOrdersLoading(true);
         try {
-            const response = await ordersService.list();
+            const response = await ordersService.listByUser(authProfileId);
             const rawList = Array.isArray(response)
                 ? response
                 : Array.isArray(response?.orders)
@@ -882,7 +900,7 @@ export const AppContextProvider = ({ children }) => {
         } finally {
             setOrdersLoading(false);
         }
-    }, [authToken]);
+    }, [authToken, authProfileId]);
 
     const refreshAddresses = useCallback(async () => {
         if (!authToken && !authProfileId) {
@@ -1049,7 +1067,7 @@ export const AppContextProvider = ({ children }) => {
     }, [authToken, authProfileId, refreshBankAccounts]);
 
     useEffect(() => {
-        if (method === 'bank' && bankAccounts.length === 0) {
+        if (method === 'wallet' && bankAccounts.length === 0) {
             setMethod(DEFAULT_PAYMENT_METHOD);
             return;
         }
@@ -1481,6 +1499,7 @@ export const AppContextProvider = ({ children }) => {
         }
 
         const payload = {
+            order_items: orderItems,
             items: orderItems,
             shipping_fee: shippingFee,
             discount,
@@ -1489,8 +1508,16 @@ export const AppContextProvider = ({ children }) => {
             payment_method: paymentMethod,
             delivery_address: deliveryAddressSnapshot,
             delivery_address_id: deliveryAddressId,
+            selectedAddress: deliveryAddressSnapshot,
+            selected_address: deliveryAddressSnapshot,
+            selectedAddressId: deliveryAddressId,
+            selected_address_id: deliveryAddressId,
             metadata,
         };
+        if (user?.id) {
+            payload.user_id = user.id;
+            payload.userId = user.id;
+        }
         if (restaurantIds.length === 1) {
             payload.restaurant_id = restaurantIds[0];
         }

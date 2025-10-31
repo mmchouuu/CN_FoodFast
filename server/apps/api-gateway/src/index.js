@@ -11,6 +11,8 @@ const health = require('./health');
 const customersRoutes = require('./routes/customers.routes');
 const restaurantsRoutes = require('./routes/restaurants.routes');
 const adminRoutes = require('./routes/admin.routes');
+const ordersRoutes = require('./routes/orders.routes');
+const paymentsRoutes = require('./routes/payments.routes');
 
 const app = express();
 app.use(bodyParser.json({ limit: '25mb' }));
@@ -35,6 +37,8 @@ app.use('/api/customers', customersRoutes);
 app.use('/api/customer', customersRoutes);
 app.use('/api/restaurants', restaurantsRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/orders', ordersRoutes);
+app.use('/api/payments', paymentsRoutes);
 
 app.get('/health', health);
 
