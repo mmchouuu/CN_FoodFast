@@ -1186,6 +1186,10 @@ export const dummyOrdersData = [
   {
     _id: "685a5bbfaff57babcdfcc171",
     userId: "68591d36daf423db94fa8f4f",
+    restaurantId: "21111111-1111-4111-8111-000000000104",
+    restaurantName: "Busan Bistro Company Limited",
+    branchId: "31111111-1111-4111-8111-000000000204",
+    branchName: "Busan Bistro Nguyen Hue",
     items: [
       {
         product: dummyProducts[0], // Argan Hair Oil
@@ -1202,7 +1206,7 @@ export const dummyOrdersData = [
     ],
     amount: 40.6,
     address: dummyAddress[0],
-    status: "Out for delivery",
+    status: "delivering",
     paymentMethod: "COD",
     isPaid: false,
     createdAt: "2025-06-24T08:03:11.197+00:00",
@@ -1212,6 +1216,10 @@ export const dummyOrdersData = [
   {
     _id: "685a5bbfaff57babcdfcc174",
     userId: "68591d36daf423db94fa8f4f",
+    restaurantId: "21111111-1111-4111-8111-000000000104",
+    restaurantName: "Busan Bistro Company Limited",
+    branchId: "31111111-1111-4111-8111-000000000205",
+    branchName: "Busan Bistro Thao Dien",
     items: [
       {
         product: dummyProducts[8], // Vitamin C Face Oil
@@ -1228,11 +1236,35 @@ export const dummyOrdersData = [
     ],
     amount: 85.0,
     address: dummyAddress[0],
-    status: "Delivered",
+    status: "completed",
     paymentMethod: "Online",
     isPaid: true,
     createdAt: "2025-07-01T09:15:45.197+00:00",
     updatedAt: "2025-07-01T11:30:04.631+00:00",
+    __v: 0,
+  },
+  {
+    _id: "785a5bbfaff57babcdfcc180",
+    userId: "78591d36daf423db94fa8f5",
+    restaurantId: "21111111-1111-4111-8111-000000000105",
+    restaurantName: "Busan Bistro Demo Kitchen",
+    branchId: "31111111-1111-4111-8111-000000000210",
+    branchName: "Busan Bistro Phu My Hung",
+    items: [
+      {
+        product: dummyProducts[12],
+        quantity: 1,
+        size: "Standard",
+        _id: "785a5bbfaff57babcdfcc181",
+      },
+    ],
+    amount: 52.5,
+    address: dummyAddress[1],
+    status: "pending",
+    paymentMethod: "Online",
+    isPaid: false,
+    createdAt: "2025-07-02T08:45:00.000+00:00",
+    updatedAt: "2025-07-02T08:45:00.000+00:00",
     __v: 0,
   },
 ];
@@ -1240,7 +1272,7 @@ export const dummyOrdersData = [
 
 // Dashboard Dummy Data
 export const dummyDashboardData = {
-    "totalOrders": 2,
+    "totalOrders": 3,
     "totalRevenue": 897,
     "orders": dummyOrdersData
 }

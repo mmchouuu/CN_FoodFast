@@ -743,6 +743,7 @@ const DishDetail = () => {
   } = useAppContext();
 
   const dish = getDishById(dishId);
+  
   const restaurant = getRestaurantById(restaurantId);
 
   const relatedDishes = useMemo(() => {
@@ -760,17 +761,17 @@ const DishDetail = () => {
 
   const formatVnd = (amount) => {
     const numeric = Number(amount);
-    if (!Number.isFinite(numeric)) return "0₫";
+    if (!Number.isFinite(numeric)) return `0₫`;
     return `${Math.abs(numeric).toLocaleString("vi-VN")}₫`;
   };
 
   const formatOptionPrice = (amount) => {
     const numeric = Number(amount);
     if (!Number.isFinite(numeric) || numeric === 0) {
-      return "0₫";
+      return `(0₫)`;
     }
     const prefix = numeric > 0 ? "+" : "-";
-    return `${prefix}${formatVnd(Math.abs(numeric))}`;
+    return `(${prefix}${formatVnd(Math.abs(numeric))})`;
   };
 
   useEffect(() => {
@@ -1099,9 +1100,10 @@ const DishDetail = () => {
               <div className="flex flex-wrap gap-2">
                 {(sizeGroup.values || []).map((value) => {
                   const selected = isValueSelected(sizeGroup, value);
-                  const priceText = value.priceDelta
-                    ? ` (${formatOptionPrice(value.priceDelta)})`
-                    : "";
+                  const priceText =
+                    value.priceDelta !== undefined && value.priceDelta !== null
+                      ? ` ${formatOptionPrice(value.priceDelta)}`
+                      : "";
                   return (
                     <button
                       type="button"
@@ -1173,9 +1175,11 @@ const DishDetail = () => {
                     <div className="flex flex-wrap gap-2">
                       {(group.values || []).map((value) => {
                         const selected = isValueSelected(group, value);
-                        const priceText = value.priceDelta
-                          ? ` (${formatOptionPrice(value.priceDelta)})`
-                          : "";
+                        const priceText =
+                          value.priceDelta !== undefined &&
+                          value.priceDelta !== null
+                            ? ` ${formatOptionPrice(value.priceDelta)}`
+                            : "";
                         return (
                           <button
                             type="button"

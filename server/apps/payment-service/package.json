@@ -13,7 +13,8 @@
     "express": "^4.18.2",
     "jsonwebtoken": "^9.0.2",
     "morgan": "^1.10.0",
-    "pg": "^8.x"
+    "pg": "^8.x",
+    "stripe": "^12.0.0"
   },
   "devDependencies": {
     "nodemon": "^2.x"
