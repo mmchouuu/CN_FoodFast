@@ -1375,7 +1375,7 @@ const InventoryModal = ({
           </div>
 
           {loading ? (
-            <div className="py-10 text-center text-sm text-slate-500">Loading inventory�</div>
+            <div className="py-10 text-center text-sm text-slate-500">Loading inventory</div>
           ) : hasBranches ? (
             <div className="space-y-4">
               {branches.map((branch) => {

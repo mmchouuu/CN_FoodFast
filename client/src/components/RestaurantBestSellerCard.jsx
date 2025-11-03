@@ -55,7 +55,7 @@ const RestaurantBestSellerCard = ({ restaurant, dish, currency }) => {
           <div className="flex items-center gap-2 text-sm text-gray-500">
             <RatingStars rating={dishRating} />
             <span>
-              {dishRating.toFixed(1)} · {dishReviews} reviews
+              {dishRating.toFixed(1)} - {dishReviews} reviews
             </span>
           </div>
         </header>
