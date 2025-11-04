@@ -3,6 +3,36 @@ import toast from "react-hot-toast";
 import { useNavigate } from "react-router-dom";
 import { useAppContext } from "../context/AppContext";
 
+const normalizePaymentMethodForSubmit = (value) => {
+  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (!normalized) return "cod";
+  if (normalized === "wallet" || normalized === "cod" || normalized === "cash" || normalized === "cash_on_delivery") {
+    return "cod";
+  }
+  if (normalized === "bank") {
+    return "bank_transfer";
+  }
+  if (normalized === "bank_transfer") {
+    return "bank_transfer";
+  }
+  if (normalized === "credit" || normalized === "debit") {
+    return "card";
+  }
+  return normalized;
+};
+
+const getActivePaymentOptionId = (value) => {
+  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (!normalized) return "";
+  if (normalized === "cod" || normalized === "cash" || normalized === "cash_on_delivery") {
+    return "wallet";
+  }
+  if (normalized === "bank_transfer") {
+    return "bank";
+  }
+  return normalized;
+};
+
 const Checkout = () => {
   const {
     getCartAmount,
@@ -48,6 +78,10 @@ const Checkout = () => {
     { id: "custom", label: "Other" },
   ];
   const navigate = useNavigate();
+  const activePaymentMethodId = useMemo(
+    () => getActivePaymentOptionId(method),
+    [method],
+  );
 
   const subtotal = getCartAmount();
   const discount = getDiscountAmount(subtotal);
@@ -78,11 +112,14 @@ const Checkout = () => {
   );
 
   useEffect(() => {
-    if (method === "bank" && bankAccounts.length === 0) {
-      setMethod("wallet");
-      return;
+    const normalized = typeof method === "string" ? method.trim().toLowerCase() : "";
+    if (normalized === "bank" || normalized === "bank_transfer") {
+      if (bankAccounts.length === 0) {
+        setMethod("wallet");
+        return;
+      }
     }
-    if (method === "card" && cardAccounts.length === 0) {
+    if (normalized === "card" && cardAccounts.length === 0) {
       setMethod("wallet");
     }
   }, [method, bankAccounts.length, cardAccounts.length, setMethod]);
@@ -101,8 +138,9 @@ const Checkout = () => {
       return;
     }
     setIsPlacingOrder(true);
+    const paymentMethodForSubmit = normalizePaymentMethodForSubmit(method);
     try {
-      await placeOrder({ paymentMethod: method, address: selectedAddress });
+      await placeOrder({ paymentMethod: paymentMethodForSubmit, address: selectedAddress });
       toast.success("Order confirmed! We're preparing your meal.");
       navigate("/orders/current");
     } catch (error) {
@@ -394,7 +432,7 @@ const Checkout = () => {
           </p>
           <div className="mt-6 grid gap-4 md:grid-cols-3">
             {paymentMethods.map((option) => {
-              const isSelected = method === option.id;
+              const isSelected = activePaymentMethodId === option.id;
               const isBank = option.id === "bank";
               const isCard = option.id === "card";
               const bankUnavailable = isBank && bankAccounts.length === 0;

@@ -12,7 +12,10 @@ const jsonHeaders = {
   'Content-Type': 'application/json',
 };
 
-function sendJsonRequest(urlString, { method = 'GET', headers = {}, body = null, timeout = REQUEST_TIMEOUT } = {}) {
+function sendJsonRequest(
+  urlString,
+  { method = 'GET', headers = {}, body = null, timeout = REQUEST_TIMEOUT } = {},
+) {
   return new Promise((resolve, reject) => {
     const targetUrl = new URL(urlString, BASE_URL);
     const transport = targetUrl.protocol === 'https:' ? https : http;
@@ -89,6 +92,38 @@ async function quoteOrderPricing(payload, { authorization } = {}) {
   throw error;
 }
 
+async function fetchBranchCatalog(restaurantId, branchId, { authorization } = {}) {
+  if (!restaurantId) {
+    throw new Error('restaurantId is required');
+  }
+
+  const headers = {};
+  if (authorization) {
+    headers.Authorization = authorization;
+  }
+
+  const querySuffix = branchId ? `?branchId=${encodeURIComponent(branchId)}` : '';
+  const { status, data } = await sendJsonRequest(
+    `/restaurants/${encodeURIComponent(restaurantId)}/catalog${querySuffix}`,
+    {
+      method: 'GET',
+      headers,
+    },
+  );
+
+  if (status >= 200 && status < 300) {
+    return data;
+  }
+
+  const error = new Error(
+    (data && (data.error || data.message)) || 'failed to load branch catalog from product-service',
+  );
+  error.status = status;
+  error.data = data;
+  throw error;
+}
+
 module.exports = {
   quoteOrderPricing,
+  fetchBranchCatalog,
 };

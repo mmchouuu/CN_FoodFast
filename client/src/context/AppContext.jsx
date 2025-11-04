@@ -574,7 +574,7 @@ const buildDefaultTimeline = (status, placedAt) => {
     ];
 };
 
-const adaptOrderFromApi = (order) => {
+export const adaptOrderFromApi = (order) => {
     if (!order) return null;
     const metadata = order.metadata && typeof order.metadata === 'object' ? order.metadata : {};
     const pricing = metadata.pricing && typeof metadata.pricing === 'object' ? metadata.pricing : {};
@@ -596,6 +596,25 @@ const adaptOrderFromApi = (order) => {
         restaurantSnapshotMeta =
             restaurantSnapshotsMap[order.restaurant_id] ||
             restaurantSnapshotsMap[String(order.restaurant_id)] ||
+            null;
+    }
+
+    const branchSnapshotsMap =
+        metadata.branch_snapshots && typeof metadata.branch_snapshots === 'object'
+            ? metadata.branch_snapshots
+            : null;
+    const branchNamesMap =
+        metadata.branch_names && typeof metadata.branch_names === 'object'
+            ? metadata.branch_names
+            : null;
+    let branchSnapshotMeta =
+        metadata.branch_snapshot && typeof metadata.branch_snapshot === 'object'
+            ? metadata.branch_snapshot
+            : null;
+    if (!branchSnapshotMeta && branchSnapshotsMap) {
+        branchSnapshotMeta =
+            branchSnapshotsMap[order.branch_id] ||
+            branchSnapshotsMap[String(order.branch_id)] ||
             null;
     }
 
@@ -625,6 +644,20 @@ const adaptOrderFromApi = (order) => {
         fallbackSnapshotFromMap?.heroImage ||
         fallbackSnapshotFromMap?.image ||
         restaurantPlaceholderImage;
+    const branchName =
+        branchSnapshotMeta?.displayName ||
+        branchSnapshotMeta?.name ||
+        metadata.branch_name ||
+        branchNamesMap?.[order.branch_id] ||
+        branchNamesMap?.[String(order.branch_id)] ||
+        null;
+    const branchImage =
+        branchSnapshotMeta?.heroImage ||
+        branchSnapshotMeta?.image ||
+        null;
+    const restaurantDisplayName =
+        branchSnapshotMeta?.displayName ||
+        (branchName && restaurantName ? `${restaurantName} • ${branchName}` : restaurantName);
     const timeline =
         Array.isArray(metadata.timeline) && metadata.timeline.length
             ? metadata.timeline
@@ -652,7 +685,13 @@ const adaptOrderFromApi = (order) => {
         deliveryAddress,
         restaurantSnapshot: restaurantSnapshotMeta,
         restaurantName,
+        restaurantDisplayName,
         restaurantImage,
+        branchId: order.branch_id,
+        branchName,
+        branchImage,
+        branchSnapshot: branchSnapshotMeta,
+        branchAddress: branchSnapshotMeta?.address || null,
         items: Array.isArray(order.items)
             ? order.items.map((item) => ({
                 id: item.id,
@@ -1231,6 +1270,46 @@ export const AppContextProvider = ({ children }) => {
             return updated;
         });
 
+        const resolvedBranchId =
+            product.branchId ??
+            product.inventory?.branchId ??
+            product.restaurantBranchId ??
+            product.restaurant_id ??
+            product.restaurantId ??
+            null;
+        const resolvedBrandRestaurantId =
+            product.brandRestaurantId ??
+            product.brandRestaurantID ??
+            product.brand?.id ??
+            product.brandId ??
+            product.restaurant_brand_id ??
+            null;
+        const branchRecord = resolvedBranchId
+            ? restaurants.find((entry) => entry.id === resolvedBranchId)
+            : null;
+        const brandRecord =
+            resolvedBrandRestaurantId
+                ? restaurantBrands.find((entry) => entry.id === resolvedBrandRestaurantId)
+                : branchRecord?.brand || null;
+        const branchDisplayName =
+            branchRecord?.displayName ||
+            branchRecord?.name ||
+            product.branchName ||
+            product.restaurantName ||
+            (brandRecord?.name && branchRecord?.name
+                ? `${brandRecord.name} • ${branchRecord.name}`
+                : null);
+        const branchAddress =
+            branchRecord?.address ||
+            [branchRecord?.street, branchRecord?.ward, branchRecord?.district, branchRecord?.city]
+                .filter(Boolean)
+                .join(', ');
+        const branchHeroImage =
+            branchRecord?.heroImage ||
+            (Array.isArray(branchRecord?.images) ? branchRecord.images[0] : null) ||
+            null;
+        const brandDisplayName = brandRecord?.name || product.brandName || branchDisplayName || 'Restaurant';
+
         setCartItemDetails((prev) => ({
             ...prev,
             [detailKey]: {
@@ -1244,6 +1323,18 @@ export const AppContextProvider = ({ children }) => {
                 taxRate,
                 taxAmount,
                 unitPrice,
+                branchId: resolvedBranchId,
+                branchName: branchDisplayName || brandDisplayName,
+                branchAddress: branchAddress || '',
+                branchImage: branchHeroImage,
+                branchProductId:
+                    product.branch_product_id ||
+                    product.branchProductId ||
+                    product.inventory?.branch_product_id ||
+                    product.inventory?.branchProductId ||
+                    null,
+                brandRestaurantId: resolvedBrandRestaurantId || resolvedBranchId || null,
+                brandRestaurantName: brandDisplayName,
             },
         }));
 
@@ -1356,6 +1447,7 @@ export const AppContextProvider = ({ children }) => {
 
         const orderItems = [];
         const restaurantStats = new Map();
+        const branchStats = new Map();
 
         for (const itemId in cartItems) {
             const product = products.find((item) => item._id === itemId);
@@ -1380,43 +1472,132 @@ export const AppContextProvider = ({ children }) => {
                 const taxPerUnit = detail?.taxAmount ?? 0;
                 const unitPrice = Math.max(baseUnitPrice, 0);
                 const totalPrice = unitPrice * quantity;
-                const restaurantId = product.restaurantId || null;
+                const branchId =
+                    detail?.branchId ??
+                    product.branchId ??
+                    product.inventory?.branchId ??
+                    product.restaurantBranchId ??
+                    product.restaurantId ??
+                    null;
+                const branchProductId =
+                    detail?.branchProductId ??
+                    product.branch_product_id ??
+                    product.branchProductId ??
+                    product.inventory?.branch_product_id ??
+                    product.inventory?.branchProductId ??
+                    null;
+                const brandRestaurantId =
+                    detail?.brandRestaurantId ??
+                    product.brandRestaurantId ??
+                    product.brandRestaurantID ??
+                    product.restaurant_brand_id ??
+                    product.brandId ??
+                    null;
+
+                const branchRecord = branchId
+                    ? restaurants.find((entry) => entry.id === branchId)
+                    : null;
+                const branchSnapshot = branchId
+                    ? {
+                        id: branchId,
+                        name:
+                            detail?.branchName ||
+                            branchRecord?.displayName ||
+                            branchRecord?.name ||
+                            product.branchName ||
+                            product.restaurantName ||
+                            'Branch',
+                        displayName:
+                            branchRecord?.displayName ||
+                            branchRecord?.name ||
+                            detail?.branchName ||
+                            null,
+                        address:
+                            detail?.branchAddress ||
+                            branchRecord?.address ||
+                            [branchRecord?.street, branchRecord?.ward, branchRecord?.district, branchRecord?.city]
+                                .filter(Boolean)
+                                .join(', ') ||
+                            '',
+                        heroImage:
+                            branchRecord?.heroImage ||
+                            (Array.isArray(branchRecord?.images) ? branchRecord.images[0] : null) ||
+                            detail?.branchImage ||
+                            restaurantPlaceholderImage,
+                        image:
+                            (Array.isArray(branchRecord?.images) ? branchRecord.images[0] : null) ||
+                            branchRecord?.heroImage ||
+                            detail?.branchImage ||
+                            restaurantPlaceholderImage,
+                        phone: branchRecord?.phone || branchRecord?.branchPhone || null,
+                        email: branchRecord?.email || branchRecord?.branchEmail || null,
+                    }
+                    : null;
+
+                const brandRecord =
+                    (brandRestaurantId && restaurantBrands.find((entry) => entry.id === brandRestaurantId)) ||
+                    branchRecord?.brand ||
+                    (brandRestaurantId && FALLBACK_RESTAURANTS.find((entry) => entry.id === brandRestaurantId)) ||
+                    null;
+
+                const restaurantId =
+                    brandRestaurantId ||
+                    brandRecord?.id ||
+                    branchRecord?.brand?.id ||
+                    branchId ||
+                    null;
 
                 if (!restaurantId) {
-                    throw new Error('One or more dishes are missing restaurant information. Please try again.');
+                    throw new Error('Unable to determine restaurant information. Please try again.');
                 }
 
-                const restaurantRecord =
-                    restaurants.find((entry) => entry.id === restaurantId) ||
-                    FALLBACK_RESTAURANTS.find((entry) => entry.id === restaurantId) ||
-                    null;
-                const resolvedRestaurantImage =
-                    restaurantRecord?.heroImage ||
-                    restaurantRecord?.coverImage ||
-                    (Array.isArray(restaurantRecord?.images) ? restaurantRecord.images[0] : null) ||
-                    restaurantPlaceholderImage;
+                const restaurantSnapshot = (() => {
+                    const heroImageCandidate =
+                        brandRecord?.heroImage ||
+                        brandRecord?.coverImage ||
+                        (Array.isArray(brandRecord?.images) ? brandRecord.images[0] : null) ||
+                        branchSnapshot?.heroImage ||
+                        restaurantPlaceholderImage;
+                    return {
+                        id: restaurantId,
+                        name:
+                            detail?.brandRestaurantName ||
+                            brandRecord?.name ||
+                            branchSnapshot?.name ||
+                            'Restaurant',
+                        heroImage: heroImageCandidate,
+                        image: heroImageCandidate,
+                        branch_id: branchId || null,
+                        branch_name: branchSnapshot?.name || detail?.branchName || null,
+                    };
+                })();
+
+                if (branchSnapshot) {
+                    branchSnapshot.restaurant_id = restaurantId;
+                    branchSnapshot.restaurant_name = restaurantSnapshot.name;
+                }
 
                 const existingStats = restaurantStats.get(restaurantId) || {
                     subtotal: 0,
                     itemCount: 0,
-                    snapshot: restaurantRecord
-                        ? {
-                            id: restaurantRecord.id,
-                            name: restaurantRecord.name,
-                            heroImage: restaurantRecord.heroImage || restaurantRecord.coverImage || resolvedRestaurantImage,
-                            image: resolvedRestaurantImage,
-                        }
-                        : {
-                            id: restaurantId,
-                            name: 'Restaurant',
-                            heroImage: restaurantPlaceholderImage,
-                            image: restaurantPlaceholderImage,
-                        },
+                    snapshot: restaurantSnapshot,
                 };
-
                 existingStats.subtotal += totalPrice;
                 existingStats.itemCount += quantity;
+                existingStats.snapshot = restaurantSnapshot;
                 restaurantStats.set(restaurantId, existingStats);
+
+                if (branchId) {
+                    const existingBranchStats = branchStats.get(branchId) || {
+                        subtotal: 0,
+                        itemCount: 0,
+                        snapshot: branchSnapshot,
+                    };
+                    existingBranchStats.subtotal += totalPrice;
+                    existingBranchStats.itemCount += quantity;
+                    existingBranchStats.snapshot = branchSnapshot || existingBranchStats.snapshot;
+                    branchStats.set(branchId, existingBranchStats);
+                }
 
                 orderItems.push({
                     product_id: product._id,
@@ -1429,12 +1610,22 @@ export const AppContextProvider = ({ children }) => {
                     tax_rate: detail?.taxRate ?? product.taxRate ?? 0,
                     options: detail?.options || [],
                     option_selections: detail?.options || [],
+                    branch_product_id: branchProductId,
                     product_snapshot: {
                         title: product.title,
                         size: displaySize,
                         image: product.images?.[0],
                         restaurant_id: restaurantId,
-                        restaurant_name: existingStats.snapshot?.name || restaurantRecord?.name || null,
+                        restaurant_name: restaurantSnapshot.name,
+                        branch_id: branchId || null,
+                        branch_name: branchSnapshot?.name || detail?.branchName || null,
+                        branch_address: branchSnapshot?.address || detail?.branchAddress || null,
+                        price_components: {
+                            base: baseUnitPrice,
+                            size_delta: detail?.sizePriceDelta ?? 0,
+                            options_total: detail?.optionPriceTotal ?? 0,
+                            tax_amount: taxPerUnit,
+                        },
                     },
                 });
             }
@@ -1447,6 +1638,14 @@ export const AppContextProvider = ({ children }) => {
         const restaurantIds = Array.from(restaurantStats.keys());
         if (!restaurantIds.length) {
             throw new Error('Unable to determine restaurant information for this order.');
+        }
+        if (restaurantIds.length > 1) {
+            throw new Error('Please place separate orders for each restaurant.');
+        }
+
+        const branchIds = Array.from(branchStats.keys());
+        if (branchIds.length > 1) {
+            throw new Error('Please place separate orders for each branch.');
         }
 
         const subtotal = orderItems.reduce((sum, item) => sum + item.total_price, 0);
@@ -1483,6 +1682,7 @@ export const AppContextProvider = ({ children }) => {
         const deliveryAddressId = deliveryAddressSnapshot.id;
 
         const restaurantSnapshots = {};
+        const restaurantNames = {};
         const pricingBreakdown = {};
         restaurantIds.forEach((restaurantId) => {
             const stats = restaurantStats.get(restaurantId);
@@ -1492,6 +1692,21 @@ export const AppContextProvider = ({ children }) => {
                 subtotal: stats.subtotal,
                 item_count: stats.itemCount,
             };
+            restaurantNames[restaurantId] = stats.snapshot?.name || null;
+        });
+
+        const branchSnapshots = {};
+        const branchPricingBreakdown = {};
+        const branchNames = {};
+        branchIds.forEach((branchId) => {
+            const stats = branchStats.get(branchId);
+            if (!stats) return;
+            branchSnapshots[branchId] = stats.snapshot;
+            branchPricingBreakdown[branchId] = {
+                subtotal: stats.subtotal,
+                item_count: stats.itemCount,
+            };
+            branchNames[branchId] = stats.snapshot?.name || stats.snapshot?.displayName || null;
         });
 
         const metadata = {
@@ -1499,6 +1714,7 @@ export const AppContextProvider = ({ children }) => {
             discount_code: appliedDiscountCode?.code || null,
             restaurant_ids: restaurantIds,
             restaurant_snapshots: restaurantSnapshots,
+            restaurant_names: restaurantNames,
             pricing_breakdown: pricingBreakdown,
             delivery_address_id: deliveryAddressId,
             delivery_address: deliveryAddressSnapshot,
@@ -1508,6 +1724,16 @@ export const AppContextProvider = ({ children }) => {
         }
         if (notes) {
             metadata.notes = notes;
+        }
+        if (branchIds.length) {
+            metadata.branch_ids = branchIds;
+            metadata.branch_snapshots = branchSnapshots;
+            metadata.branch_pricing_breakdown = branchPricingBreakdown;
+            metadata.branch_names = branchNames;
+            metadata.branch_id = branchIds[0];
+            if (branchIds.length === 1) {
+                metadata.branch_snapshot = branchSnapshots[branchIds[0]];
+            }
         }
 
         const payload = {
@@ -1523,6 +1749,9 @@ export const AppContextProvider = ({ children }) => {
         };
         if (restaurantIds.length === 1) {
             payload.restaurant_id = restaurantIds[0];
+        }
+        if (branchIds.length === 1) {
+            payload.branch_id = branchIds[0];
         }
 
         try {
@@ -1548,6 +1777,15 @@ export const AppContextProvider = ({ children }) => {
                             payment_method: paymentMethod,
                             idempotency_key: `order-${orderRecord.id}`,
                         };
+                        if (orderRecord.restaurant_id) {
+                            paymentPayload.restaurant_id = orderRecord.restaurant_id;
+                        }
+                        if (orderRecord.branch_id) {
+                            paymentPayload.branch_id = orderRecord.branch_id;
+                        }
+                        if (!paymentPayload.flow) {
+                            paymentPayload.flow = paymentMethod === 'cod' ? 'cash' : 'online';
+                        }
                         const paymentRecord = await paymentsService.createPayment(paymentPayload);
                         if (paymentRecord?.status && adaptedList[index]) {
                             adaptedList[index].paymentStatus = paymentRecord.status;

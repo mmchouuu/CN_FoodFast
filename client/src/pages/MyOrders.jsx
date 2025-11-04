@@ -11,6 +11,7 @@ const OrderHistory = () => {
     activeOrders,
     pastOrders,
     getRestaurantById,
+    getBrandById,
     getDishById,
     currency,
   } =
@@ -37,19 +38,34 @@ const OrderHistory = () => {
 
       <div className="space-y-6">
         {sortedOrders.map((order) => {
-          const restaurant = getRestaurantById(order.restaurantId);
+          const branch = order.branchId ? getRestaurantById(order.branchId) : null;
+          const brand = order.restaurantId ? getBrandById(order.restaurantId) : null;
           const restaurantSnapshot =
             order.restaurantSnapshot || order.metadata?.restaurant_snapshot || {};
+          const branchSnapshot = order.branchSnapshot || order.metadata?.branch_snapshot || {};
           const restaurantDisplayName =
-            restaurant?.name ||
+            order.restaurantDisplayName ||
+            branch?.displayName ||
+            branch?.name ||
+            branchSnapshot?.displayName ||
+            branchSnapshot?.name ||
+            brand?.name ||
             restaurantSnapshot?.name ||
             "Restaurant";
           const restaurantDisplayImage =
-            restaurant?.heroImage ||
-            (Array.isArray(restaurant?.images) ? restaurant.images[0] : null) ||
+            order.branchImage ||
+            branch?.heroImage ||
+            (Array.isArray(branch?.images) ? branch.images[0] : null) ||
+            branchSnapshot?.heroImage ||
+            branchSnapshot?.image ||
             restaurantSnapshot?.heroImage ||
             restaurantSnapshot?.image ||
             restaurantPlaceholderImage;
+          const branchAddress =
+            order.branchAddress ||
+            branchSnapshot?.address ||
+            branch?.address ||
+            "";
           return (
             <div
               key={order.id}
@@ -77,6 +93,11 @@ const OrderHistory = () => {
                           Payment: {order.paymentStatus}
                         </span>
                       ) : null}
+                      {branchAddress ? (
+                        <span className="ml-2 inline-block rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-500">
+                          {branchAddress}
+                        </span>
+                      ) : null}
                     </p>
                   </div>
                 </div>
@@ -96,7 +117,7 @@ const OrderHistory = () => {
                       View details
                     </Link>
                     <Link
-                      to={`/restaurants/${order.restaurantId}`}
+                      to={`/restaurants/${order.branchId || order.restaurantId || ""}`}
                       className="rounded-full border border-gray-200 px-4 py-2 text-xs font-semibold text-gray-600 hover:border-orange-300 hover:text-orange-500"
                     >
                       Order again

@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS orders (
   -- Địa chỉ: soft ref + snapshot text để không "trôi"
   shipping_address_id UUID,            -- soft ref: user-service.user_addresses.id
   shipping_address_snapshot JSONB,     -- {"full_name","phone","street",...}
+  metadata JSONB DEFAULT '{}'::jsonb,
 
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
