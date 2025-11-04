@@ -10,9 +10,6 @@ const addressRepository = require('../repositories/address.repository');
 
 const OTP_TTL_MS = 5 * 60 * 1000;
 const RESET_TTL_MS = 10 * 60 * 1000;
-const AUTO_VERIFY_CUSTOMERS =
-  process.env.AUTO_VERIFY_CUSTOMERS === 'true' ||
-  (process.env.NODE_ENV && process.env.NODE_ENV !== 'production');
 
 function sanitizeAddress(address) {
   if (!address) return address;
@@ -61,8 +58,7 @@ async function registerCustomer(payload) {
   }
 
   const normalizedEmail = email.trim().toLowerCase();
-  const shouldAutoVerify = Boolean(AUTO_VERIFY_CUSTOMERS);
-  const otpCode = shouldAutoVerify ? null : generateOTP();
+  const otpCode = generateOTP();
 
   let user;
   await withTransaction(async (client) => {
@@ -81,7 +77,7 @@ async function registerCustomer(payload) {
           lastName: lastName ?? existing.last_name,
           phone: phone ?? existing.phone,
           isActive: true,
-          emailVerified: shouldAutoVerify ? true : existing.email_verified,
+          emailVerified: false,
         },
         client,
       );
@@ -93,7 +89,7 @@ async function registerCustomer(payload) {
           lastName,
           phone,
           isActive: true,
-          emailVerified: shouldAutoVerify ? true : false,
+          emailVerified: false,
         },
         client,
       );
@@ -112,42 +108,20 @@ async function registerCustomer(payload) {
     );
     await userRepository.createCustomerProfile(user.id, client);
 
-    if (shouldAutoVerify && !user.email_verified) {
-      user = await userRepository.updateUser(
-        user.id,
-        { emailVerified: true },
-        client,
-      );
-    } else if (!shouldAutoVerify) {
-      await tokenRepository.createToken(
-        {
-          userId: user.id,
-          purpose: 'verify_email',
-          code: otpCode,
-          ttlMs: OTP_TTL_MS,
-        },
-        client,
-      );
-    }
+    await tokenRepository.createToken(
+      {
+        userId: user.id,
+        purpose: 'verify_email',
+        code: otpCode,
+        ttlMs: OTP_TTL_MS,
+      },
+      client,
+    );
   });
 
-  if (!shouldAutoVerify && otpCode) {
-    await sendOtpEmail(normalizedEmail, firstName || normalizedEmail, otpCode, 'VERIFY');
-    return {
-      message: 'Customer registered, please verify email to activate account.',
-    };
-  }
-
+  await sendOtpEmail(normalizedEmail, firstName || normalizedEmail, otpCode, 'VERIFY');
   return {
-    message: 'Customer registered successfully.',
-    user: {
-      id: user.id,
-      email: user.email,
-      firstName: user.first_name,
-      lastName: user.last_name,
-      phone: user.phone,
-      emailVerified: true,
-    },
+    message: 'Customer registered, please verify email to activate account.',
   };
 }
 
@@ -213,12 +187,7 @@ async function loginCustomer({ email, password }) {
   }
 
   if (!user.email_verified) {
-    if (AUTO_VERIFY_CUSTOMERS) {
-      await userRepository.updateUser(user.id, { emailVerified: true });
-      user.email_verified = true;
-    } else {
-      throw createError('Account not verified', 403);
-    }
+    throw createError('Account not verified', 403);
   }
 
   const role = await roleRepository.getRoleByCode('customer');
