@@ -43,13 +43,17 @@ require('dotenv').config();
 const express = require('express');
 const morgan = require('morgan');
 const paymentRoutes = require('./routes/payment.routes');
-const paymentMethodController = require('./controllers/paymentMethod.controller'); // 🟢 thêm dòng này
 const config = require('./config');
 const auth = require('./middlewares/auth');
+const requireRoles = require('./middlewares/authorize');
+const customerPaymentRoutes = require('./routes/payments.customer.routes');
+const adminPaymentRoutes = require('./routes/payments.admin.routes');
+const { startOrderConsumer } = require('./consumers/order.consumer');
 
 const app = express();
 app.use(express.json());
 app.use(morgan('dev'));
+
 
 const ensureUserContext = (req, res, next) => {
   if (req.headers.authorization || req.headers.Authorization) {
@@ -67,25 +71,18 @@ const ensureUserContext = (req, res, next) => {
   return res.status(401).json({ error: 'missing user context' });
 };
 
-// 🟢 Giữ nguyên route chính
 app.use('/api/payments', ensureUserContext, paymentRoutes);
 
-// 🟢 Thêm route payment-methods riêng
-app.get(
-  '/api/payment-methods/bank-accounts',
-  ensureUserContext,
-  paymentMethodController.listBankAccounts
+app.use(
+  '/customer/payment-methods',
+  auth,
+  requireRoles(['customer', 'user']),
+  customerPaymentRoutes,
 );
+app.use('/admin', auth, requireRoles(['admin', 'superadmin']), adminPaymentRoutes);
 
-app.post(
-  '/api/payment-methods/bank-accounts',
-  ensureUserContext,
-  paymentMethodController.createBankAccount
-);
+app.get('/health', (req, res) => res.json({ ok: true, service: 'payment-service' }));
 
-app.get('/health', (req, res) =>
-  res.json({ ok: true, service: 'payment-service' })
-);
 
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
@@ -97,3 +94,8 @@ app.use((err, req, res, next) => {
 
 const port = config.PORT || 3004;
 app.listen(port, () => console.log(`payment-service listening ${port}`));
+
+startOrderConsumer().catch((error) => {
+  console.error('[payment-service] Failed to start order consumer:', error);
+});
+

@@ -431,6 +431,60 @@ async function listOptionItemsForGroups(groupIds = [], client) {
   }
 }
 
+async function listBranchOptionGroupsForProducts(branchIds = [], productIds = [], client) {
+  if (
+    !Array.isArray(branchIds) ||
+    !branchIds.length ||
+    !Array.isArray(productIds) ||
+    !productIds.length
+  ) {
+    return [];
+  }
+
+  const executor = getExecutor(client);
+  try {
+    const result = await executor.query(
+      `
+        SELECT
+          bpog.id,
+          bpog.branch_product_id,
+          bpog.option_group_id AS group_id,
+          bpog.min_select,
+          bpog.max_select,
+          bpog.is_required,
+          bpog.display_order,
+          bpog.is_active,
+          bp.branch_id,
+          bp.product_id,
+          og.restaurant_id,
+          og.name,
+          og.description,
+          og.selection_type,
+          og.min_select AS group_min_select,
+          og.max_select AS group_max_select,
+          og.is_required AS group_is_required,
+          og.is_active AS group_is_active
+        FROM branch_product_option_groups bpog
+        JOIN branch_products bp ON bp.id = bpog.branch_product_id
+        JOIN option_groups og ON og.id = bpog.option_group_id
+        WHERE bp.branch_id = ANY($1::uuid[])
+          AND bp.product_id = ANY($2::uuid[])
+          AND COALESCE(bpog.is_active, TRUE) = TRUE
+          AND COALESCE(og.is_active, TRUE) = TRUE
+      `,
+      [branchIds, productIds],
+    );
+    return result.rows;
+  } catch (error) {
+    const isMissingTable = error?.code === '42P01';
+    const isMissingColumn = error?.code === '42703';
+    if (!isMissingTable && !isMissingColumn) {
+      throw error;
+    }
+    return [];
+  }
+}
+
 async function listBranchOptionOverrides(branchIds = [], productIds = [], client) {
   if (
     !Array.isArray(branchIds) ||
@@ -540,5 +594,6 @@ module.exports = {
   syncBranchProductOptions,
   listOptionGroupsForProducts,
   listOptionItemsForGroups,
+  listBranchOptionGroupsForProducts,
   listBranchOptionOverrides,
 };

@@ -1,35 +1,118 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { dummyOrdersData } from "../../assets/data";
 import { useAppContext } from "../../context/AppContext";
 
 const containerClasses = "bg-white shadow-sm rounded-2xl p-6 space-y-6";
 
-const statusGroups = [
-    { key: "new", label: "New", match: ["Order Placed"] },
-    { key: "prep", label: "In Preparation", match: ["Packing", "Shipping"] },
-    { key: "delivery", label: "In Delivery", match: ["Out for delivery"] },
-    { key: "completed", label: "Completed", match: ["Delivered"] },
-    { key: "canceled", label: "Canceled", match: ["Canceled"] },
+const ORDER_STATUS_TABS = [
+    { key: "pending", label: "Pending" },
+    { key: "confirmed", label: "Confirmed" },
+    { key: "preparing", label: "Preparing" },
+    { key: "ready", label: "Ready" },
+    { key: "delivering", label: "Delivering" },
+    { key: "completed", label: "Completed" },
+    { key: "cancelled", label: "Cancelled" },
 ];
+
+const resolveItemPrice = (item) => {
+    if (!item) return 0;
+    const productPrice = item.product?.price;
+    if (productPrice && typeof productPrice === "object") {
+        const bySize = productPrice[item.size];
+        if (bySize !== undefined) return Number(bySize) || 0;
+        if (productPrice.Standard !== undefined) return Number(productPrice.Standard) || 0;
+        const firstKey = Object.keys(productPrice)[0];
+        if (firstKey && productPrice[firstKey] !== undefined) {
+            return Number(productPrice[firstKey]) || 0;
+        }
+    }
+    if (typeof productPrice === "number") return productPrice;
+    if (item.unit_price !== undefined) return Number(item.unit_price) || 0;
+    if (item.line_total !== undefined) return Number(item.line_total) || 0;
+    return 0;
+};
 
 const Orders = () => {
     const { currency } = useAppContext();
-    const [activeTab, setActiveTab] = useState(statusGroups[0].key);
+    const [activeTab, setActiveTab] = useState(ORDER_STATUS_TABS[0].key);
     const [searchValue, setSearchValue] = useState("");
+    const [selectedRestaurantId, setSelectedRestaurantId] = useState("all");
+    const [selectedBranchId, setSelectedBranchId] = useState("all");
+
+    const restaurantOptions = useMemo(() => {
+        const map = new Map();
+        dummyOrdersData.forEach(order => {
+            if (!order.restaurantId) return;
+            if (map.has(order.restaurantId)) return;
+            map.set(order.restaurantId, {
+                id: order.restaurantId,
+                name: order.restaurantName || "Unnamed restaurant",
+            });
+        });
+        return Array.from(map.values());
+    }, []);
+
+    const branchOptions = useMemo(() => {
+        const map = new Map();
+        dummyOrdersData
+            .filter(order => selectedRestaurantId === "all" || order.restaurantId === selectedRestaurantId)
+            .forEach(order => {
+                if (!order.branchId || map.has(order.branchId)) return;
+                map.set(order.branchId, {
+                    id: order.branchId,
+                    name: order.branchName || "Unnamed branch",
+                    restaurantId: order.restaurantId,
+                });
+            });
+        return Array.from(map.values());
+    }, [selectedRestaurantId]);
+
+    useEffect(() => {
+        if (selectedRestaurantId !== "all" && !restaurantOptions.some(item => item.id === selectedRestaurantId)) {
+            setSelectedRestaurantId("all");
+        }
+    }, [selectedRestaurantId, restaurantOptions]);
+
+    useEffect(() => {
+        if (selectedBranchId === "all") return;
+        if (!branchOptions.some(item => item.id === selectedBranchId)) {
+            setSelectedBranchId("all");
+        }
+    }, [selectedBranchId, branchOptions]);
+
+    const ordersFilteredByLocation = useMemo(() => {
+        return dummyOrdersData.filter(order => {
+            const matchesRestaurant =
+                selectedRestaurantId === "all" || order.restaurantId === selectedRestaurantId;
+            const matchesBranch = selectedBranchId === "all" || order.branchId === selectedBranchId;
+            return matchesRestaurant && matchesBranch;
+        });
+    }, [selectedBranchId, selectedRestaurantId]);
+
+    const statusCounts = useMemo(() => {
+        const counts = ORDER_STATUS_TABS.reduce((acc, tab) => ({ ...acc, [tab.key]: 0 }), {});
+        ordersFilteredByLocation.forEach(order => {
+            const key = (order.status || "").toLowerCase();
+            if (counts[key] !== undefined) {
+                counts[key] += 1;
+            }
+        });
+        return counts;
+    }, [ordersFilteredByLocation]);
 
     const filteredOrders = useMemo(() => {
-        const group = statusGroups.find(item => item.key === activeTab);
-        const matchSet = new Set(group?.match ?? []);
-        return dummyOrdersData.filter(order => {
-            const matchesStatus = matchSet.size === 0 || matchSet.has(order.status);
+        const normalizedSearch = searchValue.trim().toLowerCase();
+        return ordersFilteredByLocation.filter(order => {
+            const orderStatus = (order.status || "").toLowerCase();
+            const matchesStatus = orderStatus === activeTab;
             const matchesSearch =
-                !searchValue ||
-                order._id.toLowerCase().includes(searchValue.toLowerCase()) ||
-                order.address.firstName.toLowerCase().includes(searchValue.toLowerCase()) ||
-                order.address.lastName.toLowerCase().includes(searchValue.toLowerCase());
+                !normalizedSearch ||
+                order._id.toLowerCase().includes(normalizedSearch) ||
+                order.address.firstName.toLowerCase().includes(normalizedSearch) ||
+                order.address.lastName.toLowerCase().includes(normalizedSearch);
             return matchesStatus && matchesSearch;
         });
-    }, [activeTab, searchValue]);
+    }, [activeTab, ordersFilteredByLocation, searchValue]);
 
     return (
         <div className={containerClasses}>
@@ -51,9 +134,41 @@ const Orders = () => {
             </header>
 
             <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-4">
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 mb-4">
+                    <label className="flex flex-col gap-1 text-sm text-slate-600">
+                        <span className="text-xs uppercase tracking-wide text-slate-500">Restaurant</span>
+                        <select
+                            value={selectedRestaurantId}
+                            onChange={(event) => setSelectedRestaurantId(event.target.value)}
+                            className="rounded-lg border border-slate-200 bg-white py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/60"
+                        >
+                            <option value="all">All restaurants</option>
+                            {restaurantOptions.map((restaurant) => (
+                                <option key={restaurant.id} value={restaurant.id}>
+                                    {restaurant.name}
+                                </option>
+                            ))}
+                        </select>
+                    </label>
+                    <label className="flex flex-col gap-1 text-sm text-slate-600">
+                        <span className="text-xs uppercase tracking-wide text-slate-500">Branch</span>
+                        <select
+                            value={selectedBranchId}
+                            onChange={(event) => setSelectedBranchId(event.target.value)}
+                            className="rounded-lg border border-slate-200 bg-white py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/60"
+                        >
+                            <option value="all">All branches</option>
+                            {branchOptions.map((branch) => (
+                                <option key={branch.id} value={branch.id}>
+                                    {branch.name}
+                                </option>
+                            ))}
+                        </select>
+                    </label>
+                </div>
                 <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                     <div className="flex flex-wrap gap-2">
-                        {statusGroups.map(group => (
+                        {ORDER_STATUS_TABS.map(group => (
                             <button
                                 type="button"
                                 key={group.key}
@@ -66,7 +181,7 @@ const Orders = () => {
                             >
                                 {group.label}
                                 <span className="ml-2 rounded-full bg-white/80 px-2 py-0.5 text-xs font-semibold text-emerald-600">
-                                    {dummyOrdersData.filter(order => group.match.includes(order.status)).length}
+                                    {statusCounts[group.key] ?? 0}
                                 </span>
                             </button>
                         ))}
@@ -96,6 +211,9 @@ const Orders = () => {
                                 <p className="text-xs uppercase tracking-wide text-slate-500">
                                     Order #{order._id}
                                 </p>
+                                <p className="text-xs font-semibold text-emerald-600">
+                                    {(order.restaurantName || "Restaurant")} • {(order.branchName || "Branch")}
+                                </p>
                                 <p className="text-sm text-slate-500">
                                     Placed on{" "}
                                     {new Date(order.createdAt).toLocaleString(undefined, {
@@ -124,7 +242,7 @@ const Orders = () => {
                                             </div>
                                             <p className="text-sm font-semibold text-slate-700">
                                                 {currency}
-                                                {item.product.price[item.size].toFixed(2)}
+                                                {resolveItemPrice(item).toFixed(2)}
                                             </p>
                                         </li>
                                     ))}
@@ -199,12 +317,11 @@ const StatusSelect = ({ defaultValue }) => (
         defaultValue={defaultValue}
         className="rounded-lg border border-slate-200 bg-white py-2 px-3 text-xs font-semibold text-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/60"
     >
-        <option value="Order Placed">Order Placed</option>
-        <option value="Packing">Packing</option>
-        <option value="Shipping">Shipping</option>
-        <option value="Out for delivery">Out for delivery</option>
-        <option value="Delivered">Delivered</option>
-        <option value="Canceled">Canceled</option>
+        {ORDER_STATUS_TABS.map((tab) => (
+            <option key={tab.key} value={tab.key}>
+                {tab.label}
+            </option>
+        ))}
     </select>
 );
 

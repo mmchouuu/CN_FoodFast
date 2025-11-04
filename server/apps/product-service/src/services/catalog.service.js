@@ -84,10 +84,99 @@ async function buildOptionMap(productIds = [], branchIds = []) {
     return {};
   }
 
-  const groupRows = await optionsRepository.listOptionGroupsForProducts(productIds);
-  const groupIds = groupRows.map((row) => row.group_id);
-  const itemRows = await optionsRepository.listOptionItemsForGroups(groupIds);
-  const overrides = await optionsRepository.listBranchOptionOverrides(branchIds, productIds);
+  const baseGroupRows = await optionsRepository.listOptionGroupsForProducts(productIds);
+  const branchGroupRows =
+    Array.isArray(branchIds) && branchIds.length
+      ? await optionsRepository.listBranchOptionGroupsForProducts(branchIds, productIds)
+      : [];
+
+  const groupMap = new Map();
+
+  baseGroupRows.forEach((row) => {
+    if (!row) return;
+    const key = `${row.product_id}:${row.group_id}`;
+    groupMap.set(key, { ...row, branch_overrides: [] });
+  });
+
+  branchGroupRows.forEach((row) => {
+    if (!row) return;
+    const key = `${row.product_id}:${row.group_id}`;
+    const overrideEntry = {
+      branch_id: row.branch_id,
+      branch_product_id: row.branch_product_id,
+      min_select: row.min_select,
+      max_select: row.max_select,
+      is_required: row.is_required,
+      display_order: row.display_order,
+      is_active: row.is_active !== false,
+    };
+
+    if (groupMap.has(key)) {
+      const existing = groupMap.get(key);
+      const overrides = Array.isArray(existing.branch_overrides)
+        ? existing.branch_overrides
+        : [];
+      overrides.push(overrideEntry);
+      existing.branch_overrides = overrides;
+      if (
+        (existing.min_select === null || existing.min_select === undefined) &&
+        row.min_select !== null &&
+        row.min_select !== undefined
+      ) {
+        existing.min_select = row.min_select;
+      }
+      if (
+        (existing.max_select === null || existing.max_select === undefined) &&
+        row.max_select !== null &&
+        row.max_select !== undefined
+      ) {
+        existing.max_select = row.max_select;
+      }
+      if (
+        (existing.is_required === null || existing.is_required === undefined) &&
+        row.is_required !== null &&
+        row.is_required !== undefined
+      ) {
+        existing.is_required = row.is_required;
+      }
+      if (
+        (existing.display_order === null ||
+          existing.display_order === undefined) &&
+        row.display_order !== null &&
+        row.display_order !== undefined
+      ) {
+        existing.display_order = row.display_order;
+      }
+    } else {
+      groupMap.set(key, {
+        id: row.id,
+        product_id: row.product_id,
+        group_id: row.group_id,
+        min_select: row.min_select,
+        max_select: row.max_select,
+        is_required: row.is_required,
+        display_order: row.display_order,
+        name: row.name,
+        description: row.description,
+        selection_type: row.selection_type,
+        group_min_select: row.group_min_select,
+        group_max_select: row.group_max_select,
+        group_is_required: row.group_is_required,
+        group_is_active: row.group_is_active,
+        branch_overrides: [overrideEntry],
+      });
+    }
+  });
+
+  const combinedGroupRows = Array.from(groupMap.values());
+  const groupIds = combinedGroupRows.map((row) => row.group_id);
+  const itemRows = groupIds.length
+    ? await optionsRepository.listOptionItemsForGroups(groupIds)
+    : [];
+  const overrides =
+    Array.isArray(branchIds) && branchIds.length
+      ? await optionsRepository.listBranchOptionOverrides(branchIds, productIds)
+      : [];
 
   const itemsByGroup = itemRows.reduce((acc, item) => {
     if (!item) return acc;
@@ -124,7 +213,7 @@ async function buildOptionMap(productIds = [], branchIds = []) {
     return acc;
   }, {});
 
-  const groupsByProduct = groupRows.reduce((acc, row) => {
+  const groupsByProduct = combinedGroupRows.reduce((acc, row) => {
     if (!row) return acc;
     const productId = row.product_id;
     const items = (itemsByGroup[row.group_id] || []).map((item) => {
@@ -136,32 +225,56 @@ async function buildOptionMap(productIds = [], branchIds = []) {
       };
     });
 
+    const minCandidate =
+      row.min_select !== null && row.min_select !== undefined
+        ? Number(row.min_select)
+        : row.group_min_select !== null && row.group_min_select !== undefined
+          ? Number(row.group_min_select)
+          : 0;
+    const maxCandidate =
+      row.max_select !== null && row.max_select !== undefined
+        ? Number(row.max_select)
+        : row.group_max_select !== null && row.group_max_select !== undefined
+          ? Number(row.group_max_select)
+          : null;
+    const requiredCandidate =
+      row.is_required !== null && row.is_required !== undefined
+        ? row.is_required
+        : row.group_is_required !== null && row.group_is_required !== undefined
+          ? row.group_is_required
+          : false;
+    const activeCandidate =
+      row.is_active !== undefined && row.is_active !== null
+        ? row.is_active !== false
+        : row.group_is_active !== undefined && row.group_is_active !== null
+          ? row.group_is_active !== false
+          : true;
+
+    if (!activeCandidate) {
+      return acc;
+    }
+
+    const groupBranchOverrides = Array.isArray(row.branch_overrides)
+      ? row.branch_overrides.map((entry) => ({ ...entry }))
+      : [];
+
     const group = {
       id: row.group_id,
       product_id: productId,
       name: row.name,
       description: row.description || null,
       selection_type: row.selection_type || 'multiple',
-      min_select:
-        row.min_select !== null && row.min_select !== undefined
-          ? Number(row.min_select)
-          : row.group_min_select !== null && row.group_min_select !== undefined
-            ? Number(row.group_min_select)
-            : 0,
-      max_select:
-        row.max_select !== null && row.max_select !== undefined
-          ? Number(row.max_select)
-          : row.group_max_select !== null && row.group_max_select !== undefined
-            ? Number(row.group_max_select)
-            : null,
-      is_required:
-        row.is_required !== null && row.is_required !== undefined
-          ? row.is_required
-          : row.group_is_required !== null && row.group_is_required !== undefined
-            ? row.group_is_required
-            : false,
+      min_select: minCandidate,
+      max_select: maxCandidate,
+      is_required: requiredCandidate,
       display_order: row.display_order,
       items,
+      branch_overrides: groupBranchOverrides,
+      group_min_select: row.group_min_select,
+      group_max_select: row.group_max_select,
+      group_is_required: row.group_is_required,
+      group_is_active: row.group_is_active,
+      is_active: activeCandidate,
     };
 
     const list = acc[productId] || [];
@@ -173,6 +286,250 @@ async function buildOptionMap(productIds = [], branchIds = []) {
   }, {});
 
   return groupsByProduct;
+}
+
+function applyBranchOverridesToOptions(optionGroups = [], branchId = null, branchProductId = null) {
+  if (!Array.isArray(optionGroups) || !optionGroups.length) {
+    return [];
+  }
+
+  const resolveNumber = (value, fallback) => {
+    if (value === null || value === undefined || value === '') {
+      return fallback;
+    }
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : fallback;
+  };
+
+  const resolveBoolean = (value, fallback) => {
+    if (value === null || value === undefined) {
+      return fallback;
+    }
+    return value !== false;
+  };
+
+  return optionGroups
+    .map((group) => {
+      if (!group) {
+        return null;
+      }
+
+      const baseActive = resolveBoolean(
+        group.is_active,
+        resolveBoolean(group.group_is_active, true),
+      );
+      if (!baseActive) {
+        return null;
+      }
+
+      const originalItems = Array.isArray(group.items) ? group.items : [];
+      const groupOverrides = Array.isArray(group.branch_overrides)
+        ? group.branch_overrides
+        : [];
+
+      let appliedGroupOverride = null;
+      if (branchProductId) {
+        appliedGroupOverride =
+          groupOverrides.find(
+            (entry) =>
+              entry &&
+              entry.branch_product_id &&
+              entry.branch_product_id === branchProductId,
+          ) || null;
+      }
+      if (!appliedGroupOverride && branchId) {
+        appliedGroupOverride =
+          groupOverrides.find(
+            (entry) => entry && entry.branch_id && entry.branch_id === branchId,
+          ) || null;
+      }
+
+      if (appliedGroupOverride && appliedGroupOverride.is_active === false) {
+        return null;
+      }
+
+      const mappedItems = originalItems
+        .map((item) => {
+          if (!item) return null;
+
+          const basePriceDelta = toNumber(item.price_delta, 0);
+          const overrides = Array.isArray(item.branch_overrides)
+            ? item.branch_overrides
+            : [];
+
+          let override = null;
+          if (branchProductId) {
+            override =
+              overrides.find(
+                (entry) =>
+                  entry &&
+                  entry.branch_product_id &&
+                  entry.branch_product_id === branchProductId,
+              ) || null;
+          }
+          if (!override && branchId) {
+            override =
+              overrides.find(
+                (entry) => entry && entry.branch_id && entry.branch_id === branchId,
+              ) || null;
+          }
+
+          const hasOverrideVisibility =
+            override &&
+            (override.is_available === false || override.is_visible === false);
+          const overrideInactive = override && override.is_active === false;
+
+          if (hasOverrideVisibility || overrideInactive) {
+            return null;
+          }
+
+          const overridePrice =
+            override &&
+            override.price_delta_override !== null &&
+            override.price_delta_override !== undefined
+              ? override.price_delta_override
+              : override &&
+                override.price_delta !== null &&
+                override.price_delta !== undefined
+                ? override.price_delta
+                : null;
+
+          const effectivePriceDelta =
+            overridePrice !== null && overridePrice !== undefined
+              ? toNumber(overridePrice, basePriceDelta)
+              : basePriceDelta;
+
+          const clonedOverrides = overrides.map((entry) => ({ ...entry }));
+
+          return {
+            ...item,
+            branch_overrides: clonedOverrides,
+            base_price_delta: basePriceDelta,
+            price_delta: effectivePriceDelta,
+            effective_price_delta: effectivePriceDelta,
+            applied_branch_override: override
+              ? {
+                  branch_id: override.branch_id || null,
+                  branch_product_id: override.branch_product_id || null,
+                  price_delta:
+                    overridePrice !== null && overridePrice !== undefined
+                      ? toNumber(overridePrice, basePriceDelta)
+                      : null,
+                  is_available:
+                    override.is_available !== undefined &&
+                    override.is_available !== null
+                      ? override.is_available !== false
+                      : override.is_active !== false,
+                  is_visible:
+                    override.is_visible !== undefined &&
+                    override.is_visible !== null
+                      ? override.is_visible !== false
+                      : override.is_active !== false,
+                }
+              : null,
+          };
+        })
+        .filter(Boolean);
+
+      const safeItems =
+        mappedItems.length
+          ? mappedItems
+          : originalItems
+              .map((item) => {
+                if (!item) return null;
+                const basePriceDelta = toNumber(item.price_delta, 0);
+                const overrides = Array.isArray(item.branch_overrides)
+                  ? item.branch_overrides.map((entry) => ({ ...entry }))
+                  : [];
+                return {
+                  ...item,
+                  branch_overrides: overrides,
+                  base_price_delta: basePriceDelta,
+                  price_delta: basePriceDelta,
+                  effective_price_delta: basePriceDelta,
+                  applied_branch_override: null,
+                };
+              })
+              .filter(Boolean);
+
+      const baseMin = resolveNumber(
+        group.min_select,
+        resolveNumber(group.group_min_select, 0),
+      );
+      const baseMax = resolveNumber(
+        group.max_select,
+        resolveNumber(group.group_max_select, null),
+      );
+      const baseRequired = resolveBoolean(
+        group.is_required,
+        resolveBoolean(group.group_is_required, false),
+      );
+
+      const effectiveMin = resolveNumber(
+        appliedGroupOverride?.min_select,
+        baseMin,
+      );
+      const effectiveMax = resolveNumber(
+        appliedGroupOverride?.max_select,
+        baseMax,
+      );
+      const effectiveRequired = resolveBoolean(
+        appliedGroupOverride?.is_required,
+        baseRequired,
+      );
+      const effectiveDisplayOrder =
+        appliedGroupOverride &&
+        appliedGroupOverride.display_order !== null &&
+        appliedGroupOverride.display_order !== undefined
+          ? appliedGroupOverride.display_order
+          : group.display_order;
+
+      const clonedGroupOverrides = groupOverrides.map((entry) => ({ ...entry }));
+
+      return {
+        ...group,
+        branch_id: branchId,
+        branch_product_id: branchProductId || null,
+        min_select: effectiveMin,
+        max_select: effectiveMax,
+        is_required: effectiveRequired,
+        display_order: effectiveDisplayOrder,
+        items: safeItems,
+        branch_overrides: clonedGroupOverrides,
+        applied_branch_override: appliedGroupOverride
+          ? {
+              branch_id: appliedGroupOverride.branch_id || null,
+              branch_product_id: appliedGroupOverride.branch_product_id || null,
+              min_select:
+                appliedGroupOverride.min_select !== undefined &&
+                appliedGroupOverride.min_select !== null
+                  ? Number(appliedGroupOverride.min_select)
+                  : null,
+              max_select:
+                appliedGroupOverride.max_select !== undefined &&
+                appliedGroupOverride.max_select !== null
+                  ? Number(appliedGroupOverride.max_select)
+                  : null,
+              is_required:
+                appliedGroupOverride.is_required !== undefined &&
+                appliedGroupOverride.is_required !== null
+                  ? appliedGroupOverride.is_required !== false
+                  : null,
+              display_order:
+                appliedGroupOverride.display_order !== undefined &&
+                appliedGroupOverride.display_order !== null
+                  ? appliedGroupOverride.display_order
+                  : null,
+              is_active:
+                appliedGroupOverride.is_active !== undefined &&
+                appliedGroupOverride.is_active !== null
+                  ? appliedGroupOverride.is_active !== false
+                  : true,
+            }
+          : null,
+      };
+    })
+    .filter(Boolean);
 }
 
 async function buildComboData(restaurantId, branchIds = []) {
@@ -327,7 +684,7 @@ async function getRestaurantCatalog(restaurantId, filters = {}) {
 
   const productsWithOptions = products.map((product) => ({
     ...product,
-    options: optionMap[product.id] || [],
+    options: applyBranchOverridesToOptions(optionMap[product.id] || []),
   }));
 
   const branchProductsMap = branches.reduce((acc, branch) => {
@@ -391,7 +748,11 @@ async function getRestaurantCatalog(restaurantId, filters = {}) {
               ? null
               : toNumber(assignment.daily_limit, null),
         },
-        options: optionMap[product.id] || [],
+        options: applyBranchOverridesToOptions(
+          optionMap[product.id] || [],
+          branchId,
+          assignment.id,
+        ),
         branch_assignment: assignment,
       };
 
@@ -436,7 +797,11 @@ async function getRestaurantCatalog(restaurantId, filters = {}) {
             reserved_qty: null,
             daily_limit: null,
           },
-          options: optionMap[product.id] || [],
+          options: applyBranchOverridesToOptions(
+            optionMap[product.id] || [],
+            branch.id,
+            null,
+          ),
           branch_assignment: {
             id: null,
             branch_id: branch.id,

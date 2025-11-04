@@ -1,47 +1,64 @@
-const config = require('../config');
+// api-gateway/src/services/order.client.js
 const { createAxiosInstance } = require('../utils/httpClient');
+const config = require('../config');
 
+// Tạo axios client chuẩn hóa, loại bỏ dấu "/" thừa ở cuối baseURL
 const client = createAxiosInstance({
   baseURL: `${(config.orderServiceUrl || 'http://localhost:3003').replace(/\/+$/, '')}/api/orders`,
   timeout: config.requestTimeout,
 });
 
-const buildConfig = (opts = {}) => {
-  const configPatch = {};
-  if (opts.headers) {
-    configPatch.headers = opts.headers;
-  }
-  if (opts.params) {
-    configPatch.params = opts.params;
-  }
-  return configPatch;
-};
+// Hàm tiện ích hợp nhất cách build config
+function buildConfig({ headers = {}, params = {} } = {}) {
+  const cfg = {};
+  if (Object.keys(headers).length > 0) cfg.headers = headers;
+  if (Object.keys(params).length > 0) cfg.params = params;
+  return cfg;
+}
 
-async function listOrders(opts = {}) {
-  const res = await client.get('/', buildConfig(opts));
+// ----------------------------------------------------------------------
+// Lấy danh sách đơn hàng
+// ----------------------------------------------------------------------
+async function listOrders({ params = {}, headers = {} } = {}) {
+  const res = await client.get('/', buildConfig({ headers, params }));
   return res.data;
 }
 
-async function getOrderById(id, opts = {}) {
-  const res = await client.get(`/${id}`, buildConfig(opts));
+// ----------------------------------------------------------------------
+// Lấy chi tiết đơn hàng theo ID
+// ----------------------------------------------------------------------
+async function getOrderById(orderId, { headers = {} } = {}) {
+  const res = await client.get(`/${orderId}`, buildConfig({ headers }));
   return res.data;
 }
 
-async function listOrdersByUser(userId, opts = {}) {
-  const res = await client.get(`/user/${userId}`, buildConfig(opts));
+// ----------------------------------------------------------------------
+// Lấy danh sách đơn hàng theo user
+// ----------------------------------------------------------------------
+async function listOrdersByUser(userId, { headers = {}, params = {} } = {}) {
+  const res = await client.get(`/user/${userId}`, buildConfig({ headers, params }));
   return res.data;
 }
 
-async function createOrder(data, opts = {}) {
-  const res = await client.post('/', data, buildConfig(opts));
+// ----------------------------------------------------------------------
+// Tạo đơn hàng mới
+// ----------------------------------------------------------------------
+async function createOrder(payload, { headers = {} } = {}) {
+  const res = await client.post('/', payload, buildConfig({ headers }));
   return res.data;
 }
 
-async function updateOrderStatus(id, status, opts = {}) {
-  const res = await client.put(`/${id}/status`, { status }, buildConfig(opts));
+// ----------------------------------------------------------------------
+// Cập nhật trạng thái đơn hàng
+// ----------------------------------------------------------------------
+async function updateOrderStatus(orderId, status, { headers = {} } = {}) {
+  const res = await client.put(`/${orderId}/status`, { status }, buildConfig({ headers }));
   return res.data;
 }
 
+// ----------------------------------------------------------------------
+// Xuất module
+// ----------------------------------------------------------------------
 module.exports = {
   listOrders,
   getOrderById,

@@ -363,6 +363,35 @@ const adaptProductFromApi = (product) => {
         ? product.options.map(adaptOptionGroupFromApi).filter(Boolean)
         : [];
 
+    const sizeGroup = optionGroups.find((group) => {
+        const name = (group.name || group.label || '').toLowerCase();
+        if (name.includes('size')) return true;
+        if (group.type === 'single' && (group.maxSelect === 1 || group.maxSelect == null)) {
+            return name.includes('portion') || name.includes('serve') || name.includes('bowl');
+        }
+        return false;
+    });
+
+    let sizes = ['Standard'];
+    let priceMap = { Standard: basePrice };
+
+    if (sizeGroup && Array.isArray(sizeGroup.values) && sizeGroup.values.length) {
+        const nextSizes = [];
+        const nextPriceMap = {};
+        sizeGroup.values.forEach((value) => {
+            const label = (value.label || value.name || '').trim();
+            if (!label) return;
+            const delta = Number(value.priceDelta || 0);
+            const computed = basePrice + (Number.isFinite(delta) ? delta : 0);
+            nextSizes.push(label);
+            nextPriceMap[label] = computed;
+        });
+        if (nextSizes.length) {
+            sizes = nextSizes;
+            priceMap = nextPriceMap;
+        }
+    }
+
     const inStock =
         inventoryQuantity === null || inventoryQuantity === undefined
             ? true
@@ -378,8 +407,8 @@ const adaptProductFromApi = (product) => {
         category: product.category || 'General',
         type: product.type || 'Standard',
         spiceLevel: product.spice_level || 0,
-        sizes: ['Standard'],
-        price: { Standard: basePrice },
+        sizes,
+        price: priceMap,
         basePrice,
         priceWithTax,
         taxRate,

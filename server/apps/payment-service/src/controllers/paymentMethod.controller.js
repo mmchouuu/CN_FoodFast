@@ -1,39 +1,57 @@
 const paymentMethodService = require('../services/paymentMethod.service');
 
-function getUserId(req) {
-  return req.headers['x-user-id'] || req.body?.user_id || req.query?.user_id || null;
-}
+const resolveUserId = (req, body = {}) =>
+  req.user?.id ||
+  req.user?.userId ||
+  req.user?.user_id ||
+  req.headers['x-user-id'] ||
+  req.headers['x-userid'] ||
+  body.user_id ||
+  body.userId ||
+  req.query?.user_id ||
+  req.query?.userId ||
+  null;
 
-async function listBankAccounts(req, res, next) {
+const mapError = (res, error) => {
+  const status =
+    error?.statusCode ||
+    error?.status ||
+    error?.httpStatus ||
+    (error?.name === 'ValidationError' ? 400 : 500);
+
+  return res.status(status).json({
+    error: error?.message || 'Internal server error',
+    details: error?.details || undefined,
+  });
+};
+
+exports.listBankAccounts = async (req, res) => {
   try {
-    const userId = getUserId(req);
+    const userId = resolveUserId(req, req.query);
     if (!userId) {
-      return res.status(401).json({ error: 'missing user context' });
+      return res.status(401).json({ error: 'user id is required' });
     }
-    const accounts = await paymentMethodService.listBankAccounts(userId);
-    res.json(accounts);
-  } catch (error) {
-    next(error);
-  }
-}
 
-async function createBankAccount(req, res, next) {
+    const data = await paymentMethodService.listBankAccounts(userId);
+    return res.json({ data });
+  } catch (error) {
+    console.error('[payment-service] listBankAccounts failed:', error);
+    return mapError(res, error);
+  }
+};
+
+exports.createBankAccount = async (req, res) => {
+  const body = req.body || {};
   try {
-    const userId = getUserId(req);
+    const userId = resolveUserId(req, body);
     if (!userId) {
-      return res.status(401).json({ error: 'missing user context' });
+      return res.status(401).json({ error: 'user id is required' });
     }
-    const account = await paymentMethodService.createBankAccount(userId, req.body || {});
-    res.status(201).json(account);
-  } catch (error) {
-    if (error.statusCode) {
-      return res.status(error.statusCode).json({ error: error.message });
-    }
-    next(error);
-  }
-}
 
-module.exports = {
-  listBankAccounts,
-  createBankAccount,
+    const record = await paymentMethodService.createBankAccount(userId, body);
+    return res.status(201).json(record);
+  } catch (error) {
+    console.error('[payment-service] createBankAccount failed:', error);
+    return mapError(res, error);
+  }
 };

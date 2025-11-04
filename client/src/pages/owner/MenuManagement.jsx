@@ -96,6 +96,219 @@ const createOptionGroup = () => ({
   choices: [createOptionChoice()],
 });
 
+const toFiniteNumber = (value, fallback) => {
+  if (value === null || value === undefined || value === "") {
+    return fallback;
+  }
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+};
+
+const normalizeOptionGroupsForState = (groups = []) => {
+  const source = Array.isArray(groups) ? groups : [];
+  return source
+    .map((group, groupIndex) => {
+      if (!group) return null;
+      const name = (group.name || group.label || "").trim();
+      if (!name) return null;
+
+      const displayOrder = toFiniteNumber(
+        group.display_order ?? group.displayOrder ?? group.order ?? group.position,
+        groupIndex,
+      );
+
+      const selectionTypeRaw = (group.selectionType || group.selection_type || group.type || "")
+        .toString()
+        .toLowerCase();
+
+      let allowMultiple = group.allowMultiple;
+      if (allowMultiple === undefined) {
+        if (selectionTypeRaw === "single") {
+          allowMultiple = false;
+        } else if (selectionTypeRaw === "multiple") {
+          allowMultiple = true;
+        }
+      }
+
+      const maxSelectRaw =
+        group.maxSelect ??
+        group.max_select ??
+        group.group_max_select ??
+        group.maxChoices ??
+        null;
+      if (allowMultiple === undefined) {
+        if (maxSelectRaw === 1) {
+          allowMultiple = false;
+        } else if (maxSelectRaw !== null && maxSelectRaw !== undefined) {
+          allowMultiple = toFiniteNumber(maxSelectRaw, 2) !== 1;
+        }
+      }
+      if (allowMultiple === undefined) {
+        allowMultiple = true;
+      }
+
+      const minSelectRaw =
+        group.minSelect ??
+        group.min_select ??
+        group.group_min_select ??
+        group.minChoices ??
+        null;
+
+      const requiredRaw =
+        group.required ??
+        group.is_required ??
+        group.isRequired ??
+        group.group_is_required ??
+        null;
+
+      const minSelect =
+        minSelectRaw === null || minSelectRaw === undefined
+          ? allowMultiple
+            ? 0
+            : 1
+          : toFiniteNumber(minSelectRaw, allowMultiple ? 0 : 1);
+      const maxSelect =
+        maxSelectRaw === null || maxSelectRaw === undefined
+          ? allowMultiple
+            ? null
+            : 1
+          : toFiniteNumber(maxSelectRaw, allowMultiple ? null : 1);
+      const required =
+        requiredRaw === null || requiredRaw === undefined
+          ? minSelect > 0
+          : Boolean(requiredRaw);
+
+      const rawChoices =
+        (Array.isArray(group.choices) && group.choices.length && group.choices) ||
+        (Array.isArray(group.items) && group.items.length && group.items) ||
+        (Array.isArray(group.values) && group.values.length && group.values) ||
+        [];
+
+      const decoratedChoices = rawChoices
+        .map((choice, choiceIndex) => ({
+          value: choice,
+          index: choiceIndex,
+          order: toFiniteNumber(
+            choice?.display_order ??
+              choice?.displayOrder ??
+              choice?.order ??
+              choice?.position,
+            choiceIndex,
+          ),
+        }))
+        .sort((a, b) => a.order - b.order);
+
+      const choices = decoratedChoices
+        .map(({ value: choice, order, index: choiceIndex }) => {
+          if (!choice) return null;
+          const label = (choice.label || choice.name || choice.value || choice.title || "").trim();
+          if (!label) return null;
+          const choiceId =
+            choice.id ||
+            choice.item_id ||
+            choice.value_id ||
+            choice.option_id ||
+            `choice-${groupIndex}-${choiceIndex}`;
+          const priceRaw =
+            choice.priceDelta ??
+            choice.price_delta ??
+            choice.price ??
+            choice.extra_price ??
+            choice.priceModifier ??
+            choice.delta ??
+            0;
+          const numericDelta = toFiniteNumber(priceRaw, 0) ?? 0;
+          return {
+            id: choiceId,
+            label,
+            description: choice.description || "",
+            priceDelta: numericDelta,
+            displayOrder: order,
+          };
+        })
+        .filter(Boolean);
+
+      const id =
+        group.id ||
+        group.group_id ||
+        group.option_group_id ||
+        `group-${groupIndex}`;
+
+      return {
+        id,
+        name,
+        description: group.description || group.summary || "",
+        allowMultiple: Boolean(allowMultiple),
+        required,
+        minSelect,
+        maxSelect,
+        displayOrder,
+        choices,
+      };
+    })
+    .filter(Boolean)
+    .sort(
+      (a, b) =>
+        toFiniteNumber(a.displayOrder, 32767) - toFiniteNumber(b.displayOrder, 32767),
+    );
+};
+
+const deriveOptionGroupsFromProduct = (product) => {
+  if (!product) return [];
+  if (Array.isArray(product.optionGroups) && product.optionGroups.length) {
+    return normalizeOptionGroupsForState(product.optionGroups);
+  }
+  if (Array.isArray(product.options) && product.options.length) {
+    return normalizeOptionGroupsForState(product.options);
+  }
+  if (Array.isArray(product.option_groups) && product.option_groups.length) {
+    return normalizeOptionGroupsForState(product.option_groups);
+  }
+  return [];
+};
+
+const buildFormOptionGroupsFromProduct = (product) =>
+  deriveOptionGroupsFromProduct(product).map((group, groupIndex) => ({
+    id: group.id || createOptionGroup().id,
+    name: group.name || "",
+    required: Boolean(group.required),
+    allowMultiple: Boolean(group.allowMultiple),
+    displayOrder:
+      group.displayOrder === null || group.displayOrder === undefined
+        ? groupIndex
+        : group.displayOrder,
+    choices:
+      Array.isArray(group.choices) && group.choices.length
+        ? group.choices.map((choice, choiceIndex) => ({
+            id: choice.id || createOptionChoice().id,
+            label: choice.label || "",
+            priceDelta:
+              choice.priceDelta === 0 || choice.priceDelta
+                ? String(choice.priceDelta)
+                : "",
+            displayOrder:
+              choice.displayOrder === null || choice.displayOrder === undefined
+                ? choiceIndex
+                : choice.displayOrder,
+          }))
+        : [
+            {
+              ...createOptionChoice(),
+              displayOrder: 0,
+            },
+          ],
+  }));
+
+const formatPriceDeltaLabel = (value) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric === 0) {
+    return "Included";
+  }
+  const absolute = Math.abs(numeric);
+  const formatted = formatCurrency(absolute);
+  return numeric > 0 ? `+ ${formatted}` : `- ${formatted}`;
+};
+
 const normalizeBranchId = (value) => {
   if (!value) return null;
   if (typeof value === "string") return value;
@@ -246,24 +459,7 @@ const buildFormFromProduct = (product) => {
           .map((assignment) => normalizeBranchId(assignment))
           .filter(Boolean)
         : [],
-    optionGroups: Array.isArray(product?.optionGroups)
-      ? product.optionGroups.map((group) => ({
-        id: group.id || createOptionGroup().id,
-        name: group.name || "",
-        required: Boolean(group.required),
-        allowMultiple: Boolean(group.allowMultiple),
-        choices: Array.isArray(group.choices) && group.choices.length
-          ? group.choices.map((choice) => ({
-            id: choice.id || createOptionChoice().id,
-            label: choice.label || "",
-            priceDelta:
-              choice.priceDelta === 0 || choice.priceDelta
-                ? String(choice.priceDelta)
-                : "",
-          }))
-          : [createOptionChoice()],
-      }))
-      : [],
+    optionGroups: buildFormOptionGroupsFromProduct(product),
   });
 };
 
@@ -1179,7 +1375,7 @@ const InventoryModal = ({
           </div>
 
           {loading ? (
-            <div className="py-10 text-center text-sm text-slate-500">Loading inventory�</div>
+            <div className="py-10 text-center text-sm text-slate-500">Loading inventory</div>
           ) : hasBranches ? (
             <div className="space-y-4">
               {branches.map((branch) => {
@@ -1271,14 +1467,15 @@ const MenuManagement = () => {
 
   const [restaurant, setRestaurant] = useState(() => SAMPLE_RESTAURANT);
   const [loading, setLoading] = useState(true);
-const [products, setProducts] = useState(() => decorateProductsWithInventory(SAMPLE_PRODUCTS));
-const [error, setError] = useState("");
-const [usingSampleData, setUsingSampleData] = useState(true);
-const [ownerRestaurants, setOwnerRestaurants] = useState([]);
-const [selectedRestaurantId, setSelectedRestaurantId] = useState(null);
-const [selectedBranchId, setSelectedBranchId] = useState("all");
-const [productsLoading, setProductsLoading] = useState(false);
-const [apiCategories, setApiCategories] = useState(() =>
+  const [products, setProducts] = useState(() => decorateProductsWithInventory(SAMPLE_PRODUCTS));
+  const [expandedOptionRows, setExpandedOptionRows] = useState([]);
+  const [error, setError] = useState("");
+  const [usingSampleData, setUsingSampleData] = useState(true);
+  const [ownerRestaurants, setOwnerRestaurants] = useState([]);
+  const [selectedRestaurantId, setSelectedRestaurantId] = useState(null);
+  const [selectedBranchId, setSelectedBranchId] = useState("all");
+  const [productsLoading, setProductsLoading] = useState(false);
+  const [apiCategories, setApiCategories] = useState(() =>
   SAMPLE_CATEGORIES.map((name) => ({
     id: `sample-${name.toLowerCase().replace(/\s+/g, "-")}`,
     name,
@@ -1649,6 +1846,14 @@ const [apiCategories, setApiCategories] = useState(() =>
       return [];
     });
   }, [branches, selectedBranchId, usingSampleData]);
+
+  useEffect(() => {
+    setExpandedOptionRows((previous) =>
+      (Array.isArray(previous) ? previous : []).filter((id) =>
+        products.some((product) => product.id === id),
+      ),
+    );
+  }, [products]);
 
   const derivedCategories = useMemo(() => {
     const collected = products
@@ -2043,6 +2248,8 @@ const [apiCategories, setApiCategories] = useState(() =>
           .filter(Boolean)
       : [];
 
+    const normalizedOptionGroupsForState = normalizeOptionGroupsForState(sanitizedOptionGroups);
+
     let shouldCloseModal = false;
     let shouldRefresh = false;
 
@@ -2060,7 +2267,7 @@ const [apiCategories, setApiCategories] = useState(() =>
                     images,
                     tax_amount: formState.taxAmount,
                     price_with_tax: formState.priceWithTax,
-                    optionGroups: sanitizedOptionGroups,
+                    optionGroups: normalizedOptionGroupsForState,
                   }
                   : product
               )
@@ -2101,7 +2308,7 @@ const [apiCategories, setApiCategories] = useState(() =>
                 quantity: assignment.inventory?.quantity ?? null,
                 reserved_qty: assignment.inventory?.reserved_qty ?? null,
               })),
-              optionGroups: sanitizedOptionGroups,
+              optionGroups: normalizedOptionGroupsForState,
             };
             const decoratedNewProduct = decorateProductWithInventory(newProduct);
             setProducts((previous) => [...previous, decoratedNewProduct]);
@@ -2142,7 +2349,7 @@ const [apiCategories, setApiCategories] = useState(() =>
             }
             const enrichedCreated =
               sanitizedOptionGroups.length > 0
-                ? { ...created, optionGroups: sanitizedOptionGroups }
+                ? { ...created, optionGroups: normalizedOptionGroupsForState }
                 : created;
             const decoratedCreated = decorateProductWithInventory(enrichedCreated);
             setProducts((previous) => [...previous, decoratedCreated]);
@@ -2189,6 +2396,9 @@ const [apiCategories, setApiCategories] = useState(() =>
 
     if (sampleMode) {
       setProducts((previous) => previous.filter((item) => item.id !== product.id));
+      setExpandedOptionRows((previous) =>
+        (Array.isArray(previous) ? previous : []).filter((id) => id !== product.id),
+      );
       setBranchInventoryCache((previous) => {
         const next = { ...previous };
         delete next[product.id];
@@ -2210,6 +2420,9 @@ const [apiCategories, setApiCategories] = useState(() =>
       }
       await ownerProductService.remove(restaurant.id, product.id);
       setProducts((previous) => previous.filter((item) => item.id !== product.id));
+      setExpandedOptionRows((previous) =>
+        (Array.isArray(previous) ? previous : []).filter((id) => id !== product.id),
+      );
       toast.success("Dish removed.");
       await refreshCatalog();
     } catch (requestError) {
@@ -2397,6 +2610,17 @@ const [apiCategories, setApiCategories] = useState(() =>
     } finally {
       setInventorySaving(false);
     }
+  };
+
+  const toggleOptionRow = (productId) => {
+    if (!productId) return;
+    setExpandedOptionRows((previous) => {
+      const list = Array.isArray(previous) ? [...previous] : [];
+      if (list.includes(productId)) {
+        return list.filter((id) => id !== productId);
+      }
+      return [...list, productId];
+    });
   };
 
   const handleVisibilityToggle = (productId) => {
@@ -2936,99 +3160,185 @@ const [apiCategories, setApiCategories] = useState(() =>
                     (Number(product.base_price || 0) + taxAmount).toFixed(2)
                   );
 
+                  const optionGroups = deriveOptionGroupsFromProduct(product);
+                  const hasOptions = optionGroups.length > 0;
+                  const expanded = hasOptions && expandedOptionRows.includes(product.id);
+                  const optionSummary = hasOptions
+                    ? optionGroups
+                        .map((group) =>
+                          `${group.name}${group.choices?.length ? ` (${group.choices.length})` : ""}`,
+                        )
+                        .join(" • ")
+                    : "";
+
                   return (
-                    <tr key={product.id} className="hover:bg-slate-50/60">
-                      <td className="px-4 py-3">
-                        <div className="h-14 w-14 overflow-hidden rounded-lg border border-slate-200 bg-slate-100">
-                          <img
-                            src={displayImage}
-                            alt={product.title}
-                            className="h-full w-full object-cover"
-                            onError={(event) => {
-                              event.currentTarget.onerror = null;
-                              event.currentTarget.src = dishPlaceholderImage;
-                            }}
-                          />
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex flex-col">
-                          <span className="font-semibold text-slate-900">{product.title}</span>
-                          {product.description ? (
-                            <span className="text-xs text-slate-500 line-clamp-2">
-                              {product.description}
-                            </span>
-                          ) : null}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-sm text-slate-600">
-                        {product.category || "Unassigned"}
-                      </td>
-                      <td className="px-4 py-3 text-sm font-semibold text-slate-800">
-                        {formatCurrency(product.base_price)}
-                      </td>
-                      <td className="px-4 py-3 text-sm font-semibold text-emerald-700">
-                        {formatCurrency(priceWithTax)}
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex flex-col gap-2 text-sm">
-                          {showBranchInventory ? (
-                            <>
-                              <span className="font-semibold text-slate-800">
-                                {branchQuantity.toLocaleString("vi-VN")} in stock
-                              </span>
+                    <React.Fragment key={product.id}>
+                      <tr className={`hover:bg-slate-50/60 ${expanded ? "bg-slate-50/60" : ""}`}>
+                        <td className="px-4 py-3">
+                          <div className="h-14 w-14 overflow-hidden rounded-lg border border-slate-200 bg-slate-100">
+                            <img
+                              src={displayImage}
+                              alt={product.title}
+                              className="h-full w-full object-cover"
+                              onError={(event) => {
+                                event.currentTarget.onerror = null;
+                                event.currentTarget.src = dishPlaceholderImage;
+                              }}
+                            />
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-start gap-3">
+                            <div className="flex flex-1 flex-col">
+                              <span className="font-semibold text-slate-900">{product.title}</span>
+                              {product.description ? (
+                                <span className="text-xs text-slate-500 line-clamp-2">
+                                  {product.description}
+                                </span>
+                              ) : null}
+                              {hasOptions ? (
+                                <span className="mt-1 text-xs font-semibold text-emerald-600">
+                                  {optionSummary}
+                                </span>
+                              ) : null}
+                            </div>
+                            {hasOptions ? (
+                              <button
+                                type="button"
+                                aria-expanded={expanded}
+                                aria-label={`${expanded ? "Hide" : "Show"} options for ${
+                                  product.title
+                                }`}
+                                onClick={() => toggleOptionRow(product.id)}
+                                className="mt-1 inline-flex h-7 w-7 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:border-emerald-300 hover:text-emerald-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+                              >
+                                <svg
+                                  viewBox="0 0 20 20"
+                                  fill="currentColor"
+                                  className={`h-4 w-4 transition-transform ${expanded ? "rotate-180" : ""}`}
+                                >
+                                  <path
+                                    fillRule="evenodd"
+                                    d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 10.17l3.71-2.94a.75.75 0 0 1 .94 1.17l-4.24 3.36a.75.75 0 0 1-.94 0L5.25 8.27a.75.75 0 0 1-.02-1.06Z"
+                                    clipRule="evenodd"
+                                  />
+                                </svg>
+                              </button>
+                            ) : null}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-sm text-slate-600">
+                          {product.category || "Unassigned"}
+                        </td>
+                        <td className="px-4 py-3 text-sm font-semibold text-slate-800">
+                          {formatCurrency(product.base_price)}
+                        </td>
+                        <td className="px-4 py-3 text-sm font-semibold text-emerald-700">
+                          {formatCurrency(priceWithTax)}
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex flex-col gap-2 text-sm">
+                            {showBranchInventory ? (
+                              <>
+                                <span className="font-semibold text-slate-800">
+                                  {branchQuantity.toLocaleString("vi-VN")} in stock
+                                </span>
+                                <span className="text-xs text-slate-500">
+                                  Reserved: {branchReserved.toLocaleString("vi-VN")}
+                                </span>
+                              </>
+                            ) : (
                               <span className="text-xs text-slate-500">
-                                Reserved: {branchReserved.toLocaleString("vi-VN")}
+                                Select a branch filter to view stock levels.
                               </span>
-                            </>
-                          ) : (
-                            <span className="text-xs text-slate-500">
-                              Select a branch filter to view stock levels.
-                            </span>
-                          )}
-                          <button
-                            type="button"
-                            className="w-full rounded-lg border border-emerald-200 bg-emerald-50 py-2 text-xs font-semibold text-emerald-600 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
-                            onClick={() => openInventoryManager(product)}
-                            disabled={manageDisabled}
+                            )}
+                            <button
+                              type="button"
+                              className="w-full rounded-lg border border-emerald-200 bg-emerald-50 py-2 text-xs font-semibold text-emerald-600 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+                              onClick={() => openInventoryManager(product)}
+                              disabled={manageDisabled}
+                            >
+                              Manage
+                            </button>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span
+                            className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${statusStyles}`}
                           >
-                            Manage
-                          </button>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span
-                          className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${statusStyles}`}
-                        >
-                          {statusLabel}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <div className="flex items-center justify-end gap-3 text-xs font-semibold">
-                          <button
-                            className="text-emerald-600 hover:text-emerald-700"
-                            type="button"
-                            onClick={() => openEditModal(product)}
-                          >
-                            Edit
-                          </button>
-                          <button
-                            className="text-amber-600 hover:text-amber-700"
-                            type="button"
-                            onClick={() => handleVisibilityToggle(product.id)}
-                          >
-                            {hidden ? "Show" : "Hide"}
-                          </button>
-                          <button
-                            className="text-rose-500 hover:text-rose-600"
-                            type="button"
-                            onClick={() => handleDelete(product)}
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
+                            {statusLabel}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <div className="flex items-center justify-end gap-3 text-xs font-semibold">
+                            <button
+                              className="text-emerald-600 hover:text-emerald-700"
+                              type="button"
+                              onClick={() => openEditModal(product)}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              className="text-amber-600 hover:text-amber-700"
+                              type="button"
+                              onClick={() => handleVisibilityToggle(product.id)}
+                            >
+                              {hidden ? "Show" : "Hide"}
+                            </button>
+                            <button
+                              className="text-rose-500 hover:text-rose-600"
+                              type="button"
+                              onClick={() => handleDelete(product)}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                      {expanded ? (
+                        <tr className="bg-slate-50/70">
+                          <td colSpan={8} className="px-6 pb-6 pt-0">
+                            <div className="space-y-4 border-t border-slate-200 pt-4">
+                              {optionGroups.map((group) => (
+                                <div key={`${product.id}-${group.id}`} className="space-y-2">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span className="text-sm font-semibold text-slate-800">
+                                      {group.name}
+                                    </span>
+                                    <span className="text-[11px] uppercase tracking-wide text-slate-500">
+                                      {group.required ? "Required" : "Optional"} •{" "}
+                                      {group.allowMultiple ? "Multiple selection" : "Single selection"}
+                                    </span>
+                                  </div>
+                                  {group.description ? (
+                                    <p className="text-xs text-slate-500">{group.description}</p>
+                                  ) : null}
+                                  {Array.isArray(group.choices) && group.choices.length ? (
+                                    <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                                      {group.choices.map((choice) => (
+                                        <li
+                                          key={`${group.id}-${choice.id}`}
+                                          className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+                                        >
+                                          <span>{choice.label}</span>
+                                          <span className="text-xs font-semibold text-slate-500">
+                                            {formatPriceDeltaLabel(choice.priceDelta)}
+                                          </span>
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  ) : (
+                                    <p className="rounded-lg border border-dashed border-slate-200 bg-white px-3 py-2 text-xs text-slate-500">
+                                      No choices configured for this option group.
+                                    </p>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </td>
+                        </tr>
+                      ) : null}
+                    </React.Fragment>
                   );
                 })
               ) : (

@@ -381,19 +381,19 @@ CREATE TABLE IF NOT EXISTS product_option_groups (
 );
 CREATE INDEX IF NOT EXISTS idx_pog_product ON product_option_groups(product_id, is_active);
 
-CREATE TABLE IF NOT EXISTS branch_product_option_items (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  branch_id UUID NOT NULL,
-  product_id UUID NOT NULL,
-  option_item_id UUID NOT NULL,
-  is_available BOOLEAN NOT NULL DEFAULT TRUE,
-  price_delta_override NUMERIC(12,2),
-  is_visible BOOLEAN NOT NULL DEFAULT TRUE,
-  created_at TIMESTAMPTZ DEFAULT now(),
-  updated_at TIMESTAMPTZ DEFAULT now(),
-  UNIQUE (branch_id, product_id, option_item_id)
-);
-CREATE INDEX IF NOT EXISTS idx_bpoi_branch_product ON branch_product_option_items(branch_id, product_id, is_available, is_visible);
+-- CREATE TABLE IF NOT EXISTS branch_product_option_items (
+--   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+--   branch_id UUID NOT NULL,
+--   product_id UUID NOT NULL,
+--   option_item_id UUID NOT NULL,
+--   is_available BOOLEAN NOT NULL DEFAULT TRUE,
+--   price_delta_override NUMERIC(12,2),
+--   is_visible BOOLEAN NOT NULL DEFAULT TRUE,
+--   created_at TIMESTAMPTZ DEFAULT now(),
+--   updated_at TIMESTAMPTZ DEFAULT now(),
+--   UNIQUE (branch_id, product_id, option_item_id)
+-- );
+-- CREATE INDEX IF NOT EXISTS idx_bpoi_branch_product ON branch_product_option_items(branch_id, product_id, is_available, is_visible);
 
 CREATE TABLE IF NOT EXISTS branch_product_option_items (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1037,38 +1037,41 @@ WITH busan_branch_products AS (
     daily_limit,
     price_override
   )
-)
-INSERT INTO branch_products (
-  id,
-  branch_id,
-  product_id,
-  is_available,
-  is_visible,
-  is_featured,
-  display_order,
-  price_mode,
-  base_price_override,
-  local_name,
-  local_description
-)
-SELECT
-  branch_product_id,
-  branch_id,
-  product_id,
-  TRUE,
-  TRUE,
-  is_featured,
-  display_order,
-  CASE WHEN price_override IS NULL THEN 'inherit' ELSE 'override' END,
-  price_override,
-  NULL,
-  NULL
-FROM busan_branch_products
-ON CONFLICT (branch_id, product_id) DO UPDATE
-  SET is_visible = EXCLUDED.is_visible,
-      is_featured = EXCLUDED.is_featured,
-      updated_at = now();
+),
+upsert_branch_products AS (
+  INSERT INTO branch_products (
+    id,
+    branch_id,
+    product_id,
+    is_available,
+    is_visible,
+    is_featured,
+    display_order,
+    price_mode,
+    base_price_override,
+    local_name,
+    local_description
+  )
+  SELECT
+    branch_product_id,
+    branch_id,
+    product_id,
+    TRUE,
+    TRUE,
+    is_featured,
+    display_order,
+    CASE WHEN price_override IS NULL THEN 'inherit' ELSE 'override' END,
+    price_override,
+    NULL,
+    NULL
+  FROM busan_branch_products
+  ON CONFLICT (branch_id, product_id) DO UPDATE
+    SET is_visible = EXCLUDED.is_visible,
+        is_featured = EXCLUDED.is_featured,
+        updated_at = now()
+  RETURNING id AS branch_product_id
 
+)
 INSERT INTO inventory (
   branch_product_id,
   quantity,
@@ -1081,16 +1084,17 @@ INSERT INTO inventory (
   last_restock_at
 )
 SELECT
-  branch_product_id,
-  quantity,
-  reserved_qty,
-  min_stock,
-  daily_limit,
+  bp.branch_product_id,
+  bp.quantity,
+  bp.reserved_qty,
+  bp.min_stock,
+  bp.daily_limit,
   0,
   TRUE,
   TRUE,
   now()
-FROM busan_branch_products
+FROM busan_branch_products bp
+LEFT JOIN upsert_branch_products ubp ON ubp.branch_product_id = bp.branch_product_id
 ON CONFLICT (branch_product_id) DO UPDATE
   SET quantity = EXCLUDED.quantity,
       reserved_qty = EXCLUDED.reserved_qty,
@@ -1332,5 +1336,6 @@ SELECT id, DATE '2025-12-24', DATE '2025-12-24', DATE '2025-12-25', 'Giáng Sinh
 
 UNION ALL
 -- TẾT ÂM LỊCH (5 ngày nghỉ: 29/01–02/02/2025)
+
 SELECT id, DATE '2025-01-29', DATE '2025-01-29', DATE '2025-08-02',
        'Tết Nguyên Đán (Âm lịch: 29/01–08/02/2025)', TRUE FROM cal;

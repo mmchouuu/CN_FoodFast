@@ -96,8 +96,9 @@ const Cart = () => {
                       {item.dish.title}
                     </h3>
                     <p className="text-sm text-gray-500">
-                      Size: {item.size} - {item.dish.category}
+                      <span className="font-semibold">Size:</span> {item.size} - {item.dish.category}
                     </p>
+
                     {item.options?.length ? (
                       <div className="mt-1 space-y-1 text-xs text-gray-500">
                         {item.options.map((group) => (
@@ -108,11 +109,10 @@ const Cart = () => {
                             {(group.values || [])
                               .map((value) => {
                                 const delta = value.priceDelta || 0;
-                                return `${value.label}${
-                                  delta
+                                return `${value.label}${delta
                                     ? ` (+${currency}${delta.toLocaleString()})`
                                     : ""
-                                }`;
+                                  }`;
                               })
                               .join(", ") || "Standard"}
                           </p>
@@ -180,8 +180,7 @@ const Cart = () => {
 
         <div className="flex flex-wrap items-center justify-between gap-4 rounded-3xl bg-orange-50 px-6 py-4 text-sm text-orange-700">
           <span>
-            Delivery is free for wallet payments over {currency}{" "}
-            {(150000).toLocaleString()}.
+            Do you want to continue shopping?
           </span>
           <Link
             to="/restaurants"
@@ -222,11 +221,10 @@ const Cart = () => {
         <button
           onClick={() => navigate("/checkout")}
           disabled={!lineItems.length}
-          className={`w-full rounded-full px-6 py-3 text-sm font-semibold text-white transition ${
-            lineItems.length
+          className={`w-full rounded-full px-6 py-3 text-sm font-semibold text-white transition ${lineItems.length
               ? "bg-orange-500 hover:bg-orange-600"
               : "cursor-not-allowed bg-gray-300"
-          }`}
+            }`}
         >
           Proceed to payment
         </button>
