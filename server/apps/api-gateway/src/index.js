@@ -1,4 +1,4 @@
-﻿// api-gateway/src/index.js
+﻿﻿// api-gateway/src/index.js
 require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
@@ -11,12 +11,19 @@ const health = require('./health');
 const customersRoutes = require('./routes/customers.routes');
 const restaurantsRoutes = require('./routes/restaurants.routes');
 const adminRoutes = require('./routes/admin.routes');
+
+const ordersRoutes = require('./routes/orders.routes');
+const paymentsRoutes = require('./routes/payments.routes');
 const customerOrderRoutes = require('./routes/orders.customer.routes');
 const ownerOrderRoutes = require('./routes/orders.owner.routes');
 const adminOrderRoutes = require('./routes/orders.admin.routes');
 
+
 const app = express();
-app.use(bodyParser.json({ limit: '25mb' }));
+
+// Accept larger order payloads (options, metadata, etc.)
+app.use(bodyParser.json({ limit: '50mb' }));
+app.use(bodyParser.urlencoded({ limit: '50mb', extended: true }));
 app.use((req, res, next) => {
   const origin = req.headers.origin || '*';
   res.header('Access-Control-Allow-Origin', origin);
@@ -38,9 +45,14 @@ app.use('/api/customers', customersRoutes);
 app.use('/api/customer', customersRoutes);
 app.use('/api/restaurants', restaurantsRoutes);
 app.use('/api/admin', adminRoutes);
+
+app.use('/api/orders', ordersRoutes);
+app.use('/api/payments', paymentsRoutes);
+
 app.use('/customer/orders', customerOrderRoutes);
 app.use('/owner/orders', ownerOrderRoutes);
 app.use('/admin/orders', adminOrderRoutes);
+
 
 app.get('/health', health);
 

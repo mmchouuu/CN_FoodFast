@@ -230,6 +230,96 @@ async function createPromotion(restaurantId, payload, req) {
   return res.data;
 }
 
+async function listRestaurantProducts(restaurantId, params = {}, req) {
+  const res = await productClient.get(`/${restaurantId}/products`, {
+    params,
+    headers: buildHeaders(req),
+  });
+  return res.data;
+}
+
+async function createRestaurantProduct(restaurantId, payload, req) {
+  const res = await productClient.post(`/${restaurantId}/products`, payload, {
+    headers: buildHeaders(req),
+  });
+  return res.data;
+}
+
+async function updateRestaurantProduct(restaurantId, productId, payload, req) {
+  const res = await productClient.patch(
+    `/${restaurantId}/products/${productId}`,
+    payload,
+    { headers: buildHeaders(req) },
+  );
+  return res.data;
+}
+
+async function deleteRestaurantProduct(restaurantId, productId, req) {
+  const res = await productClient.delete(`/${restaurantId}/products/${productId}`, {
+    headers: buildHeaders(req),
+  });
+  return res.data;
+}
+
+async function listRestaurantInventory(restaurantId, req) {
+  const res = await productClient.get(`/${restaurantId}/inventory`, {
+    headers: buildHeaders(req),
+  });
+  return res.data;
+}
+
+async function listProductInventory(restaurantId, productId, req) {
+  const res = await productClient.get(`/${restaurantId}/products/${productId}/inventory`, {
+    headers: buildHeaders(req),
+  });
+  return res.data;
+}
+
+async function listBranchInventory(restaurantId, branchId, req) {
+  const res = await productClient.get(`/${restaurantId}/branches/${branchId}/inventory`, {
+    headers: buildHeaders(req),
+  });
+  return res.data;
+}
+
+async function upsertBranchInventory(restaurantId, branchId, productId, payload, req) {
+  const res = await productClient.put(
+    `/${restaurantId}/branches/${branchId}/inventory/${productId}`,
+    payload,
+    { headers: buildHeaders(req) },
+  );
+  return res.data;
+}
+
+async function listCategories(params = {}, req) {
+  const res = await categoryClient.get('/', {
+    params,
+    headers: buildHeaders(req),
+  });
+  return res.data;
+}
+
+async function createCategory(payload, req) {
+  const res = await categoryClient.post('/', payload, {
+    headers: buildHeaders(req),
+  });
+  return res.data;
+}
+
+async function updateCategory(id, payload, req) {
+  const res = await categoryClient.patch(`/${id}`, payload, {
+    headers: buildHeaders(req),
+  });
+  return res.data;
+}
+
+async function deleteCategory(id, req) {
+  const res = await categoryClient.delete(`/${id}`, {
+    headers: buildHeaders(req),
+  });
+  return res.data;
+}
+
 module.exports = {
   signupOwner,
   verifyOwner,

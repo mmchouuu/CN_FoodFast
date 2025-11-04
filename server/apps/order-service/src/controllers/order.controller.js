@@ -1,77 +1,125 @@
-// const service = require('../services/order.service');
+const OrderService = require('../services/order.service');
 
-// async function create(req,res,next){
-//   try{
-//     const ord = await service.create(req.body);
-//     res.status(201).json(ord);
-//   }catch(err){ next(err); }
-// }
+const respondWithError = (res, error) => {
+  const status =
+    Number.isInteger(error?.statusCode) && error.statusCode >= 400 && error.statusCode < 600
+      ? error.statusCode
+      : 500;
+  const message =
+    status >= 500
+      ? 'Internal server error'
+      : error?.message || 'Request validation failed';
 
-// async function get(req,res,next){
-//   try{
-//     const ord = await service.get(req.params.id);
-//     if(!ord) return res.status(404).json({error:'not found'});
-//     res.json(ord);
-//   }catch(err){ next(err); }
-// }
+  if (status >= 500) {
+    console.error('[order-service] controller error:', error);
+  }
 
-// module.exports = { create, get };
+  return res.status(status).json({ error: message });
+};
 
-import * as OrderService from "../services/order.service.js";
-
-export const getAllOrders = async (req, res) => {
+exports.getAllOrders = async (_req, res) => {
   try {
     const orders = await OrderService.getAllOrders();
     res.json(orders);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+  } catch (error) {
+    respondWithError(res, error);
   }
 };
 
-export const getOrderById = async (req, res) => {
+exports.getOrderById = async (req, res) => {
   try {
     const order = await OrderService.getOrderById(req.params.id);
-    if (!order) return res.status(404).json({ error: "Order not found" });
+    if (!order) {
+      return res.status(404).json({ error: 'Order not found' });
+    }
     res.json(order);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+  } catch (error) {
+    respondWithError(res, error);
   }
 };
 
-export const createOrder = async (req, res) => {
+exports.createOrder = async (req, res) => {
   try {
-    const order = await OrderService.createOrder(req.body);
+    const payload = req.body || {};
+    const userIdFromToken =
+      req.user?.id || req.user?.userId || req.user?.user_id || req.user?.sub || null;
+    const totalAmount = payload.total_amount ?? payload.totalAmount;
+
+    if (totalAmount === undefined || totalAmount === null) {
+      return res.status(400).json({ error: 'total_amount is required' });
+    }
+
+    const normalizedUserId = userIdFromToken || payload.user_id || payload.userId;
+
+    if (!normalizedUserId) {
+      return res.status(400).json({ error: 'User context is missing' });
+    }
+
+    const normalizedPaymentMethod =
+      typeof payload.payment_method === 'string'
+        ? payload.payment_method
+        : typeof payload.paymentMethod === 'string'
+        ? payload.paymentMethod
+        : typeof payload.payment?.method === 'string'
+        ? payload.payment.method
+        : null;
+
+    const selectedAddress =
+      payload.selectedAddress ||
+      payload.selected_address ||
+      payload.delivery_address ||
+      payload.shipping_address ||
+      null;
+
+    const orderPayload = {
+      ...payload,
+      user_id: normalizedUserId,
+    };
+
+    if (selectedAddress) {
+      orderPayload.selectedAddress = selectedAddress;
+    }
+
+    if (normalizedPaymentMethod) {
+      orderPayload.payment_method = normalizedPaymentMethod;
+    }
+
+    const order = await OrderService.createOrder(
+      orderPayload,
+      req.user || null,
+    );
     res.status(201).json(order);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+  } catch (error) {
+    respondWithError(res, error);
   }
 };
 
-export const updateOrderStatus = async (req, res) => {
+exports.updateOrderStatus = async (req, res) => {
   try {
     const order = await OrderService.updateOrderStatus(req.params.id, req.body.status);
-    if (!order) return res.status(404).json({ error: "Order not found" });
+    if (!order) {
+      return res.status(404).json({ error: 'Order not found' });
+    }
     res.json(order);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+  } catch (error) {
+    respondWithError(res, error);
   }
 };
 
-export const deleteOrder = async (req, res) => {
+exports.deleteOrder = async (req, res) => {
   try {
     const result = await OrderService.deleteOrder(req.params.id);
     res.json(result);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+  } catch (error) {
+    respondWithError(res, error);
   }
 };
 
-export const getOrdersByUser = async (req, res) => {
+exports.getOrdersByUser = async (req, res) => {
   try {
     const orders = await OrderService.getOrdersByUserId(req.params.userId);
     res.json(orders);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+  } catch (error) {
+    respondWithError(res, error);
   }
 };
-

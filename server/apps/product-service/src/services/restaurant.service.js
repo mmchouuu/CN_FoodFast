@@ -1,4 +1,4 @@
-﻿const { withTransaction } = require('../db');
+const { withTransaction } = require('../db');
 const restaurantRepository = require('../repositories/restaurant.repository');
 const taxRepository = require('../repositories/tax.repository');
 const { generatePassword } = require('../utils/password');

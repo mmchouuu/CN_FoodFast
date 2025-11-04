@@ -1,4 +1,4 @@
-﻿const express = require('express');
+const express = require('express');
 const jwt = require('jsonwebtoken');
 const customerController = require('../controllers/customer.controller');
 
@@ -42,5 +42,9 @@ router.get('/me/addresses', authMiddleware, customerController.listAddresses);
 router.post('/me/addresses', authMiddleware, customerController.createAddress);
 router.put('/me/addresses/:id', authMiddleware, customerController.updateAddress);
 router.delete('/me/addresses/:id', authMiddleware, customerController.deleteAddress);
+
+router.get('/addresses', authMiddleware, customerController.listAddresses);
+router.post('/addresses', authMiddleware, customerController.createAddress);
+router.delete('/addresses/:id', authMiddleware, customerController.deleteAddress);
 
 module.exports = router;

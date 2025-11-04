@@ -224,22 +224,20 @@ const Orders = () => {
             </select>
           </div>
 
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500">
-              Search
-            </label>
-            <div className="relative mt-2">
-              <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-slate-400">
-                🔍
-              </span>
-              <input
-                value={searchValue}
-                onChange={(event) => setSearchValue(event.target.value)}
-                placeholder="Search order ID or recipient"
-                className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/60"
-              />
-            </div>
-          </div>
+          <div className="flex justify-start">
+  <div className="w-full max-w-xs">
+    <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500">
+      Search
+    </label>
+    <input
+      value={searchValue}
+      onChange={(event) => setSearchValue(event.target.value)}
+      placeholder="Search order ID or recipient"
+      className="mt-2 w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/60"
+    />
+  </div>
+</div>
+
         </div>
       </header>
 

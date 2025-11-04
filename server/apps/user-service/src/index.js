@@ -19,6 +19,21 @@ app.use(
   })
 );
 
+// Middleware
+// app.use(express.json());
+// app.use(bodyParser.json());
+// app.use(morgan('dev'));
+
+// // Health check
+// app.use((req, res, next) => {
+//   if (req.path === '/health') return res.status(200).send({ status: 'ok' });
+//   next();
+// });
+
+
+// // Routes
+// app.use('/api/users', userRoutes);
+// app.use('/api/customers/me/addresses', customerAddressRoutes);
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
 });

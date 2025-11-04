@@ -4,6 +4,10 @@ function getUserId(req) {
   return req.user?.userId || req.headers['x-user-id'] || null;
 }
 
+function getUserId(req) {
+  return req.headers['x-user-id'] || (req.body && req.body.user_id) || null;
+}
+
 async function register(req, res, next) {
   try {
     const result = await customerService.registerCustomer(req.body || {});

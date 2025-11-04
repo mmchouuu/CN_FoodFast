@@ -93,36 +93,43 @@ const Checkout = () => {
   const paymentMethods = useMemo(
     () => [
       {
-        id: "wallet",
-        label: "Cash",
-        description: "Pay with cash when the courier arrives.",
+        id: "cod",
+        label: "Cash on delivery (COD)",
+        description: "Hand the cash to our courier when your food arrives.",
       },
       {
-        id: "bank",
-        label: "Bank account",
-        description: "Link a bank account for secure, cashless payments.",
+        id: "wallet",
+        label: "FoodFast wallet",
+        description: "Use your wallet balance linked to bank accounts.",
       },
       {
         id: "card",
         label: "Debit/Credit card",
-        description: "Save a card for quick, secure checkout.",
+        description: "Pay securely with your saved cards.",
       },
     ],
     [],
   );
 
   useEffect(() => {
-    const normalized = typeof method === "string" ? method.trim().toLowerCase() : "";
-    if (normalized === "bank" || normalized === "bank_transfer") {
-      if (bankAccounts.length === 0) {
-        setMethod("wallet");
-        return;
-      }
+    // const normalized = typeof method === "string" ? method.trim().toLowerCase() : "";
+    // if (normalized === "bank" || normalized === "bank_transfer") {
+    //   if (bankAccounts.length === 0) {
+    //     setMethod("wallet");
+    //     return;
+    //   }
+    // }
+    // if (normalized === "card" && cardAccounts.length === 0) {
+    //   setMethod("wallet");
+    const fallbackMethod = paymentMethods[0]?.id || "cod";
+    if (method === "wallet" && bankAccounts.length === 0) {
+      setMethod(fallbackMethod);
+      return;
     }
-    if (normalized === "card" && cardAccounts.length === 0) {
-      setMethod("wallet");
+    if (method === "card" && cardAccounts.length === 0) {
+      setMethod(fallbackMethod);
     }
-  }, [method, bankAccounts.length, cardAccounts.length, setMethod]);
+  }, [method, bankAccounts.length, cardAccounts.length, setMethod, paymentMethods]);
 
   const handleApplyDiscount = () => {
     applyDiscountCode(discountCode);
@@ -140,9 +147,14 @@ const Checkout = () => {
     setIsPlacingOrder(true);
     const paymentMethodForSubmit = normalizePaymentMethodForSubmit(method);
     try {
-      await placeOrder({ paymentMethod: paymentMethodForSubmit, address: selectedAddress });
-      toast.success("Order confirmed! We're preparing your meal.");
-      navigate("/orders/current");
+
+      // await placeOrder({ paymentMethod: paymentMethodForSubmit, address: selectedAddress });
+      // toast.success("Order confirmed! We're preparing your meal.");
+      // navigate("/orders/current");
+
+      await placeOrder({ paymentMethod: method, address: selectedAddress });
+      toast.success("Order successful");
+      navigate("/my-orders");
     } catch (error) {
       const message =
         error?.message || "We could not place your order. Please try again.";
@@ -432,22 +444,23 @@ const Checkout = () => {
           </p>
           <div className="mt-6 grid gap-4 md:grid-cols-3">
             {paymentMethods.map((option) => {
-              const isSelected = activePaymentMethodId === option.id;
-              const isBank = option.id === "bank";
+              // const isSelected = activePaymentMethodId === option.id;
+              // const isBank = option.id === "bank";
+              const isSelected = method === option.id;
+              const isWallet = option.id === "wallet";
               const isCard = option.id === "card";
-              const bankUnavailable = isBank && bankAccounts.length === 0;
+              const walletUnavailable = isWallet && bankAccounts.length === 0;
               const cardUnavailable = isCard && cardAccounts.length === 0;
-              const isDisabled = bankUnavailable || cardUnavailable;
+              const isDisabled = walletUnavailable || cardUnavailable;
 
               const cardCountLabel =
                 cardAccounts.length === 1
                   ? "1 saved card ready to use."
                   : `${cardAccounts.length} saved cards ready to use.`;
-              const bankCountLabel =
+              const walletBankLabel =
                 bankAccounts.length === 1
                   ? "1 linked account ready to use."
                   : `${bankAccounts.length} linked accounts ready to use.`;
-
               return (
                 <button
                   key={option.id}
@@ -472,10 +485,9 @@ const Checkout = () => {
                   <p className="mt-2 text-xs text-gray-500">
                     {option.description}
                   </p>
-
-                  {isBank ? (
+                  {isWallet ? (
                     <p className="mt-2 text-xs">
-                      {bankUnavailable ? (
+                      {walletUnavailable ? (
                         <span
                           className="cursor-pointer text-orange-500 underline underline-offset-2"
                           onClick={(event) => {
@@ -488,7 +500,7 @@ const Checkout = () => {
                         </span>
                       ) : (
                         <span className="text-emerald-600">
-                          {bankCountLabel}
+                          {walletBankLabel}
                         </span>
                       )}
                     </p>
@@ -596,7 +608,7 @@ const Checkout = () => {
               : "bg-orange-500 hover:bg-orange-600"
           }`}
         >
-          {isPlacingOrder ? "Processing..." : "Place order"}
+          {isPlacingOrder ? "Processing..." : "Proceed to Payment"}
         </button>
         <p className="mt-3 text-center text-xs text-gray-400">
           By placing an order you agree to FoodFast's terms of use.

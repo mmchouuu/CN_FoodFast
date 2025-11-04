@@ -89,6 +89,25 @@ export const authService = {
     await api.delete(`${basePath}/addresses/${addressId}`, config);
     return true;
   },
+
+  async createAddress(payload) {
+    const config = {};
+    if (payload?.user_id) {
+      config.params = { user_id: payload.user_id };
+    }
+    const { data } = await api.post(`${basePath}/addresses`, payload, config);
+    return data;
+  },
+
+  async deleteAddress(addressId, { userId } = {}) {
+    const config = {};
+    if (userId) {
+      config.params = { user_id: userId };
+    }
+    await api.delete(`${basePath}/addresses/${addressId}`, config);
+    return true;
+  },
+
 };
 
 export default authService;

@@ -207,7 +207,18 @@ async function listPayments(filters) {
   return paymentModel.listPayments(filters);
 }
 
+async function getPaymentForUser(paymentId, userId) {
+  if (!paymentId) {
+    throw Object.assign(new Error('payment id is required'), { statusCode: 400 });
+  }
+  if (!userId) {
+    throw Object.assign(new Error('user id is required'), { statusCode: 401 });
+  }
+  return paymentModel.getPaymentForUser(paymentId, userId);
+}
+
 module.exports = {
   handlePaymentPending,
   listPayments,
+  getPaymentForUser,
 };

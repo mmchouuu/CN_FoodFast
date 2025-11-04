@@ -3,6 +3,27 @@ const config = require('./config');
 const app = require('./app');
 const { startPaymentConsumer } = require('./consumers/payment.consumer');
 
+
+const app = express();
+// Keep JSON body limit aligned with API gateway to avoid 413 errors
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
+app.use(morgan('dev'));
+
+app.use('/customer/orders', auth, requireRoles(['customer', 'user']), customerOrderRoutes);
+app.use('/owner/orders', auth, requireRoles(['owner', 'manager']), ownerOrderRoutes);
+app.use('/admin/orders', auth, requireRoles(['admin', 'superadmin']), adminOrderRoutes);
+app.get('/health', (req, res) => res.json({ ok: true, service: 'order-service' }));
+
+// basic error handler
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, next) => {
+  console.error('[order-service] unhandled error', err);
+  const status = err.status || err.httpStatus || 500;
+  const message = err.message || 'Internal server error';
+  res.status(status).json({ error: message });
+});
+
 const port = config.PORT || 3003;
 
 app.listen(port, () => {

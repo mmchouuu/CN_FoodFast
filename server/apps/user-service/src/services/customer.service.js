@@ -32,6 +32,25 @@ async function ensureCustomerRole(client) {
   return role;
 }
 
+
+// const adaptAddress = (record) => ({
+//   id: record.id,
+//   label: record.label || (record.is_primary ? 'Primary' : 'Address'),
+//   recipient: record.recipient || null,
+//   phone: record.phone || null,
+//   street: record.street,
+//   ward: record.ward || null,
+//   district: record.district || null,
+//   city: record.city || null,
+//   instructions: record.instructions || null,
+//   isDefault: record.is_primary === true,
+//   createdAt: record.created_at,
+//   updatedAt: record.updated_at,
+// });
+
+
+// Customer register -> gửi OTP để verify email
+
 async function registerCustomer(payload) {
   const { email, password, firstName, lastName, phone } = payload || {};
   if (!email || !password) {
@@ -58,6 +77,7 @@ async function registerCustomer(payload) {
           lastName: lastName ?? existing.last_name,
           phone: phone ?? existing.phone,
           isActive: true,
+          emailVerified: false,
         },
         client,
       );

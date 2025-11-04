@@ -110,39 +110,60 @@ router.use(
   createProxyMiddleware({
     target: PAYMENT_SERVICE,
     changeOrigin: true,
-    pathRewrite: { '^/api/payments': '/api/payments' },
+
+//     pathRewrite: { '^/api/payments': '/api/payments' },
+
+    pathRewrite: (path, req) => {
+      const original = req.originalUrl || path || '';
+      const [pathnameRaw, search = ''] = original.split('?');
+      const pathname = pathnameRaw || '/api/payments';
+      return search ? `${pathname}?${search}` : pathname;
+    },
+
+
     onProxyReq(proxyReq, req) {
       if (req.user?.userId) {
         proxyReq.setHeader('x-user-id', req.user.userId);
       }
-      if (req.user?.role) {
-        proxyReq.setHeader('x-user-role', req.user.role);
-      }
-      if (Array.isArray(req.user?.roles) && req.user.roles.length) {
-        proxyReq.setHeader('x-user-roles', JSON.stringify(req.user.roles));
-      }
-      if (req.user?.email) {
-        proxyReq.setHeader('x-user-email', req.user.email);
-      }
-      if (req.user?.name) {
-        proxyReq.setHeader('x-user-name', req.user.name);
-      }
-      if (
-        req.body &&
-        Object.keys(req.body).length &&
-        req.headers['content-type']?.includes('application/json') &&
-        ['POST', 'PUT', 'PATCH'].includes(req.method?.toUpperCase())
-      ) {
-        const bodyData = JSON.stringify(req.body);
-        proxyReq.setHeader('Content-Type', 'application/json');
-        proxyReq.setHeader('Content-Length', Buffer.byteLength(bodyData));
-        proxyReq.write(bodyData);
-        proxyReq.end();
-      }
+
+//       if (req.user?.role) {
+//         proxyReq.setHeader('x-user-role', req.user.role);
+//       }
+//       if (Array.isArray(req.user?.roles) && req.user.roles.length) {
+//         proxyReq.setHeader('x-user-roles', JSON.stringify(req.user.roles));
+//       }
+//       if (req.user?.email) {
+//         proxyReq.setHeader('x-user-email', req.user.email);
+//       }
+//       if (req.user?.name) {
+//         proxyReq.setHeader('x-user-name', req.user.name);
+//       }
+//       if (
+//         req.body &&
+//         Object.keys(req.body).length &&
+//         req.headers['content-type']?.includes('application/json') &&
+//         ['POST', 'PUT', 'PATCH'].includes(req.method?.toUpperCase())
+//       ) {
+//         const bodyData = JSON.stringify(req.body);
+//         proxyReq.setHeader('Content-Type', 'application/json');
+//         proxyReq.setHeader('Content-Length', Buffer.byteLength(bodyData));
+//         proxyReq.write(bodyData);
+//         proxyReq.end();
+//       }
+//     },
+//     onError: (err, req, res) =>
+//       res.status(502).json({ error: 'bad gateway', detail: err.message }),
+//   }),
+// );
+
     },
-    onError: (err, req, res) =>
-      res.status(502).json({ error: 'bad gateway', detail: err.message }),
-  }),
+
+    onError: (err, req, res) => {
+      console.error('[Gateway → PaymentService]', err.message);
+      res.status(502).json({ error: 'bad gateway', detail: err.message });
+    },
+  })
 );
+
 
 module.exports = router;

@@ -60,7 +60,6 @@ const CustomerProfilePanel = ({ open, onClose, onLogout }) => {
   }));
   const [savingBankAccount, setSavingBankAccount] = useState(false);
   const [loadingBankAccounts, setLoadingBankAccounts] = useState(false);
-
   const [showCardForm, setShowCardForm] = useState(false);
   const [savingCard, setSavingCard] = useState(false);
   const [cardForm, setCardForm] = useState(() => ({
@@ -555,7 +554,7 @@ const CustomerProfilePanel = ({ open, onClose, onLogout }) => {
 
                   className="rounded-full border border-orange-100 px-3 py-1 text-xs font-semibold text-gray-500 transition hover:border-red-200 hover:text-red-500"
                 >
-                  Xoa
+                  Delete
                 </button>
               </div>
             </div>
@@ -736,13 +735,11 @@ const CustomerProfilePanel = ({ open, onClose, onLogout }) => {
   const renderPaymentSection = () => {
     const hasLinkedBank = bankAccounts.length > 0;
     const hasLinkedCard = cardAccounts.length > 0;
-
     return (
       <div className="space-y-4 rounded-3xl bg-white p-6 shadow">
         <p className="text-sm text-gray-500">
           Manage saved payment methods for faster checkout.
         </p>
-
         <div className="rounded-2xl border border-orange-100 bg-orange-50/40 p-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
