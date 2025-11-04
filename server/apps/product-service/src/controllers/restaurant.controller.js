@@ -27,7 +27,7 @@ async function getByOwner(req, res, next) {
     const { ownerId } = req.params;
     const restaurant = await restaurantService.getRestaurantDetailsByOwner(ownerId);
     if (!restaurant) {
-      return res.status(404).json({ message: 'Restaurant not found' });
+      return res.json(null);
     }
     return res.json(restaurant);
   } catch (error) {

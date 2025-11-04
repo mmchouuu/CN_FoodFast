@@ -576,37 +576,6 @@ async function upsertBranchInventory(req, res, next) {
   } catch (err) { return sendCatalogError(err, res, next); }
 }
 
-async function listCategories(req, res, next) {
-  try {
-    const result = await restaurantClient.listCategories(
-      { ...req.query, restaurant_id: req.params.id || req.query?.restaurant_id },
-      req,
-    );
-    return res.json(result);
-  } catch (err) { return sendCatalogError(err, res, next); }
-}
-
-async function createCategory(req, res, next) {
-  try {
-    const result = await restaurantClient.createCategory(req.body, req);
-    return res.status(201).json(result);
-  } catch (err) { return sendCatalogError(err, res, next); }
-}
-
-async function updateCategory(req, res, next) {
-  try {
-    const result = await restaurantClient.updateCategory(req.params.categoryId || req.params.id, req.body, req);
-    return res.json(result);
-  } catch (err) { return sendCatalogError(err, res, next); }
-}
-
-async function deleteCategory(req, res, next) {
-  try {
-    await restaurantClient.deleteCategory(req.params.categoryId || req.params.id, req);
-    return res.status(204).end();
-  } catch (err) { return sendCatalogError(err, res, next); }
-}
-
 module.exports = {
   ownerSignup,
   ownerVerify,
