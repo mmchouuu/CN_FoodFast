@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { useAppContext } from "../context/AppContext";
 import {
@@ -13,6 +13,92 @@ const StatusDot = ({ completed }) => (
     }`}
   />
 );
+
+const ORDER_STATUS_STEPS = [
+  { key: "pending", label: "Pending" },
+  { key: "confirmed", label: "Confirmed" },
+  { key: "preparing", label: "Preparing" },
+  { key: "ready", label: "Ready" },
+  { key: "delivering", label: "Delivering" },
+  { key: "completed", label: "Completed" },
+];
+
+const normaliseStatus = (value) =>
+  typeof value === "string" ? value.trim().toLowerCase() : "";
+
+const buildTrackingSteps = (status, placedAt) => {
+  const normalisedStatus = normaliseStatus(status);
+  const activeIndex = ORDER_STATUS_STEPS.findIndex(
+    (step) => step.key === normalisedStatus,
+  );
+  const placedTime = placedAt
+    ? new Date(placedAt).toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : null;
+
+  return ORDER_STATUS_STEPS.map((step, index) => {
+    const completed =
+      activeIndex >= 0 ? index <= activeIndex : index === 0;
+
+    let timestamp = "Pending";
+    if (index === 0) {
+      timestamp = placedTime || "Pending";
+    } else if (activeIndex === index) {
+      timestamp = "In progress";
+    } else if (index < activeIndex) {
+      timestamp = "Completed";
+    }
+
+    return {
+      id: `step-${step.key}`,
+      label: step.label,
+      completed,
+      timestamp,
+    };
+  });
+};
+
+const parseAmount = (value) => {
+  if (value === null || value === undefined) return 0;
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  if (typeof value === "string") {
+    const normalised = value.replace(/[^0-9.-]+/g, "");
+    const parsed = Number(normalised);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
+};
+
+const resolveTotals = (order) => {
+  const raw = order?.raw || {};
+  const metadataPricing =
+    order?.metadata && typeof order.metadata.pricing === "object"
+      ? order.metadata.pricing
+      : {};
+
+  const subtotal = parseAmount(
+    order?.subtotal ?? raw.items_subtotal ?? metadataPricing.items_subtotal,
+  );
+  const shippingFee = parseAmount(
+    order?.shippingFee ?? raw.shipping_fee ?? metadataPricing.shipping_fee,
+  );
+  const vat = parseAmount(
+    order?.taxTotal ?? raw.tax_total ?? metadataPricing.tax_total,
+  );
+  let discount = parseAmount(order?.discount ?? metadataPricing.discount);
+  if (!discount) {
+    const orderDiscount = parseAmount(raw.order_discount);
+    const itemsDiscount = parseAmount(raw.items_discount);
+    discount = orderDiscount + itemsDiscount;
+  }
+  const total = parseAmount(
+    order?.totalAmount ?? raw.total_amount ?? metadataPricing.total_amount ?? metadataPricing.total,
+  );
+
+  return { subtotal, shippingFee, vat, discount, total };
+};
 
 const CurrentOrder = () => {
   const { activeOrders, getRestaurantById, getDishById, currency } =
@@ -52,7 +138,11 @@ const CurrentOrder = () => {
     restaurantPlaceholderImage;
   const courier = order.courier || {};
   const deliveryAddress = order.deliveryAddress || {};
-  const hasTimeline = Array.isArray(order.timeline) && order.timeline.length > 0;
+  const trackingSteps = useMemo(
+    () => buildTrackingSteps(order.status, order.placedAt),
+    [order.status, order.placedAt],
+  );
+  const totals = useMemo(() => resolveTotals(order), [order]);
   const deliveryAddressLine = [
     deliveryAddress.street,
     deliveryAddress.ward,
@@ -106,29 +196,21 @@ const CurrentOrder = () => {
             Live order tracking
           </h2>
           <div className="mt-6 space-y-4">
-            {hasTimeline ? (
-              order.timeline.map((step) => (
-                <div key={step.id || step.label} className="flex items-start gap-4">
-                  <StatusDot completed={step.completed} />
-                  <div>
-                    <p
-                      className={`text-sm font-semibold ${
-                        step.completed ? "text-gray-900" : "text-gray-500"
-                      }`}
-                    >
-                      {step.label}
-                    </p>
-                    <p className="text-xs text-gray-400">
-                      {step.timestamp || "Pending"}
-                    </p>
-                  </div>
+            {trackingSteps.map((step) => (
+              <div key={step.id} className="flex items-start gap-4">
+                <StatusDot completed={step.completed} />
+                <div>
+                  <p
+                    className={`text-sm font-semibold ${
+                      step.completed ? "text-gray-900" : "text-gray-500"
+                    }`}
+                  >
+                    {step.label}
+                  </p>
+                  <p className="text-xs text-gray-400">{step.timestamp}</p>
                 </div>
-              ))
-            ) : (
-              <p className="text-sm text-gray-500">
-                Tracking updates will appear here as soon as the restaurant progresses your order.
-              </p>
-            )}
+              </div>
+            ))}
           </div>
         </div>
 
@@ -181,21 +263,28 @@ const CurrentOrder = () => {
               <span>Subtotal</span>
               <span className="font-semibold">
                 {currency}
-                {order.subtotal.toLocaleString()}
+                {totals.subtotal.toLocaleString()}
               </span>
             </div>
             <div className="flex justify-between text-gray-500">
               <span>Shipping</span>
               <span>
                 {currency}
-                {order.shippingFee.toLocaleString()}
+                {totals.shippingFee.toLocaleString()}
+              </span>
+            </div>
+            <div className="flex justify-between text-gray-500">
+              <span>VAT</span>
+              <span>
+                {currency}
+                {totals.vat.toLocaleString()}
               </span>
             </div>
             <div className="flex justify-between text-green-600">
               <span>Discount</span>
               <span>
                 -{currency}
-                {order.discount.toLocaleString()}
+                {totals.discount.toLocaleString()}
               </span>
             </div>
           </div>

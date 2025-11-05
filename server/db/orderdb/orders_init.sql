@@ -36,7 +36,6 @@ CREATE TABLE IF NOT EXISTS orders (
   -- Địa chỉ: soft ref + snapshot text để không "trôi"
   shipping_address_id UUID,            -- soft ref: user-service.user_addresses.id
   shipping_address_snapshot JSONB,     -- {"full_name","phone","street",...}
-  metadata JSONB DEFAULT '{}'::jsonb,
 
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -155,8 +154,8 @@ CREATE INDEX IF NOT EXISTS idx_oprom_order ON order_promotions(order_id);
 CREATE TABLE IF NOT EXISTS deliveries (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   order_id UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
-  delivery_status VARCHAR(30) NOT NULL DEFAULT 'preparing'
-    CHECK (delivery_status IN ('preparing','dispatched','arriving','delivered','failed','cancelled')),
+  delivery_status VARCHAR(30) NOT NULL DEFAULT 'pending'
+    CHECK (delivery_status IN ('pending','preparing','dispatched','arriving','delivered','failed','cancelled')),
   delivery_address TEXT,
   contact_name VARCHAR(150),
   contact_phone VARCHAR(30),

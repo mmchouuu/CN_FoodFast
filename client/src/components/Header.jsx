@@ -8,6 +8,7 @@ const navigationItems = [
   { label: "Home", href: "/" },
   { label: "Restaurants", href: "/restaurants" },
   { label: "My Orders", href: "/orders/current" },
+  { label: "Order History", href: "/orders/history" },
 ];
 
 const BellIcon = ({ className }) => (

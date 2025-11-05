@@ -456,44 +456,11 @@ const buildFallbackPricing = (payload) => {
     throw new ValidationError('order items are required');
   }
 
-  // Apply option price adjustments (e.g., size Large upcharge, toppings) into unit price if not already included
-  for (const item of items) {
-    const optionsDelta = ensureArray(item.options).reduce(
-      (acc, opt) => acc + toNumber(opt.price_delta, 0),
-      0,
-    );
-    if (optionsDelta !== 0) {
-      const baseUnit = toNumber(item.unit_price, 0);
-      item.unit_price = Number((baseUnit + optionsDelta).toFixed(2));
-      // If total_price was not explicitly sent, recompute a line total from unit*qty
-      const recomputedLine = Number((item.unit_price * toNumber(item.quantity, 0)).toFixed(2));
-      if (!item.total_price || item.total_price === 0) {
-        item.total_price = recomputedLine;
-      }
-    }
-  }
-
   const orderDiscounts = normaliseAdjustments(payload.discounts, 'discount');
   const surcharges = normaliseAdjustments(payload.surcharges, 'surcharge');
   const promotions = normaliseAdjustments(payload.promotions, 'promotion');
-  let orderTaxes = normaliseOrderTaxes(payload.order_taxes);
+  const orderTaxes = normaliseOrderTaxes(payload.order_taxes);
   const delivery = normaliseDeliveryPayload(payload.delivery);
-
-  // If client didn't provide tax breakdowns, apply a default 7% sales tax over items subtotal
-  if (!orderTaxes.length) {
-    const subtotal = items.reduce(
-      (acc, it) => acc + toNumber(it.unit_price, 0) * toNumber(it.quantity, 0),
-      0,
-    );
-    const taxAmount = Number((subtotal * 0.07).toFixed(2));
-    orderTaxes = [
-      {
-        tax_template_code: 'VAT_7',
-        tax_rate: 7,
-        tax_amount: taxAmount,
-      },
-    ];
-  }
 
   const totals = computePricingTotals(items, {
     order_discount: orderDiscounts.reduce((acc, discount) => acc + discount.amount, 0),
@@ -522,331 +489,38 @@ const buildFallbackPricing = (payload) => {
   };
 };
 
-const BRANCH_DEFAULT_TAX_TEMPLATE = 'BRANCH_TAX';
-const FALLBACK_BRANCH_TAX_RATE = 7;
-
-const collectOptionSelections = (item = {}) => {
-  const all = [];
-  const sources = [
-    item.options,
-    item.option_items,
-    item.optionItems,
-    item.selected_options,
-    item.selectedOptions,
-    item.addons,
-    item.addOns,
-  ];
-  sources.forEach((source) => {
-    ensureArray(source).forEach((entry) => {
-      if (entry) {
-        all.push(entry);
-      }
-    });
-  });
-  return all;
-};
-
-const resolveBranchProduct = (branchProducts = [], rawItem = {}) => {
-  const branchProductId = normaliseUuid(
-    rawItem.branch_product_id ||
-      rawItem.branchProductId ||
-      rawItem.branch_product ||
-      rawItem.branchProduct,
-  );
-  const productId = normaliseUuid(
-    rawItem.product_id || rawItem.productId || rawItem.id || rawItem.product,
-  );
-
-  if (branchProductId) {
-    const byBranchProduct = branchProducts.find(
-      (entry) => entry && entry.branch_product_id === branchProductId,
-    );
-    if (byBranchProduct) return byBranchProduct;
-  }
-
-  if (productId) {
-    const byProductId = branchProducts.find((entry) => entry && entry.id === productId);
-    if (byProductId) return byProductId;
-  }
-
-  return null;
-};
-
-const normaliseOptionMatch = (selection = {}, optionGroups = []) => {
-  const candidateItemIds = [
-    normaliseUuid(selection.option_item_id),
-    normaliseUuid(selection.optionItemId),
-    normaliseUuid(selection.item_id),
-    normaliseUuid(selection.itemId),
-    normaliseUuid(selection.id),
-  ].filter(Boolean);
-
-  const candidateGroupIds = [
-    normaliseUuid(selection.option_group_id),
-    normaliseUuid(selection.optionGroupId),
-    normaliseUuid(selection.group_id),
-    normaliseUuid(selection.groupId),
-  ].filter(Boolean);
-
-  const candidateItemNames = [
-    selection.option_item_name,
-    selection.optionItemName,
-    selection.item_name,
-    selection.itemName,
-    selection.name,
-    selection.label,
-  ]
-    .map((value) => (typeof value === 'string' ? value.trim().toLowerCase() : ''))
-    .filter(Boolean);
-
-  const candidateGroupNames = [
-    selection.option_group_name,
-    selection.group_name,
-    selection.groupName,
-    selection.group,
-  ]
-    .map((value) => (typeof value === 'string' ? value.trim().toLowerCase() : ''))
-    .filter(Boolean);
-
-  for (const group of optionGroups) {
-    if (!group || !Array.isArray(group.items) || !group.items.length) continue;
-
-    const groupMatchesId =
-      !candidateGroupIds.length ||
-      candidateGroupIds.includes(normaliseUuid(group.id)) ||
-      candidateGroupIds.includes(normaliseUuid(group.option_group_id));
-
-    const groupMatchesName =
-      !candidateGroupNames.length ||
-      candidateGroupNames.includes((group.name || '').toLowerCase().trim());
-
-    if (!groupMatchesId && !groupMatchesName) {
-      continue;
-    }
-
-    for (const option of group.items) {
-      if (!option) continue;
-
-      const optionId = normaliseUuid(option.id || option.option_item_id);
-      const optionName = typeof option.name === 'string' ? option.name.trim().toLowerCase() : '';
-
-      const idMatch = optionId && candidateItemIds.includes(optionId);
-      const nameMatch = optionName && candidateItemNames.includes(optionName);
-
-      if (idMatch || nameMatch) {
-        return { group, option };
-      }
-    }
-  }
-
-  return null;
-};
-
-const aggregateOrderTaxes = (itemTaxes = []) => {
-  if (!Array.isArray(itemTaxes) || !itemTaxes.length) return [];
-  const grouped = new Map();
-
-  itemTaxes.forEach((tax) => {
-    if (!tax) return;
-    const template = tax.tax_template_code || BRANCH_DEFAULT_TAX_TEMPLATE;
-    const rate = Number(toNumber(tax.tax_rate, 0).toFixed(2));
-    const key = `${template}:${rate}`;
-    const existing = grouped.get(key) || {
-      tax_template_code: template,
-      tax_rate: rate,
-      tax_amount: 0,
-    };
-    existing.tax_amount = Number((existing.tax_amount + toNumber(tax.tax_amount, 0)).toFixed(2));
-    grouped.set(key, existing);
-  });
-
-  return Array.from(grouped.values());
-};
-
-const buildBranchPricingSnapshot = (payload = {}, branchCatalog = {}, explicitBranchId = null) => {
-  const resolvedBranchId =
-    normaliseUuid(explicitBranchId) ||
-    normaliseUuid(payload.branch_id) ||
-    normaliseUuid(payload.branchId);
-
-  if (!resolvedBranchId) {
-    throw new ValidationError('branch_id is required for branch orders');
-  }
-
-  const branches = ensureArray(branchCatalog.branches);
-  const branch = branches.find((entry) => entry && entry.id === resolvedBranchId);
-  if (!branch) {
-    throw new ValidationError('branch not found for restaurant', {
-      branch_id: resolvedBranchId,
-    });
-  }
-
-  const branchProducts = ensureArray(branch.products);
-  if (!branchProducts.length) {
-    throw new ValidationError('branch has no available products', { branch_id: resolvedBranchId });
-  }
-
-  const items = ensureArray(payload.items).map((rawItem, index) => {
-    const branchProduct = resolveBranchProduct(branchProducts, rawItem);
-    if (!branchProduct) {
-      throw new ValidationError(`item ${index + 1} is not available at this branch`, {
-        item_index: index,
-        product_id: rawItem?.product_id || rawItem?.productId || null,
-        branch_id: resolvedBranchId,
-      });
-    }
-
-    if (branchProduct.available === false || branchProduct.is_visible === false) {
-      throw new ValidationError(`item ${index + 1} is not available right now`, {
-        item_index: index,
-        product_id: branchProduct.id,
-      });
-    }
-
-    const quantity = toNumber(rawItem.quantity ?? rawItem.qty, 0);
-    if (!Number.isFinite(quantity) || quantity <= 0) {
-      throw new ValidationError(`item ${index + 1} has invalid quantity`);
-    }
-
-    const basePrice = toNumber(branchProduct.base_price, 0);
-    const optionGroups = ensureArray(branchProduct.options);
-    const selections = collectOptionSelections(rawItem);
-
-    let perUnitAddon = 0;
-    const resolvedOptions = [];
-
-    selections.forEach((selection) => {
-      const match = normaliseOptionMatch(selection, optionGroups);
-      if (!match) {
-        throw new ValidationError('selected option is not available for this product', {
-          product_id: branchProduct.id,
-        });
-      }
-
-      const optionQuantity = Math.max(
-        1,
-        Math.floor(
-          toNumber(selection.quantity ?? selection.qty ?? selection.count ?? 1, 1),
-        ),
-      );
-      const delta = toNumber(
-        match.option?.effective_price_delta ?? match.option?.price_delta,
-        0,
-      );
-      const totalDelta = Number((delta * optionQuantity).toFixed(2));
-
-      perUnitAddon += totalDelta;
-      resolvedOptions.push({
-        option_group_id: match.group?.id || null,
-        option_group_name: match.group?.name || 'Option',
-        option_item_id: match.option?.id || null,
-        option_item_name: match.option?.name || 'Selection',
-        price_delta: totalDelta,
-      });
-    });
-
-    const unitPrice = Number((basePrice + perUnitAddon).toFixed(2));
-    const totalPrice = Number((unitPrice * quantity).toFixed(2));
-
-    const taxRate = branchProduct.tax_rate !== undefined && branchProduct.tax_rate !== null
-      ? Number(toNumber(branchProduct.tax_rate, FALLBACK_BRANCH_TAX_RATE).toFixed(2))
-      : FALLBACK_BRANCH_TAX_RATE;
-
-    const lineTaxAmount = Number((totalPrice * taxRate / 100).toFixed(2));
-
-    const productSnapshot = {
-      product: {
-        id: branchProduct.id,
-        title: branchProduct.title,
-        description: branchProduct.description,
-        images: branchProduct.images,
-        category_id: branchProduct.category_id,
-      },
-      branch_product: {
-        id: branchProduct.branch_product_id || null,
-        branch_id: resolvedBranchId,
-        base_price: basePrice,
-        price_mode: branchProduct.price_mode,
-        base_price_override: branchProduct.base_price_override,
-        tax_rate: taxRate,
-      },
-      branch: {
-        id: branch.id,
-        name: branch.name,
-      },
-      restaurant: branchCatalog.restaurant || null,
-    };
-
-    return {
-      product_id: branchProduct.id,
-      branch_product_id: branchProduct.branch_product_id || null,
-      variant_id: rawItem.variant_id || rawItem.variantId || null,
-      quantity,
-      unit_price: unitPrice,
-      total_price: totalPrice,
-      discount_total: toNumber(rawItem.discount_total ?? rawItem.discount ?? 0, 0),
-      product_snapshot: productSnapshot,
-      options: resolvedOptions,
-      taxes: taxRate
-        ? [
-            {
-              tax_template_code: branchProduct.tax_template_code || BRANCH_DEFAULT_TAX_TEMPLATE,
-              tax_rate: taxRate,
-              tax_amount: lineTaxAmount,
-            },
-          ]
-        : [],
-    };
-  });
-
-  const orderDiscounts = normaliseAdjustments(payload.discounts, 'discount');
-  const surcharges = normaliseAdjustments(payload.surcharges, 'surcharge');
-  const promotions = normaliseAdjustments(payload.promotions, 'promotion');
-  const delivery = normaliseDeliveryPayload(payload.delivery);
-
-  const flattenedTaxes = items.flatMap((item) => ensureArray(item.taxes));
-  const orderTaxes = aggregateOrderTaxes(flattenedTaxes);
-
-  const totals = computePricingTotals(items, {
-    order_discount: orderDiscounts.reduce((acc, discount) => acc + discount.amount, 0),
-    surcharges_total: surcharges.reduce((acc, surcharge) => acc + surcharge.amount, 0),
-    shipping_fee: payload.shipping_fee,
-    tax_total: orderTaxes.reduce((acc, entry) => acc + toNumber(entry.tax_amount, 0), 0),
-    tip_amount: payload.tip_amount,
-    currency: payload.currency,
-  });
-
-  return {
-    source: 'branch-catalog',
-    currency: totals.currency,
-    items,
-    totals,
-    orderDiscounts,
-    surcharges,
-    promotions,
-    orderTaxes,
-    delivery,
-    metadata: ensureJson(payload.metadata),
-  };
-};
-
 async function computePricingSnapshot({ userId, payload, context }) {
+  const request = {
+    user_id: userId,
+    restaurant_id: payload.restaurant_id,
+    branch_id: payload.branch_id,
+    currency: payload.currency || DEFAULT_CURRENCY,
+    items: payload.items,
+    promo_code: payload.promo_code || payload.promoCode || null,
+    fulfillment_type: payload.fulfillment_type || payload.fulfillmentType || 'delivery',
+    metadata: ensureJson(payload.pricing_metadata || payload.metadata),
+    delivery: payload.delivery,
+  };
+
   try {
-    const restaurantId = payload.restaurant_id || payload.restaurantId;
-    const branchId = payload.branch_id || payload.branchId;
-    const catalog = await productClient.fetchBranchCatalog(restaurantId, branchId, {
+    const quote = await productClient.quoteOrderPricing(request, {
       authorization: context?.authorization,
     });
-    if (!catalog) {
-      throw new Error('failed to load branch catalog');
+    if (quote && quote.branch_open === false) {
+      throw new ValidationError('branch is currently not accepting orders');
     }
-    return buildBranchPricingSnapshot(payload, catalog, branchId);
+    if (quote && Array.isArray(quote.inventory_errors) && quote.inventory_errors.length) {
+      throw new ValidationError('one or more items are unavailable', {
+        items: quote.inventory_errors,
+      });
+    }
+    if (quote && quote.validation && quote.validation.errors && quote.validation.errors.length) {
+      throw new ValidationError('order validation failed', quote.validation.errors);
+    }
+    return normaliseQuoteResponse(quote, payload);
   } catch (error) {
-    if (error instanceof ValidationError) {
-      throw error;
-    }
     console.error(
-      '[order-service] Failed to fetch branch pricing from product-service:',
+      '[order-service] Failed to fetch pricing from product-service:',
       error?.message || error,
     );
     if (!ALLOW_CLIENT_PRICING_FALLBACK) {
@@ -2145,9 +1819,6 @@ async function listOwnerOrders({ user, query = {} }) {
   if (!restaurantScope.length) {
     throw new ForbiddenError('owner does not manage any restaurants');
   }
-  const branchScope = extractBranchScope(user)
-    .map((value) => normaliseUuid(value))
-    .filter(Boolean);
 
   const limit = Math.min(Math.max(Number(query.limit) || 20, 1), 100);
   const offset = Math.max(Number(query.offset) || 0, 0);
@@ -2168,25 +1839,15 @@ async function listOwnerOrders({ user, query = {} }) {
       if (restaurantId && restaurantScope.includes(restaurantId)) {
         params.push(restaurantId);
         whereClause += ` AND restaurant_id = $${params.length}`;
-      } else if (restaurantId) {
-        throw new ForbiddenError('owner does not manage the requested restaurant');
       }
     }
 
     if (query.branch_id) {
       const branchId = normaliseUuid(query.branch_id);
       if (branchId) {
-        if (branchScope.length && !branchScope.includes(branchId)) {
-          throw new ForbiddenError('owner does not manage the requested branch');
-        }
         params.push(branchId);
         whereClause += ` AND branch_id = $${params.length}`;
       }
-    }
-
-    if (!query.branch_id && branchScope.length) {
-      params.push(branchScope);
-      whereClause += ` AND (branch_id IS NULL OR branch_id = ANY($${params.length}::uuid[]))`;
     }
 
     if (query.start_date) {
@@ -2242,9 +1903,6 @@ async function getOwnerOrder({ user, orderId }) {
   if (!restaurantScope.length) {
     throw new ForbiddenError('owner does not manage any restaurants');
   }
-  const branchScope = extractBranchScope(user)
-    .map((value) => normaliseUuid(value))
-    .filter(Boolean);
 
   const client = await pool.connect();
   try {
@@ -2261,11 +1919,6 @@ async function getOwnerOrder({ user, orderId }) {
       return null;
     }
 
-    const order = orderRes.rows[0];
-    if (branchScope.length && order.branch_id && !branchScope.includes(order.branch_id)) {
-      throw new ForbiddenError('owner does not manage this branch');
-    }
-
     return fetchOrderById(orderId, { client });
   } finally {
     client.release();
@@ -2277,9 +1930,6 @@ async function updateOwnerOrderStatus({ user, orderId, payload = {} }) {
   if (!restaurantScope.length) {
     throw new ForbiddenError('owner does not manage any restaurants');
   }
-  const branchScope = extractBranchScope(user)
-    .map((value) => normaliseUuid(value))
-    .filter(Boolean);
 
   const nextStatus = normaliseOrderStatus(payload.status);
   if (!nextStatus) {
@@ -2303,10 +1953,6 @@ async function updateOwnerOrderStatus({ user, orderId, payload = {} }) {
     const order = orderRes.rows[0];
     if (!order) {
       throw new NotFoundError('order not found');
-    }
-
-    if (branchScope.length && order.branch_id && !branchScope.includes(order.branch_id)) {
-      throw new ForbiddenError('owner does not manage this branch');
     }
 
     await client.query(
@@ -2371,9 +2017,6 @@ async function createOwnerOrderRevision({ user, orderId, payload = {} }) {
   if (!restaurantScope.length) {
     throw new ForbiddenError('owner does not manage any restaurants');
   }
-  const branchScope = extractBranchScope(user)
-    .map((value) => normaliseUuid(value))
-    .filter(Boolean);
 
   const client = await pool.connect();
   try {
@@ -2391,11 +2034,6 @@ async function createOwnerOrderRevision({ user, orderId, payload = {} }) {
 
     if (!orderRes.rows.length) {
       throw new NotFoundError('order not found');
-    }
-
-    const order = orderRes.rows[0];
-    if (branchScope.length && order.branch_id && !branchScope.includes(order.branch_id)) {
-      throw new ForbiddenError('owner does not manage this branch');
     }
 
     const snapshot =

@@ -1,0 +1,171 @@
+﻿{
+  "info": {
+    "name": "FoodFast - Customer (via API Gateway)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Covers customer signup → verify → login → forgot/reset password → address CRUD"
+  },
+  "variable": [
+    { "key": "gateway_base", "value": "http://localhost:8080" },
+    { "key": "customer_email", "value": "" },
+    { "key": "customer_password", "value": "P@ssw0rd!" },
+    { "key": "customer_first", "value": "An" },
+    { "key": "customer_last", "value": "Nguyen" },
+    { "key": "customer_token", "value": "" },
+    { "key": "customer_otp", "value": "123456" },
+    { "key": "reset_otp", "value": "123456" },
+    { "key": "new_password", "value": "NewP@ssw0rd!" },
+    { "key": "customer_address_id", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Gateway Health",
+      "request": { "method": "GET", "url": "{{gateway_base}}/health" },
+      "event": [
+        {"listen":"test","script":{"exec":["pm.test('health ok',()=>pm.response.to.have.status(200));"]}}
+      ]
+    },
+    {
+      "name": "Signup",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "exec": [
+              "// Auto-generate email if not set",
+              "if (!pm.variables.get('customer_email')) {",
+              "  const ts = Date.now();",
+              "  pm.collectionVariables.set('customer_email', `customer_${ts}@example.com`);",
+              "}"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {"exec": [
+            "pm.test('signup accepted', ()=>pm.response.to.have.status(201));",
+            "const b = pm.response.json(); pm.expect(b).to.have.property('message');"
+          ]}
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [ {"key":"Content-Type","value":"application/json"} ],
+        "url": "{{gateway_base}}/api/customers/signup",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"{{customer_email}}\",\n  \"password\": \"{{customer_password}}\",\n  \"firstName\": \"{{customer_first}}\",\n  \"lastName\": \"{{customer_last}}\"\n}"
+        }
+      }
+    },
+    {
+      "name": "Verify Email",
+      "request": {
+        "method": "POST",
+        "header": [ {"key":"Content-Type","value":"application/json"} ],
+        "url": "{{gateway_base}}/api/customers/verify",
+        "body": {"mode":"raw","raw":"{\n  \"email\": \"{{customer_email}}\",\n  \"otp\": \"{{customer_otp}}\"\n}"}
+      },
+      "event": [
+        {"listen":"test","script":{"exec":[
+          "pm.test('verify ok',()=>pm.response.to.have.status(200));",
+          "var data = pm.response.json(); pm.environment.set('customer_token', data.token || '');",
+          "pm.expect(data).to.have.property('user');"
+        ]}}
+      ]
+    },
+    {
+      "name": "Login",
+      "request": {
+        "method": "POST",
+        "header": [ {"key":"Content-Type","value":"application/json"} ],
+        "url": "{{gateway_base}}/api/customers/login",
+        "body": {"mode":"raw","raw":"{\n  \"email\": \"{{customer_email}}\",\n  \"password\": \"{{customer_password}}\"\n}"}
+      },
+      "event": [
+        {"listen":"test","script":{"exec":[
+          "pm.test('login ok',()=>pm.response.to.have.status(200));",
+          "var data = pm.response.json(); pm.environment.set('customer_token', data.token);"
+        ]}}
+      ]
+    },
+    {
+      "name": "Request Password Reset",
+      "request": {
+        "method": "POST",
+        "header": [ {"key":"Content-Type","value":"application/json"} ],
+        "url": "{{gateway_base}}/api/customers/forgot-password",
+        "body": {"mode":"raw","raw":"{\n  \"email\": \"{{customer_email}}\"\n}"}
+      },
+      "event": [
+        {"listen":"test","script":{"exec":["pm.test('reset requested',()=>pm.response.to.have.status(200));"]}}
+      ]
+    },
+    {
+      "name": "Reset Password",
+      "request": {
+        "method": "POST",
+        "header": [ {"key":"Content-Type","value":"application/json"} ],
+        "url": "{{gateway_base}}/api/customers/reset-password",
+        "body": {"mode":"raw","raw":"{\n  \"email\": \"{{customer_email}}\",\n  \"otp\": \"{{reset_otp}}\",\n  \"newPassword\": \"{{new_password}}\"\n}"}
+      },
+      "event": [
+        {"listen":"test","script":{"exec":[
+          "pm.test('password reset ok',()=>pm.response.to.have.status(200));",
+          "pm.collectionVariables.set('customer_password', pm.collectionVariables.get('new_password') || pm.environment.get('new_password'))"
+        ]}}
+      ]
+    },
+    {
+      "name": "Login (after reset)",
+      "request": {
+        "method": "POST",
+        "header": [ {"key":"Content-Type","value":"application/json"} ],
+        "url": "{{gateway_base}}/api/customers/login",
+        "body": {"mode":"raw","raw":"{\n  \"email\": \"{{customer_email}}\",\n  \"password\": \"{{new_password}}\"\n}"}
+      },
+      "event": [
+        {"listen":"test","script":{"exec":[
+          "pm.test('login ok with new password',()=>pm.response.to.have.status(200));",
+          "var data = pm.response.json(); pm.environment.set('customer_token', data.token);"
+        ]}}
+      ]
+    },
+    {
+      "name": "Addresses - List",
+      "request": {
+        "method": "GET",
+        "header": [ {"key":"Authorization","value":"Bearer {{customer_token}}"} ],
+        "url": "{{gateway_base}}/api/customers/addresses"
+      },
+      "event": [
+        {"listen":"test","script":{"exec":["pm.test('list ok',()=>pm.response.to.have.status(200));"]}}
+      ]
+    },
+    {
+      "name": "Addresses - Create",
+      "request": {
+        "method": "POST",
+        "header": [ {"key":"Authorization","value":"Bearer {{customer_token}}"}, {"key":"Content-Type","value":"application/json"}],
+        "url": "{{gateway_base}}/api/customers/addresses",
+        "body": {"mode":"raw","raw":"{\n  \"label\": \"Home\",\n  \"recipient\": \"{{customer_first}} {{customer_last}}\",\n  \"phone\": \"0900000000\",\n  \"street\": \"1 Example St\",\n  \"district\": \"Q1\",\n  \"city\": \"HCM\",\n  \"isDefault\": true\n}"}
+      },
+      "event": [
+        {"listen":"test","script":{"exec":[
+          "pm.test('create ok',()=>pm.response.to.have.status(201));",
+          "var a = pm.response.json(); pm.environment.set('customer_address_id', a.id || a.address?.id);"
+        ]}}
+      ]
+    },
+    {
+      "name": "Addresses - Delete",
+      "request": {
+        "method": "DELETE",
+        "header": [ {"key":"Authorization","value":"Bearer {{customer_token}}"} ],
+        "url": "{{gateway_base}}/api/customers/addresses/{{customer_address_id}}"
+      },
+      "event": [
+        {"listen":"test","script":{"exec":["pm.test('delete ok',()=>pm.response.to.have.status(204));"]}}
+      ]
+    }
+  ]
+}

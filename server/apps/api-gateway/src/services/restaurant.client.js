@@ -291,35 +291,6 @@ async function upsertBranchInventory(restaurantId, branchId, productId, payload,
   return res.data;
 }
 
-async function listCategories(params = {}, req) {
-  const res = await categoryClient.get('/', {
-    params,
-    headers: buildHeaders(req),
-  });
-  return res.data;
-}
-
-async function createCategory(payload, req) {
-  const res = await categoryClient.post('/', payload, {
-    headers: buildHeaders(req),
-  });
-  return res.data;
-}
-
-async function updateCategory(id, payload, req) {
-  const res = await categoryClient.patch(`/${id}`, payload, {
-    headers: buildHeaders(req),
-  });
-  return res.data;
-}
-
-async function deleteCategory(id, req) {
-  const res = await categoryClient.delete(`/${id}`, {
-    headers: buildHeaders(req),
-  });
-  return res.data;
-}
-
 module.exports = {
   signupOwner,
   verifyOwner,

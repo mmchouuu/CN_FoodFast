@@ -11,7 +11,9 @@ export const api = axios.create({
 
 // Attach Authorization header if token exists
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('auth_token');
+  const customerToken = localStorage.getItem('auth_token');
+  const ownerToken = localStorage.getItem('restaurant_token');
+  const token = customerToken || ownerToken;
   if (token) {
     config.headers = config.headers || {};
     config.headers.Authorization = `Bearer ${token}`;
@@ -27,6 +29,9 @@ api.interceptors.response.use(
         localStorage.removeItem('auth_token');
         localStorage.removeItem('auth_profile');
         window.dispatchEvent(new CustomEvent('auth:expired'));
+        localStorage.removeItem('restaurant_token');
+        localStorage.removeItem('restaurant_profile');
+        window.dispatchEvent(new CustomEvent('restaurant:expired'));
       } catch (storageErr) {
         console.warn('Failed to reset auth cache after 401', storageErr);
       }

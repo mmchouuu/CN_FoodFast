@@ -150,10 +150,22 @@ const OrderHistory = () => {
                     (Array.isArray(snapshot.images) ? snapshot.images[0] : null) ||
                     item.displayImage ||
                     dishPlaceholderImage;
+                  const toppings = Array.isArray(item.options)
+                    ? item.options
+                        .map((option) => {
+                          if (!option) return null;
+                          if (typeof option === "string") return option;
+                          if (option.option_item_name) return option.option_item_name;
+                          if (option.name) return option.name;
+                          if (option.label) return option.label;
+                          return null;
+                        })
+                        .filter(Boolean)
+                    : [];
                   return (
                     <div
                       key={`${item.dishId}-${index}`}
-                      className="rounded-2xl bg-gray-50 px-4 py-3 text-sm text-gray-600"
+                      className="rounded-2xl border border-gray-100 bg-white px-5 py-4 text-sm text-gray-600 shadow-sm"
                     >
                       <div className="flex items-center gap-3">
                         <img
@@ -168,12 +180,30 @@ const OrderHistory = () => {
                           <p className="text-xs text-gray-500">
                             Size: {item.size}
                           </p>
+                          <p className="text-xs text-gray-500">
+                            Toppings:{" "}
+                            {toppings.length
+                              ? toppings.join(", ")
+                              : "None"}
+                          </p>
                         </div>
                       </div>
-                      <p className="mt-3 text-sm font-semibold text-gray-900">
-                        {currency}
-                        {item.price.toLocaleString()}
-                      </p>
+                      <div className="mt-3 flex flex-col gap-1 text-xs text-gray-500">
+                        <div className="flex justify-between text-gray-500">
+                          <span>Base price</span>
+                          <span className="font-semibold text-gray-900">
+                            {currency}
+                            {item.unitPrice.toLocaleString()}
+                          </span>
+                        </div>
+                        <div className="flex justify-between text-gray-500">
+                          <span>Line total</span>
+                          <span className="font-semibold text-gray-900">
+                            {currency}
+                            {item.price.toLocaleString()}
+                          </span>
+                        </div>
+                      </div>
                     </div>
                   );
                 })}

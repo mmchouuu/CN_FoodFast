@@ -1,6 +1,6 @@
 import api from './api';
 
-const basePath = '/customer/orders';
+const basePath = '/api/orders';
 const ownerBasePath = '/owner/orders';
 
 const unwrapCollection = (payload) => {
@@ -18,16 +18,16 @@ const unwrapRecord = (payload) => {
   return payload;
 };
 
-export async function listOrders() {
-  const { data } = await api.get(basePath);
+export async function listOrders(params = {}) {
+  const { data } = await api.get(basePath, { params });
   return unwrapCollection(data);
 }
 
-export async function listOrdersByUser(userId) {
+export async function listOrdersByUser(userId, params = {}) {
   if (!userId) {
     throw new Error('userId is required to list orders by user');
   }
-  const { data } = await api.get(`${basePath}/user/${userId}`);
+  const { data } = await api.get(`${basePath}/user/${userId}`, { params });
   return unwrapCollection(data);
 }
 
