@@ -13,6 +13,7 @@ import { restaurantPlaceholderImage, dishPlaceholderImage } from '../utils/image
 
 // --- Auth Systems ---
 import authService from '../services/auth';
+import restaurantAuth from '../services/restaurantAuth';
 import {
     dishes as menuDishes,
     restaurants as restaurantList,
@@ -1671,10 +1672,11 @@ export const AppContextProvider = ({ children }) => {
 
 
     // --- Local auth actions ---
-    const loginWithCredentials = async (email, password) => {
-        try {
-            const res = await authService.login(email, password);
+    const loginWithCredentials = async (email, password, options = {}) => {
+        const { accountType = 'auto' } = options;
+        const normalizedEmail = typeof email === 'string' ? email.trim() : email;
 
+        const handleCustomerSuccess = async (res) => {
             let sanitizedUser = null;
             if (res?.token) {
                 setAuthToken(res.token);
@@ -1685,6 +1687,10 @@ export const AppContextProvider = ({ children }) => {
                 setAuthProfile(sanitizedUser);
                 localStorage.setItem('auth_profile', JSON.stringify(sanitizedUser));
             }
+            localStorage.removeItem('restaurant_token');
+            localStorage.removeItem('restaurant_profile');
+            setIsOwner(false);
+            setRestaurantProfile(null);
             toast.success(res?.message || 'Logged in successfully');
             try {
                 const pendingRaw = localStorage.getItem('pending_address');
@@ -1705,12 +1711,73 @@ export const AppContextProvider = ({ children }) => {
                     toast.success('Saved your pending address.');
                 }
             } catch { }
-            return res;
-        } catch (error) {
-            const message = error?.response?.data?.message || error.message || 'Login failed';
-            toast.error(message);
-            throw error;
+            return { type: 'customer', response: res, user: sanitizedUser || res?.user || null };
+        };
+
+        const handleOwnerSuccess = (data) => {
+            if (data?.token) {
+                localStorage.setItem('restaurant_token', data.token);
+            } else {
+                localStorage.removeItem('restaurant_token');
+            }
+            if (data?.user) {
+                setRestaurantProfile(data.user);
+                localStorage.setItem('restaurant_profile', JSON.stringify(data.user));
+            } else {
+                setRestaurantProfile(null);
+                localStorage.removeItem('restaurant_profile');
+            }
+            setIsOwner(true);
+            setAuthToken(null);
+            setAuthProfile(null);
+            localStorage.removeItem('auth_token');
+            localStorage.removeItem('auth_profile');
+            toast.success(data?.message || 'Signed in successfully.');
+            return { type: 'owner', response: data, user: data?.user || null };
+        };
+
+        const shouldTryCustomer = accountType !== 'owner';
+        const shouldTryOwner = accountType !== 'customer';
+        let lastError = null;
+
+        if (shouldTryCustomer) {
+            try {
+                const result = await authService.login(normalizedEmail, password);
+                return await handleCustomerSuccess(result);
+            } catch (error) {
+                lastError = error;
+                if (accountType === 'customer') {
+                    const message = error?.response?.data?.message || error.message || 'Login failed';
+                    toast.error(message);
+                    throw error;
+                }
+            }
         }
+
+        if (shouldTryOwner) {
+            try {
+                const ownerResult = await restaurantAuth.login({ email: normalizedEmail, password });
+                return handleOwnerSuccess(ownerResult);
+            } catch (error) {
+                lastError = error;
+                if (accountType === 'owner') {
+                    const message =
+                        error?.response?.data?.message ||
+                        error.message ||
+                        'Unable to sign in to restaurant account.';
+                    toast.error(message);
+                    throw error;
+                }
+            }
+        }
+
+        const message =
+            lastError?.response?.data?.message || lastError?.message || 'Login failed. Please try again.';
+        toast.error(message);
+        if (lastError) {
+            throw lastError;
+        }
+        throw new Error(message);
     };
 
     const signupWithCredentials = async ({ firstName, lastName, email, password, phone }) => {

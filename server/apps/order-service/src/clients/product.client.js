@@ -89,6 +89,40 @@ async function quoteOrderPricing(payload, { authorization } = {}) {
   throw error;
 }
 
+async function listRestaurantsByOwner(ownerId, { authorization } = {}) {
+  if (!ownerId) {
+    return [];
+  }
+
+  const headers = {};
+  if (authorization) {
+    headers.Authorization = authorization;
+  }
+
+  const { status, data } = await sendJsonRequest(`/api/restaurants/owner/${ownerId}/list`, {
+    method: 'GET',
+    headers,
+  });
+
+  if (status >= 200 && status < 300) {
+    if (Array.isArray(data?.items)) {
+      return data.items;
+    }
+    if (Array.isArray(data)) {
+      return data;
+    }
+    return [];
+  }
+
+  const error = new Error(
+    (data && (data.error || data.message)) || 'failed to load restaurants for owner from product-service',
+  );
+  error.status = status;
+  error.data = data;
+  throw error;
+}
+
 module.exports = {
   quoteOrderPricing,
+  listRestaurantsByOwner,
 };

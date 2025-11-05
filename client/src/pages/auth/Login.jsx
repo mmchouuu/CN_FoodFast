@@ -50,7 +50,7 @@ const Login = () => {
     setLoading(true);
     setError("");
     try {
-      await loginWithCredentials(email.trim(), password);
+      const result = await loginWithCredentials(email.trim(), password);
       if (rememberMe) {
         let encodedPassword = password;
         if (typeof btoa === "function") {
@@ -70,7 +70,11 @@ const Login = () => {
         localStorage.removeItem("foodfast_remembered_login");
         localStorage.removeItem("foodfast_remembered_email");
       }
-      navigate("/");
+      if (result?.type === "owner") {
+        navigate("/owner", { replace: true });
+      } else {
+        navigate("/");
+      }
     } catch (err) {
       setError(
         err?.response?.data?.message ||

@@ -145,6 +145,44 @@ const extractRestaurantScope = (user = {}) => {
   );
 };
 
+async function resolveOwnerRestaurantScope(user = {}) {
+  const directScope = extractRestaurantScope(user);
+  if (directScope.length) {
+    return directScope;
+  }
+
+  const ownerId = resolveUserId(user);
+  if (!ownerId) {
+    return [];
+  }
+
+  try {
+    const restaurants = await productClient.listRestaurantsByOwner(ownerId);
+    const items = Array.isArray(restaurants) ? restaurants : [];
+    const ids = unique(
+      items
+        .map((item) => item && (item.id || item.restaurant_id || item.restaurantId || null))
+        .filter(Boolean)
+        .map((value) => value.toString().trim())
+        .filter((value) => value.length),
+    );
+
+    if (ids.length) {
+      const merged = unique([...(user.restaurant_ids || []), ...ids]);
+      user.restaurant_ids = merged;
+      user.restaurantIds = merged;
+    }
+
+    return ids;
+  } catch (error) {
+    console.error(
+      '[order-service] failed to resolve owner restaurant scope:',
+      error?.message || error,
+    );
+    return [];
+  }
+}
+
 const extractBranchScope = (user = {}) => {
   const list = ensureArray(user.branch_ids)
     .concat(ensureArray(user.branchIds))
@@ -1815,13 +1853,20 @@ async function cancelCustomerOrder({ user, orderId, payload = {} }) {
 }
 
 async function listOwnerOrders({ user, query = {} }) {
-  const restaurantScope = extractRestaurantScope(user);
-  if (!restaurantScope.length) {
-    throw new ForbiddenError('owner does not manage any restaurants');
-  }
-
   const limit = Math.min(Math.max(Number(query.limit) || 20, 1), 100);
   const offset = Math.max(Number(query.offset) || 0, 0);
+
+  const restaurantScope = await resolveOwnerRestaurantScope(user);
+  if (!restaurantScope.length) {
+    return {
+      data: [],
+      pagination: {
+        limit,
+        offset,
+        total: 0,
+      },
+    };
+  }
 
   const client = await pool.connect();
   try {
@@ -1899,7 +1944,7 @@ async function listOwnerOrders({ user, query = {} }) {
 }
 
 async function getOwnerOrder({ user, orderId }) {
-  const restaurantScope = extractRestaurantScope(user);
+  const restaurantScope = await resolveOwnerRestaurantScope(user);
   if (!restaurantScope.length) {
     throw new ForbiddenError('owner does not manage any restaurants');
   }
@@ -1926,7 +1971,7 @@ async function getOwnerOrder({ user, orderId }) {
 }
 
 async function updateOwnerOrderStatus({ user, orderId, payload = {} }) {
-  const restaurantScope = extractRestaurantScope(user);
+  const restaurantScope = await resolveOwnerRestaurantScope(user);
   if (!restaurantScope.length) {
     throw new ForbiddenError('owner does not manage any restaurants');
   }
@@ -2013,7 +2058,7 @@ async function updateOwnerOrderStatus({ user, orderId, payload = {} }) {
 }
 
 async function createOwnerOrderRevision({ user, orderId, payload = {} }) {
-  const restaurantScope = extractRestaurantScope(user);
+  const restaurantScope = await resolveOwnerRestaurantScope(user);
   if (!restaurantScope.length) {
     throw new ForbiddenError('owner does not manage any restaurants');
   }
