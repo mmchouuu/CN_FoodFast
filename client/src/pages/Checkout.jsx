@@ -40,7 +40,7 @@ const Checkout = () => {
     getDiscountAmount,
     applyDiscountCode,
     appliedDiscountCode,
-    bankAccounts,
+    momoWallets,
     cardAccounts,
     method,
     setMethod,
@@ -99,8 +99,8 @@ const Checkout = () => {
       },
       {
         id: "wallet",
-        label: "FoodFast wallet",
-        description: "Use your wallet balance linked to bank accounts.",
+        label: "MoMo wallet",
+        description: "Pay via your linked MoMo wallet for instant confirmation.",
       },
       {
         id: "card",
@@ -114,7 +114,7 @@ const Checkout = () => {
   useEffect(() => {
     // const normalized = typeof method === "string" ? method.trim().toLowerCase() : "";
     // if (normalized === "bank" || normalized === "bank_transfer") {
-    //   if (bankAccounts.length === 0) {
+    //   if (momoWallets.length === 0) {
     //     setMethod("wallet");
     //     return;
     //   }
@@ -122,14 +122,14 @@ const Checkout = () => {
     // if (normalized === "card" && cardAccounts.length === 0) {
     //   setMethod("wallet");
     const fallbackMethod = paymentMethods[0]?.id || "cod";
-    if (method === "wallet" && bankAccounts.length === 0) {
+    if (method === "wallet" && momoWallets.length === 0) {
       setMethod(fallbackMethod);
       return;
     }
     if (method === "card" && cardAccounts.length === 0) {
       setMethod(fallbackMethod);
     }
-  }, [method, bankAccounts.length, cardAccounts.length, setMethod, paymentMethods]);
+  }, [method, momoWallets.length, cardAccounts.length, setMethod, paymentMethods]);
 
   const handleApplyDiscount = () => {
     applyDiscountCode(discountCode);
@@ -449,7 +449,7 @@ const Checkout = () => {
               const isSelected = method === option.id;
               const isWallet = option.id === "wallet";
               const isCard = option.id === "card";
-              const walletUnavailable = isWallet && bankAccounts.length === 0;
+              const walletUnavailable = isWallet && momoWallets.length === 0;
               const cardUnavailable = isCard && cardAccounts.length === 0;
               const isDisabled = walletUnavailable || cardUnavailable;
 
@@ -458,9 +458,9 @@ const Checkout = () => {
                   ? "1 saved card ready to use."
                   : `${cardAccounts.length} saved cards ready to use.`;
               const walletBankLabel =
-                bankAccounts.length === 1
-                  ? "1 linked account ready to use."
-                  : `${bankAccounts.length} linked accounts ready to use.`;
+                momoWallets.length === 1
+                  ? "1 linked wallet ready to use."
+                  : `${momoWallets.length} linked wallets ready to use.`;
               return (
                 <button
                   key={option.id}
@@ -496,7 +496,7 @@ const Checkout = () => {
                             openCustomerProfilePanel();
                           }}
                         >
-                          Link a bank account in your profile panel.
+                          Link a MoMo wallet in your profile panel.
                         </span>
                       ) : (
                         <span className="text-emerald-600">

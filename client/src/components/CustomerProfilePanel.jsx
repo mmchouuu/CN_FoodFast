@@ -4,6 +4,8 @@ import toast from "react-hot-toast";
 import RatingStars from "./RatingStars";
 import { assets } from "../assets/data";
 import { useAppContext } from "../context/AppContext";
+import { Elements, CardElement, useStripe, useElements } from "@stripe/react-stripe-js";
+import { getStripe } from "../lib/stripe";
 
 const ADDRESS_LABELS = [
   { id: "home", label: "Home" },
@@ -11,6 +13,8 @@ const ADDRESS_LABELS = [
   { id: "school", label: "School" },
   { id: "custom", label: "Other" },
 ];
+
+const stripePromise = getStripe();
 
 const CustomerProfilePanel = ({ open, onClose, onLogout }) => {
   const {
@@ -21,11 +25,13 @@ const CustomerProfilePanel = ({ open, onClose, onLogout }) => {
     addNewAddress,
     updateLocalProfile,
     removeAddress,
-    bankAccounts,
-    refreshBankAccounts,
-    linkBankAccount,
+    momoWallets,
+    refreshMomoWallets,
+    linkMomoWallet,
     cardAccounts,
+    createStripeSetupIntent,
     linkCard,
+    refreshCardAccounts,
     removeCard,
     pastOrders,
     restaurantReviews,
@@ -50,24 +56,20 @@ const CustomerProfilePanel = ({ open, onClose, onLogout }) => {
     "";
   const defaultPhone = user?.phone || addresses[0]?.phone || "";
 
-  const [showBankForm, setShowBankForm] = useState(false);
-  const [bankForm, setBankForm] = useState(() => ({
-    bankName: "",
-    bankCode: "",
-    accountHolder: defaultFullName,
-    accountNumber: "",
-    isDefault: bankAccounts.length === 0,
+  const [showWalletForm, setShowWalletForm] = useState(false);
+  const [walletForm, setWalletForm] = useState(() => ({
+    walletName: defaultFullName,
+    phoneNumber: "",
+    walletId: "",
+    isDefault: momoWallets.length === 0,
   }));
-  const [savingBankAccount, setSavingBankAccount] = useState(false);
-  const [loadingBankAccounts, setLoadingBankAccounts] = useState(false);
+  const [savingWallet, setSavingWallet] = useState(false);
+  const [loadingWallets, setLoadingWallets] = useState(false);
   const [showCardForm, setShowCardForm] = useState(false);
   const [savingCard, setSavingCard] = useState(false);
+  const [loadingCards, setLoadingCards] = useState(false);
   const [cardForm, setCardForm] = useState(() => ({
     cardholderName: defaultFullName,
-    cardNumber: "",
-    expiryMonth: "",
-    expiryYear: "",
-    cvv: "",
     isDefault: cardAccounts.length === 0,
   }));
 
@@ -101,7 +103,7 @@ const CustomerProfilePanel = ({ open, onClose, onLogout }) => {
 
   useEffect(() => {
     if (!open) {
-      setShowBankForm(false);
+      setShowWalletForm(false);
       setShowCardForm(false);
     }
   }, [open]);
@@ -115,12 +117,35 @@ const CustomerProfilePanel = ({ open, onClose, onLogout }) => {
   }, [defaultFullName, defaultEmail, defaultPhone, open]);
 
   useEffect(() => {
-    setBankForm((prev) => ({
+    setWalletForm((prev) => ({
       ...prev,
-      accountHolder: defaultFullName,
-      isDefault: bankAccounts.length === 0 ? true : prev.isDefault,
+      walletName: defaultFullName,
+      isDefault: momoWallets.length === 0 ? true : prev.isDefault,
     }));
-  }, [defaultFullName, bankAccounts.length]);
+  }, [defaultFullName, momoWallets.length]);
+
+  useEffect(() => {
+    setCardForm((prev) => ({
+      cardholderName: prev.cardholderName || defaultFullName,
+      isDefault: cardAccounts.length === 0 ? true : prev.isDefault,
+    }));
+  }, [defaultFullName, cardAccounts.length]);
+
+  useEffect(() => {
+    if (!open || typeof refreshCardAccounts !== "function") return;
+    let isMounted = true;
+    setLoadingCards(true);
+    refreshCardAccounts()
+      .catch((error) => {
+        console.error("Failed to refresh cards", error);
+      })
+      .finally(() => {
+        if (isMounted) setLoadingCards(false);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, [open, refreshCardAccounts]);
 
   useEffect(() => {
     setCardForm((prev) => ({
@@ -133,21 +158,21 @@ const CustomerProfilePanel = ({ open, onClose, onLogout }) => {
   useEffect(() => {
     if (!open) return undefined;
     let cancelled = false;
-    const loadAccounts = async () => {
-      setLoadingBankAccounts(true);
+    const loadWallets = async () => {
+      setLoadingWallets(true);
       try {
-        await refreshBankAccounts();
+        await refreshMomoWallets();
       } finally {
         if (!cancelled) {
-          setLoadingBankAccounts(false);
+          setLoadingWallets(false);
         }
       }
     };
-    loadAccounts();
+    loadWallets();
     return () => {
       cancelled = true;
     };
-  }, [open, refreshBankAccounts]);
+  }, [open, refreshMomoWallets]);
 
   const normalize = (value) =>
     value
@@ -253,17 +278,9 @@ const CustomerProfilePanel = ({ open, onClose, onLogout }) => {
     }
   };
 
-  const handleBankFieldChange = (event) => {
+  const handleWalletFieldChange = (event) => {
     const { name, value, type, checked } = event.target;
-    setBankForm((prev) => ({
-      ...prev,
-      [name]: type === "checkbox" ? checked : value,
-    }));
-  };
-
-  const handleCardFieldChange = (event) => {
-    const { name, value, type, checked } = event.target;
-    setCardForm((prev) => ({
+    setWalletForm((prev) => ({
       ...prev,
       [name]: type === "checkbox" ? checked : value,
     }));
@@ -282,98 +299,59 @@ const CustomerProfilePanel = ({ open, onClose, onLogout }) => {
     }
   };
 
-  const handleBankSubmit = async (event) => {
+  const handleWalletSubmit = async (event) => {
     event.preventDefault();
-    if (!bankForm.bankName.trim()) {
-      toast.error("Please enter the bank name.");
+    if (!walletForm.walletName.trim()) {
+      toast.error("Please enter the MoMo account name.");
       return;
     }
-    if (!bankForm.accountHolder.trim()) {
-      toast.error("Please enter the account holder name.");
+    if (!walletForm.phoneNumber.trim()) {
+      toast.error("Please provide the registered MoMo phone number.");
       return;
     }
-    if (!bankForm.accountNumber.trim()) {
-      toast.error("Please enter the account number.");
-      return;
-    }
-    setSavingBankAccount(true);
+    setSavingWallet(true);
     try {
-      await linkBankAccount({
-        bankName: bankForm.bankName,
-        bankCode: bankForm.bankCode,
-        accountHolder: bankForm.accountHolder,
-        accountNumber: bankForm.accountNumber,
-        isDefault: bankForm.isDefault,
+      await linkMomoWallet({
+        walletName: walletForm.walletName,
+        phoneNumber: walletForm.phoneNumber,
+        walletId: walletForm.walletId,
+        isDefault: walletForm.isDefault,
         user_id: user?.id,
       });
-      toast.success("Bank account linked successfully.");
-      setShowBankForm(false);
-      setBankForm({
-        bankName: "",
-        bankCode: "",
-        accountHolder: defaultFullName,
-        accountNumber: "",
-        isDefault: false,
+      toast.success("MoMo wallet linked successfully.");
+      setShowWalletForm(false);
+      setWalletForm({
+        walletName: defaultFullName,
+        phoneNumber: "",
+        walletId: "",
+        isDefault: momoWallets.length === 0,
       });
     } catch (error) {
       const message =
         error?.response?.data?.error ||
         error?.message ||
-        "Unable to link bank account.";
+        "Unable to link MoMo wallet.";
       toast.error(message);
     } finally {
-      setSavingBankAccount(false);
+      setSavingWallet(false);
     }
   };
 
-  const handleCardSubmit = async (event) => {
-    event.preventDefault();
-    if (
-      !cardForm.cardholderName.trim() ||
-      !cardForm.cardNumber.trim() ||
-      !cardForm.expiryMonth.trim() ||
-      !cardForm.expiryYear.trim() ||
-      !cardForm.cvv.trim()
-    ) {
-      toast.error("Please complete all required card fields.");
-      return;
-    }
-    setSavingCard(true);
-    try {
-      await linkCard({
-        cardholderName: cardForm.cardholderName,
-        cardNumber: cardForm.cardNumber,
-        expiryMonth: cardForm.expiryMonth,
-        expiryYear: cardForm.expiryYear,
-        cvv: cardForm.cvv,
-        isDefault: cardForm.isDefault,
-      });
-      toast.success("Card added successfully.");
-      setShowCardForm(false);
-      setCardForm({
-        cardholderName: defaultFullName,
-        cardNumber: "",
-        expiryMonth: "",
-        expiryYear: "",
-        cvv: "",
-        isDefault: false,
-      });
-    } catch (error) {
-      const message = error?.message || "Unable to link card.";
-      toast.error(message);
-    } finally {
-      setSavingCard(false);
-    }
+  const handleCardLinkSuccess = () => {
+    setShowCardForm(false);
+    setCardForm({
+      cardholderName: defaultFullName,
+      isDefault: false,
+    });
   };
 
-  const handleCancelBankForm = () => {
-    setShowBankForm(false);
-    setBankForm({
-      bankName: "",
-      bankCode: "",
-      accountHolder: defaultFullName,
-      accountNumber: "",
-      isDefault: bankAccounts.length === 0,
+  const handleCancelWalletForm = () => {
+    setShowWalletForm(false);
+    setWalletForm({
+      walletName: defaultFullName,
+      phoneNumber: "",
+      walletId: "",
+      isDefault: momoWallets.length === 0,
     });
   };
 
@@ -381,10 +359,6 @@ const CustomerProfilePanel = ({ open, onClose, onLogout }) => {
     setShowCardForm(false);
     setCardForm({
       cardholderName: defaultFullName,
-      cardNumber: "",
-      expiryMonth: "",
-      expiryYear: "",
-      cvv: "",
       isDefault: cardAccounts.length === 0,
     });
   };
@@ -733,7 +707,7 @@ const CustomerProfilePanel = ({ open, onClose, onLogout }) => {
   );
 
   const renderPaymentSection = () => {
-    const hasLinkedBank = bankAccounts.length > 0;
+    const hasLinkedWallet = momoWallets.length > 0;
     const hasLinkedCard = cardAccounts.length > 0;
     return (
       <div className="space-y-4 rounded-3xl bg-white p-6 shadow">
@@ -744,59 +718,55 @@ const CustomerProfilePanel = ({ open, onClose, onLogout }) => {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <p className="text-sm font-semibold text-gray-900">
-                Connected bank accounts
+                Connected MoMo wallets
               </p>
               <p className="text-xs text-gray-500">
-                {hasLinkedBank
-                  ? "Manage your linked accounts below."
-                  : "Link a bank account to enable instant bank payments at checkout."}
+                {hasLinkedWallet
+                  ? "Manage the wallet you trust for fast MoMo checkouts."
+                  : "Link your MoMo wallet to enjoy one-tap, secure payments."}
               </p>
             </div>
             <button
               type="button"
               onClick={() => {
-                setShowBankForm((prev) => !prev);
+                setShowWalletForm((prev) => !prev);
                 setShowCardForm(false);
               }}
               className="rounded-full border border-orange-300 px-3 py-1 text-xs font-semibold text-orange-500 transition hover:bg-orange-100"
             >
-              {showBankForm ? "Close" : "+ Add bank"}
+              {showWalletForm ? "Close" : "+ Add wallet"}
             </button>
           </div>
           <div className="mt-3 space-y-2">
-            {loadingBankAccounts ? (
+            {loadingWallets ? (
               <p className="text-xs text-gray-500">
-                Loading linked accounts...
+                Loading linked wallets...
               </p>
-            ) : hasLinkedBank ? (
-              bankAccounts.map((account) => (
+            ) : hasLinkedWallet ? (
+              momoWallets.map((wallet) => (
                 <div
-                  key={account.id}
+                  key={wallet.id}
                   className="flex items-center justify-between rounded-xl border border-orange-100 bg-white px-3 py-2 text-sm text-gray-700"
                 >
                   <div>
                     <p className="font-semibold text-gray-900">
-                      {account.bankName}
-                      {account.isDefault ? (
+                      {wallet.walletName || "MoMo Wallet"}
+                      {wallet.isDefault ? (
                         <span className="ml-2 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-600">
                           Default
                         </span>
                       ) : null}
                     </p>
                     <p className="text-xs text-gray-500">
-                      {account.accountHolder} • {account.accountNumberMasked}
+                      {wallet.maskedPhone || wallet.phoneNumber || "Phone not set"}
+                      {wallet.walletId ? ` • ID ${wallet.walletId}` : ""}
                     </p>
                   </div>
-                  {account.bankCode ? (
-                    <span className="text-[10px] uppercase tracking-wide text-orange-500">
-                      {account.bankCode}
-                    </span>
-                  ) : null}
                 </div>
               ))
             ) : (
               <p className="text-xs text-gray-500">
-                No bank accounts linked yet.
+                No MoMo wallets linked yet.
               </p>
             )}
           </div>
@@ -816,7 +786,7 @@ const CustomerProfilePanel = ({ open, onClose, onLogout }) => {
               type="button"
               onClick={() => {
                 setShowCardForm((prev) => !prev);
-                setShowBankForm(false);
+      setShowWalletForm(false);
               }}
               className="rounded-full border border-orange-300 px-3 py-1 text-xs font-semibold text-orange-500 transition hover:bg-orange-100"
             >
@@ -824,7 +794,9 @@ const CustomerProfilePanel = ({ open, onClose, onLogout }) => {
             </button>
           </div>
           <div className="mt-3 space-y-2">
-            {hasLinkedCard ? (
+            {loadingCards ? (
+              <p className="text-xs text-gray-500">Loading saved cards...</p>
+            ) : hasLinkedCard ? (
               cardAccounts.map((card) => (
                 <div
                   key={card.id}
@@ -832,7 +804,7 @@ const CustomerProfilePanel = ({ open, onClose, onLogout }) => {
                 >
                   <div>
                     <p className="font-semibold text-gray-900">
-                      {card.cardholderName || "Saved card"}
+                      {(card.brand || "Card").toUpperCase()} •••• {card.last4 || "----"}
                       {card.isDefault ? (
                         <span className="ml-2 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-600">
                           Default
@@ -840,16 +812,10 @@ const CustomerProfilePanel = ({ open, onClose, onLogout }) => {
                       ) : null}
                     </p>
                     <p className="text-xs text-gray-500">
-                      **** {card.last4} • Exp {card.expiryMonth || "--"}/
-                      {card.expiryYear || "--"}
+                      Exp {card.expMonth || "--"}/{card.expYear || "--"}
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
-                    {card.brand ? (
-                      <span className="text-[10px] uppercase tracking-wide text-orange-500">
-                        {card.brand}
-                      </span>
-                    ) : null}
                     {typeof removeCard === "function" ? (
                       <button
                         type="button"
@@ -868,61 +834,49 @@ const CustomerProfilePanel = ({ open, onClose, onLogout }) => {
           </div>
         </div>
 
-        {showBankForm ? (
+        {showWalletForm ? (
           <form
-            onSubmit={handleBankSubmit}
+            onSubmit={handleWalletSubmit}
             className="space-y-4 rounded-2xl border border-orange-100 bg-white p-4"
           >
             <div className="grid gap-3 md:grid-cols-2">
               <div className="space-y-2">
                 <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                  Bank name
+                  Account name
                 </label>
                 <input
-                  name="bankName"
-                  value={bankForm.bankName}
-                  onChange={handleBankFieldChange}
-                  placeholder="e.g. Vietcombank"
+                  name="walletName"
+                  value={walletForm.walletName}
+                  onChange={handleWalletFieldChange}
+                  placeholder="MoMo account holder"
                   className="w-full rounded-xl border border-orange-100 px-3 py-2 text-sm outline-none transition focus:border-orange-300 focus:ring-1 focus:ring-orange-200"
                   required
                 />
               </div>
               <div className="space-y-2">
                 <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                  Bank code (optional)
+                  MoMo phone number
                 </label>
                 <input
-                  name="bankCode"
-                  value={bankForm.bankCode}
-                  onChange={handleBankFieldChange}
-                  placeholder="VCB"
-                  className="w-full rounded-xl border border-orange-100 px-3 py-2 text-sm outline-none transition focus:border-orange-300 focus:ring-1 focus:ring-orange-200"
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                  Account holder
-                </label>
-                <input
-                  name="accountHolder"
-                  value={bankForm.accountHolder}
-                  onChange={handleBankFieldChange}
-                  placeholder="Account holder name"
+                  name="phoneNumber"
+                  value={walletForm.phoneNumber}
+                  onChange={handleWalletFieldChange}
+                  placeholder="090 123 4567"
+                  inputMode="tel"
                   className="w-full rounded-xl border border-orange-100 px-3 py-2 text-sm outline-none transition focus:border-orange-300 focus:ring-1 focus:ring-orange-200"
                   required
                 />
               </div>
               <div className="space-y-2">
                 <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                  Account number
+                  MoMo wallet ID (optional)
                 </label>
                 <input
-                  name="accountNumber"
-                  value={bankForm.accountNumber}
-                  onChange={handleBankFieldChange}
-                  placeholder="Enter digits only"
+                  name="walletId"
+                  value={walletForm.walletId}
+                  onChange={handleWalletFieldChange}
+                  placeholder="Reference / wallet ID"
                   className="w-full rounded-xl border border-orange-100 px-3 py-2 text-sm outline-none transition focus:border-orange-300 focus:ring-1 focus:ring-orange-200"
-                  required
                 />
               </div>
             </div>
@@ -930,23 +884,23 @@ const CustomerProfilePanel = ({ open, onClose, onLogout }) => {
               <input
                 type="checkbox"
                 name="isDefault"
-                checked={bankForm.isDefault}
-                onChange={handleBankFieldChange}
+                checked={walletForm.isDefault}
+                onChange={handleWalletFieldChange}
                 className="h-4 w-4 rounded border-orange-200 text-orange-500 focus:ring-orange-300"
               />
-              Set as default bank for checkout
+              Set as default wallet for checkout
             </label>
             <div className="flex flex-wrap gap-3">
               <button
                 type="submit"
-                disabled={savingBankAccount}
+                disabled={savingWallet}
                 className="rounded-full bg-orange-500 px-5 py-2 text-sm font-semibold text-white transition hover:bg-orange-600 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {savingBankAccount ? "Linking..." : "Link bank account"}
+                {savingWallet ? "Linking..." : "Link MoMo wallet"}
               </button>
               <button
                 type="button"
-                onClick={handleCancelBankForm}
+                onClick={handleCancelWalletForm}
                 className="rounded-full border border-orange-200 px-5 py-2 text-sm font-semibold text-orange-500 transition hover:bg-orange-100"
               >
                 Cancel
@@ -956,109 +910,19 @@ const CustomerProfilePanel = ({ open, onClose, onLogout }) => {
         ) : null}
 
         {showCardForm ? (
-          <form
-            onSubmit={handleCardSubmit}
-            className="space-y-4 rounded-2xl border border-orange-100 bg-white p-4"
-          >
-            <div className="grid gap-3 md:grid-cols-2">
-              <div className="space-y-2">
-                <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                  Cardholder name
-                </label>
-                <input
-                  name="cardholderName"
-                  value={cardForm.cardholderName}
-                  onChange={handleCardFieldChange}
-                  placeholder="e.g. PHAM NGUYEN MINH CHAU"
-                  className="w-full rounded-xl border border-orange-100 px-3 py-2 text-sm outline-none transition focus:border-orange-300 focus:ring-1 focus:ring-orange-200"
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                  Card number
-                </label>
-                <input
-                  name="cardNumber"
-                  value={cardForm.cardNumber}
-                  onChange={handleCardFieldChange}
-                  placeholder="4111 1111 1111 1111"
-                  maxLength={19}
-                  className="w-full rounded-xl border border-orange-100 px-3 py-2 text-sm outline-none transition focus:border-orange-300 focus:ring-1 focus:ring-orange-200"
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                  Expiry month (MM)
-                </label>
-                <input
-                  name="expiryMonth"
-                  value={cardForm.expiryMonth}
-                  onChange={handleCardFieldChange}
-                  placeholder="04"
-                  maxLength={2}
-                  className="w-full rounded-xl border border-orange-100 px-3 py-2 text-sm outline-none transition focus:border-orange-300 focus:ring-1 focus:ring-orange-200"
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                  Expiry year (YY)
-                </label>
-                <input
-                  name="expiryYear"
-                  value={cardForm.expiryYear}
-                  onChange={handleCardFieldChange}
-                  placeholder="27"
-                  maxLength={2}
-                  className="w-full rounded-xl border border-orange-100 px-3 py-2 text-sm outline-none transition focus:border-orange-300 focus:ring-1 focus:ring-orange-200"
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                  CVV
-                </label>
-                <input
-                  name="cvv"
-                  type="password"
-                  value={cardForm.cvv}
-                  onChange={handleCardFieldChange}
-                  placeholder="3 digits"
-                  maxLength={3}
-                  className="w-full rounded-xl border border-orange-100 px-3 py-2 text-sm outline-none transition focus:border-orange-300 focus:ring-1 focus:ring-orange-200"
-                  required
-                />
-              </div>
-            </div>
-            <label className="flex items-center gap-2 text-xs text-gray-600">
-              <input
-                type="checkbox"
-                name="isDefault"
-                checked={cardForm.isDefault}
-                onChange={handleCardFieldChange}
-                className="h-4 w-4 rounded border-orange-200 text-orange-500 focus:ring-orange-300"
-              />
-              Set as default card for checkout
-            </label>
-            <div className="flex flex-wrap gap-3">
-              <button
-                type="submit"
-                disabled={savingCard}
-                className="rounded-full bg-orange-500 px-5 py-2 text-sm font-semibold text-white transition hover:bg-orange-600 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {savingCard ? "Linking..." : "Add card"}
-              </button>
-              <button
-                type="button"
-                onClick={handleCancelCardForm}
-                className="rounded-full border border-orange-200 px-5 py-2 text-sm font-semibold text-orange-500 transition hover:bg-orange-100"
-              >
-                Cancel
-              </button>
-            </div>
-          </form>
+          <Elements stripe={stripePromise}>
+            <StripeCardLinkForm
+              cardForm={cardForm}
+              setCardForm={setCardForm}
+              defaultEmail={defaultEmail}
+              savingCard={savingCard}
+              setSavingCard={setSavingCard}
+              createStripeSetupIntent={createStripeSetupIntent}
+              linkStripeCard={linkCard}
+              onSuccess={handleCardLinkSuccess}
+              onCancel={handleCancelCardForm}
+            />
+          </Elements>
         ) : null}
       </div>
     );
@@ -1316,3 +1180,172 @@ const CustomerProfilePanel = ({ open, onClose, onLogout }) => {
 };
 
 export default CustomerProfilePanel;
+
+const cardElementStyles = {
+  style: {
+    base: {
+      fontSize: "15px",
+      color: "#1f2933",
+      "::placeholder": {
+        color: "#9ca3af",
+      },
+      fontFamily: '"Inter", system-ui, sans-serif',
+    },
+    invalid: {
+      color: "#ef4444",
+    },
+  },
+  hidePostalCode: true,
+};
+
+function StripeCardLinkForm({
+  cardForm,
+  setCardForm,
+  defaultEmail,
+  savingCard,
+  setSavingCard,
+  createStripeSetupIntent,
+  linkStripeCard,
+  onSuccess,
+  onCancel,
+}) {
+  const stripe = useStripe();
+  const elements = useElements();
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    if (!stripe || !elements) {
+      toast.error("Payment form is not ready yet. Please try again in a moment.");
+      return;
+    }
+
+    if (!cardForm.cardholderName.trim()) {
+      toast.error("Please enter the cardholder's name.");
+      return;
+    }
+
+    const cardElement = elements.getElement(CardElement);
+    if (!cardElement) {
+      toast.error("Unable to access the secure card field.");
+      return;
+    }
+
+    setSavingCard(true);
+    try {
+      const setupIntent = await createStripeSetupIntent();
+      if (!setupIntent?.client_secret || !setupIntent?.customer_id) {
+        throw new Error("Unable to initialise Stripe setup intent.");
+      }
+
+      const confirmation = await stripe.confirmCardSetup(setupIntent.client_secret, {
+        payment_method: {
+          card: cardElement,
+          billing_details: {
+            name: cardForm.cardholderName,
+            email: defaultEmail || undefined,
+          },
+        },
+      });
+
+      if (confirmation.error) {
+        throw new Error(confirmation.error.message || "Card verification failed.");
+      }
+
+      const paymentMethodId = confirmation.setupIntent?.payment_method;
+      if (!paymentMethodId) {
+        throw new Error("Stripe did not return a payment method id.");
+      }
+
+      await linkStripeCard({
+        paymentMethodId,
+        customerId: setupIntent.customer_id,
+        isDefault: cardForm.isDefault,
+      });
+
+      toast.success("Card added successfully.");
+      if (typeof onSuccess === "function") {
+        onSuccess();
+      }
+      cardElement.clear();
+    } catch (error) {
+      const message = error?.message || "Unable to link card.";
+      toast.error(message);
+    } finally {
+      setSavingCard(false);
+    }
+  };
+
+  const handleCardholderChange = (event) => {
+    setCardForm((prev) => ({
+      ...prev,
+      cardholderName: event.target.value,
+    }));
+  };
+
+  const handleDefaultToggle = (event) => {
+    setCardForm((prev) => ({
+      ...prev,
+      isDefault: event.target.checked,
+    }));
+  };
+
+  return (
+    <form
+      onSubmit={handleSubmit}
+      className="space-y-4 rounded-2xl border border-orange-100 bg-white p-4"
+    >
+      <div className="space-y-3">
+        <div className="space-y-2">
+          <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+            Cardholder name
+          </label>
+          <input
+            name="cardholderName"
+            value={cardForm.cardholderName}
+            onChange={handleCardholderChange}
+            placeholder="e.g. PHAM NGUYEN MINH CHAU"
+            className="w-full rounded-xl border border-orange-100 px-3 py-2 text-sm outline-none transition focus:border-orange-300 focus:ring-1 focus:ring-orange-200"
+            required
+          />
+        </div>
+        <div className="space-y-2">
+          <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+            Card details
+          </label>
+          <div className="rounded-xl border border-orange-100 px-3 py-3">
+            <CardElement options={cardElementStyles} />
+          </div>
+        </div>
+        <label className="flex items-center gap-2 text-xs text-gray-600">
+          <input
+            type="checkbox"
+            name="isDefault"
+            checked={cardForm.isDefault}
+            onChange={handleDefaultToggle}
+            className="h-4 w-4 rounded border-orange-200 text-orange-500 focus:ring-orange-300"
+          />
+          Set as default card for checkout
+        </label>
+        <p className="text-[10px] text-gray-400">
+          Card details are securely tokenised by Stripe. FoodFast never stores full card numbers or CVV codes.
+        </p>
+      </div>
+      <div className="flex flex-wrap gap-3">
+        <button
+          type="submit"
+          disabled={savingCard || !stripe || !elements}
+          className="rounded-full bg-orange-500 px-5 py-2 text-sm font-semibold text-white transition hover:bg-orange-600 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {savingCard ? "Linking..." : "Add card"}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="rounded-full border border-orange-200 px-5 py-2 text-sm font-semibold text-orange-500 transition hover:bg-orange-100"
+        >
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}

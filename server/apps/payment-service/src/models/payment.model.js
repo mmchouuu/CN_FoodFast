@@ -60,6 +60,19 @@ async function getPayment(id){
   return res.rows[0];
 }
 
+async function findPaymentByTransactionId(transactionId) {
+  if (!transactionId) return null;
+  const res = await pool.query(
+    `SELECT *
+       FROM payments
+      WHERE transaction_id = $1
+      ORDER BY created_at DESC
+      LIMIT 1`,
+    [transactionId],
+  );
+  return res.rows[0] || null;
+}
+
 async function findPaymentByIdempotencyKey(idempotencyKey, userId) {
   if (!idempotencyKey) return null;
   const res = await pool.query(
@@ -253,6 +266,7 @@ module.exports = {
   pool,
   createPayment,
   getPayment,
+  findPaymentByTransactionId,
   findPaymentByIdempotencyKey,
   getPaymentForUser,
   updatePayment,

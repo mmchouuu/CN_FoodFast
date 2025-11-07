@@ -12,6 +12,8 @@
   "dependencies": {
     "@auth0/auth0-react": "^2.5.0",
     "@clerk/clerk-react": "^5.49.0",
+    "@stripe/react-stripe-js": "^3.10.0",
+    "@stripe/stripe-js": "^4.10.0",
     "@tailwindcss/vite": "^4.1.13",
     "axios": "^1.12.2",
     "chart.js": "^4.5.0",

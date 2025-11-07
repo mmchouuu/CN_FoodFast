@@ -57,7 +57,6 @@ const FALLBACK_RESTAURANTS = restaurantList;
 const DEFAULT_PAYMENT_METHOD = paymentOptionList[0]?.id || 'cod';
 const ORDER_HISTORY_STATUSES = new Set(['delivered', 'completed', 'cancelled']);
 const ORDER_REVIEWABLE_STATUSES = new Set(['delivered', 'completed']);
-const CARD_STORAGE_KEY = 'customer_payment_cards';
 
 const toNumberOr = (value, fallback = 0) => {
     const parsed = Number(value);
@@ -86,52 +85,6 @@ const normalizePaymentMethodForSubmit = (value) => {
 
 const ensureArray = (value) => (Array.isArray(value) ? value : value ? [value] : []);
 
-const generateCardId = () => {
-    try {
-        if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-            return crypto.randomUUID();
-        }
-    } catch (error) {
-        // ignore generation errors, fallback below
-    }
-    return `card_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-};
-
-const readStoredCardsMap = () => {
-    if (typeof window === 'undefined') {
-        return {};
-    }
-    try {
-        const raw = localStorage.getItem(CARD_STORAGE_KEY);
-        if (!raw) return {};
-        const parsed = JSON.parse(raw);
-        return parsed && typeof parsed === 'object' ? parsed : {};
-    } catch (error) {
-        console.warn('Failed to parse stored cards', error);
-        return {};
-    }
-};
-
-const loadCardsForUser = (userId) => {
-    if (!userId) return [];
-    const map = readStoredCardsMap();
-    const list = map?.[userId];
-    return Array.isArray(list) ? list : [];
-};
-
-const persistCardsForUser = (userId, cards) => {
-    if (!userId || typeof window === 'undefined') {
-        return;
-    }
-    try {
-        const map = readStoredCardsMap();
-        map[userId] = cards;
-        localStorage.setItem(CARD_STORAGE_KEY, JSON.stringify(map));
-    } catch (error) {
-        console.warn('Failed to persist stored cards', error);
-    }
-};
-
 const detectCardBrand = (digitString = '') => {
     if (!digitString) return 'card';
     const digits = digitString.replace(/\D/g, '');
@@ -141,6 +94,22 @@ const detectCardBrand = (digitString = '') => {
     if (/^3[47]/.test(digits)) return 'amex';
     if (digits.startsWith('6')) return 'discover';
     return 'card';
+};
+
+const adaptStripeCardFromApi = (record) => {
+    if (!record) return null;
+    const providerData =
+        record.provider_data && typeof record.provider_data === 'object' ? record.provider_data : {};
+    const fallbackBrand = detectCardBrand(providerData.last4 || record.last4 || '');
+    return {
+        id: record.id,
+        brand: (record.brand || fallbackBrand || 'card').toUpperCase(),
+        last4: record.last4 || providerData.last4 || '',
+        expMonth: record.exp_month || providerData.exp_month || null,
+        expYear: record.exp_year || providerData.exp_year || null,
+        isDefault: Boolean(record.is_default),
+        providerData,
+    };
 };
 
 const adaptOptionValueFromApi = (item) => {
@@ -830,7 +799,7 @@ export const AppContextProvider = ({ children }) => {
     const [notifications, setNotifications] = useState(notificationFeed);
     const [addresses, setAddresses] = useState([]);
 
-    const [bankAccounts, setBankAccounts] = useState([]);
+    const [momoWallets, setMomoWallets] = useState([]);
     const [cardAccounts, setCardAccounts] = useState([]);
     const [customerProfileOpen, setCustomerProfileOpen] = useState(false);
 
@@ -988,14 +957,6 @@ export const AppContextProvider = ({ children }) => {
     });
 
 
-    useEffect(() => {
-        if (!authProfileId) {
-            setCardAccounts([]);
-            return;
-        }
-        setCardAccounts(loadCardsForUser(authProfileId));
-    }, [authProfileId]);
-
     const refreshOrders = useCallback(async () => {
         if (!authToken || !authProfileId) {
             setActiveOrders([]);
@@ -1066,13 +1027,13 @@ export const AppContextProvider = ({ children }) => {
         }
     }, [authToken, authProfileId]);
 
-    const refreshBankAccounts = useCallback(async () => {
+    const refreshMomoWallets = useCallback(async () => {
         if (!authToken && !authProfileId) {
-            setBankAccounts([]);
+            setMomoWallets([]);
             return [];
         }
         try {
-            const data = await paymentsService.listBankAccounts({ userId: authProfileId || undefined });
+            const data = await paymentsService.listMomoWallets({ userId: authProfileId || undefined });
             const rawList = Array.isArray(data)
                 ? data
                 : Array.isArray(data?.data)
@@ -1080,12 +1041,12 @@ export const AppContextProvider = ({ children }) => {
                     : Array.isArray(data?.items)
                         ? data.items
                         : [];
-            setBankAccounts(rawList);
+            setMomoWallets(rawList);
             return rawList;
         } catch (error) {
             const status = error?.response?.status;
             if (status === 401 || status === 403) {
-                setBankAccounts([]);
+                setMomoWallets([]);
                 return [];
             }
             const errorMessage = String(error?.response?.data?.message || '').toLowerCase();
@@ -1094,83 +1055,110 @@ export const AppContextProvider = ({ children }) => {
                 status === 400 ||
                 error?.response?.data?.code === 'BANK_ACCOUNT_NOT_FOUND' ||
                 errorMessage.includes('not linked') ||
-                errorMessage.includes('no bank account')
+                errorMessage.includes('no bank account') ||
+                errorMessage.includes('no momo wallet') ||
+                errorMessage.includes('no wallet')
             ) {
-                setBankAccounts([]);
+                setMomoWallets([]);
                 return [];
             }
-            console.error('Failed to load bank accounts', error);
-            toast.error('Unable to load bank accounts. Please try again later.');
-            setBankAccounts([]);
+            console.error('Failed to load MoMo wallets', error);
+            toast.error('Unable to load MoMo wallets. Please try again later.');
+            setMomoWallets([]);
             return [];
         }
     }, [authToken, authProfileId]);
 
-    const linkBankAccount = useCallback(
+    const linkMomoWallet = useCallback(
         async (payload = {}) => {
             if (!authToken && !authProfileId) {
-                throw new Error('Please sign in to link a bank account.');
+                throw new Error('Please sign in to link a MoMo wallet.');
             }
             const requestPayload = { ...payload };
             if (!requestPayload.user_id && authProfileId) {
                 requestPayload.user_id = authProfileId;
             }
-            const record = await paymentsService.linkBankAccount(requestPayload);
-            await refreshBankAccounts();
+            const record = await paymentsService.linkMomoWallet(requestPayload);
+            await refreshMomoWallets();
             return record;
         },
-        [authToken, authProfileId, refreshBankAccounts],
+        [authToken, authProfileId, refreshMomoWallets],
     );
 
+    const refreshCardAccounts = useCallback(
+        async () => {
+            if (!authToken && !authProfileId) {
+                setCardAccounts([]);
+                return [];
+            }
+            try {
+                const response = await paymentsService.listStripeCards({ userId: authProfileId || undefined });
+                const rawList = Array.isArray(response?.data)
+                    ? response.data
+                    : Array.isArray(response)
+                        ? response
+                        : [];
+                const adapted = rawList.map(adaptStripeCardFromApi).filter(Boolean);
+                setCardAccounts(adapted);
+                return adapted;
+            } catch (error) {
+                const status = error?.response?.status;
+                if (status === 401 || status === 403) {
+                    setCardAccounts([]);
+                    return [];
+                }
+                console.error('Failed to load cards', error);
+                toast.error('Unable to load saved cards. Please try again later.');
+                setCardAccounts([]);
+                return [];
+            }
+        },
+        [authToken, authProfileId],
+    );
+
+    const createStripeSetupIntent = useCallback(async () => {
+        if (!authProfileId) {
+            throw new Error('Please sign in to link a card.');
+        }
+        const result = await paymentsService.createStripeSetupIntent();
+        return result;
+    }, [authProfileId]);
+
     const linkPaymentCard = useCallback(
-        async (payload = {}) => {
+        async ({ paymentMethodId, customerId, isDefault } = {}) => {
             if (!authProfileId) {
                 throw new Error('Please sign in to link a card.');
             }
-            const rawNumber = String(payload.cardNumber || '').replace(/\D/g, '');
-            if (!rawNumber || rawNumber.length < 4) {
-                throw new Error('Please provide a valid card number.');
+            if (!paymentMethodId) {
+                throw new Error('paymentMethodId is required');
             }
-            const normalizedMonth = payload.expiryMonth ? String(payload.expiryMonth).padStart(2, '0') : '';
-            const normalizedYear = payload.expiryYear ? String(payload.expiryYear).padStart(2, '0') : '';
-            const cardRecord = {
-                id: payload.id || generateCardId(),
-                cardholderName: (payload.cardholderName || '').trim(),
-                last4: rawNumber.slice(-4),
-                expiryMonth: normalizedMonth,
-                expiryYear: normalizedYear,
-                brand: detectCardBrand(rawNumber),
-                isDefault: Boolean(payload.isDefault),
-            };
-            setCardAccounts((prev) => {
-                const filtered = prev.filter((card) => card.id !== cardRecord.id);
-                const updated = cardRecord.isDefault
-                    ? [
-                        cardRecord,
-                        ...filtered.map((card) => ({ ...card, isDefault: false })),
-                    ]
-                    : [...filtered, cardRecord];
-                persistCardsForUser(authProfileId, updated);
-                return updated;
+            if (!customerId) {
+                throw new Error('customerId is required');
+            }
+            await paymentsService.confirmStripePaymentMethod({
+                payment_method_id: paymentMethodId,
+                customer_id: customerId,
+                make_default: Boolean(isDefault),
             });
-            return cardRecord;
+            const updated = await refreshCardAccounts();
+            return updated.find(
+                (card) => card?.providerData?.payment_method_id === paymentMethodId,
+            ) || null;
         },
-        [authProfileId],
+        [authProfileId, refreshCardAccounts],
     );
 
-    const removePaymentCard = useCallback(
-        (cardId) => {
-            if (!authProfileId) {
-                return;
-            }
-            setCardAccounts((prev) => {
-                const updated = prev.filter((card) => card.id !== cardId);
-                persistCardsForUser(authProfileId, updated);
-                return updated;
-            });
-        },
-        [authProfileId],
-    );
+    const removePaymentCard = useCallback(() => {
+        throw new Error('Removing a saved card is not supported yet.');
+    }, []);
+
+    useEffect(() => {
+        if (!authToken && !authProfileId) {
+            setCardAccounts([]);
+            return;
+        }
+        refreshCardAccounts();
+    }, [authToken, authProfileId, refreshCardAccounts]);
 
     useEffect(() => {
         refreshOrders();
@@ -1187,21 +1175,21 @@ export const AppContextProvider = ({ children }) => {
 
     useEffect(() => {
         if (!authToken && !authProfileId) {
-            setBankAccounts([]);
+            setMomoWallets([]);
             return;
         }
-        refreshBankAccounts();
-    }, [authToken, authProfileId, refreshBankAccounts]);
+        refreshMomoWallets();
+    }, [authToken, authProfileId, refreshMomoWallets]);
 
     useEffect(() => {
-        if (method === 'wallet' && bankAccounts.length === 0) {
+        if (method === 'wallet' && momoWallets.length === 0) {
             setMethod(DEFAULT_PAYMENT_METHOD);
             return;
         }
         if (method === 'card' && cardAccounts.length === 0) {
             setMethod(DEFAULT_PAYMENT_METHOD);
         }
-    }, [method, bankAccounts.length, cardAccounts.length, setMethod]);
+    }, [method, momoWallets.length, cardAccounts.length, setMethod]);
 
     // --- Unified user object ---
 
@@ -2222,10 +2210,12 @@ export const AppContextProvider = ({ children }) => {
         notifications,
         markNotificationAsRead,
         clearCart,
-        bankAccounts,
-        refreshBankAccounts,
-        linkBankAccount,
+        momoWallets,
+        refreshMomoWallets,
+        linkMomoWallet,
         cardAccounts,
+        refreshCardAccounts,
+        createStripeSetupIntent,
         linkCard: linkPaymentCard,
         removeCard: removePaymentCard,
         paymentOptions: paymentOptionList,
