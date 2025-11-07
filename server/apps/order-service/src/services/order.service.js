@@ -647,6 +647,33 @@ const deriveRestaurantId = (payload, items) => {
   return null;
 };
 
+const deriveBranchId = (payload, items) => {
+  const metadata = payload.metadata && typeof payload.metadata === 'object' ? payload.metadata : {};
+  const directValue =
+    payload.branch_id ||
+    payload.branchId ||
+    metadata.branch_id ||
+    metadata.branchId ||
+    (Array.isArray(metadata.branch_ids) && metadata.branch_ids.length && metadata.branch_ids[0]) ||
+    (Array.isArray(payload.branch_ids) && payload.branch_ids.length && payload.branch_ids[0]) ||
+    null;
+  if (directValue) return directValue;
+
+  for (const item of items) {
+    if (item.branch_id || item.branchId) {
+      return item.branch_id || item.branchId;
+    }
+    if (item.product_snapshot) {
+      const snapshot = item.product_snapshot;
+      if (snapshot.branch_id || snapshot.branchId) {
+        return snapshot.branch_id || snapshot.branchId;
+      }
+    }
+  }
+
+  return null;
+};
+
 const createOrder = async (payload, userContext = null) => {
   const client = await pool.connect();
   try {
@@ -688,11 +715,7 @@ const createOrder = async (payload, userContext = null) => {
       throw new OrderValidationError('restaurant_id is required');
     }
 
-    const branchId =
-      payload.branch_id ||
-      payload.branchId ||
-      (payload.metadata && (payload.metadata.branch_id || payload.metadata.branchId)) ||
-      null;
+    const branchId = deriveBranchId(payload, items);
 
     const deliveryInput =
       payload.delivery ||

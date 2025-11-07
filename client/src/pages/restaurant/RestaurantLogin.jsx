@@ -25,12 +25,22 @@ const RestaurantLogin = () => {
       toast.success("Signed in successfully.");
       if (data?.token) {
         localStorage.setItem("restaurant_token", data.token);
+      } else {
+        localStorage.removeItem("restaurant_token");
       }
-      if (data?.user) {
-        localStorage.setItem("restaurant_profile", JSON.stringify(data.user));
-        setRestaurantProfile(data.user);
+      const ownerProfile = data?.user
+        ? {
+            ...data.user,
+            authToken: data.token || data.user?.authToken || null,
+          }
+        : null;
+      if (ownerProfile) {
+        localStorage.setItem("restaurant_profile", JSON.stringify(ownerProfile));
+      } else {
+        localStorage.removeItem("restaurant_profile");
       }
-      setIsOwner(true);
+      setRestaurantProfile(ownerProfile);
+      setIsOwner(Boolean(ownerProfile));
       navigate("/owner", { replace: true });
     } catch (err) {
       setError(err?.response?.data?.message || err?.message || "Unable to sign in to restaurant account.");

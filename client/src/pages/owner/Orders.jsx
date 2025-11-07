@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import toast from "react-hot-toast";
 import ownerOrdersService from "../../services/ownerOrders";
 import restaurantManagerService from "../../services/restaurantManager";
 import { useAppContext } from "../../context/AppContext";
@@ -228,6 +229,7 @@ const Orders = () => {
   const [searchValue, setSearchValue] = useState("");
   const [selectedRestaurantId, setSelectedRestaurantId] = useState("all");
   const [selectedBranchId, setSelectedBranchId] = useState("all");
+  const [statusUpdatingMap, setStatusUpdatingMap] = useState({});
 
   const lookups = useMemo(
     () => buildLookups(ownerRestaurants),
@@ -316,6 +318,55 @@ const Orders = () => {
   useEffect(() => {
     loadOrders();
   }, [loadOrders]);
+
+  const handleStatusChange = useCallback(
+    async (order, nextStatusRaw) => {
+      if (!order?.id) return;
+      const nextStatus = typeof nextStatusRaw === "string" ? nextStatusRaw.trim() : "";
+      if (!nextStatus || order.status === nextStatus) {
+        return;
+      }
+      const prettyStatus = nextStatus
+        .split("_")
+        .map((chunk) => chunk.charAt(0).toUpperCase() + chunk.slice(1))
+        .join(" ");
+
+      setStatusUpdatingMap((prev) => ({ ...prev, [order.id]: true }));
+
+      try {
+        const updated = await ownerOrdersService.updateStatus(order.id, { status: nextStatus });
+        setRawOrders((prev) => {
+          if (!Array.isArray(prev) || !prev.length) return prev;
+          return prev.map((item) => {
+            if (item.id !== order.id) return item;
+            if (updated && typeof updated === "object") {
+              return updated;
+            }
+            return {
+              ...item,
+              status: nextStatus,
+              updated_at: new Date().toISOString(),
+            };
+          });
+        });
+        toast.success(`Order ${order.displayCode || order.id} marked as ${prettyStatus}`);
+      } catch (err) {
+        console.error("[owner-orders] failed to update status", err);
+        const message =
+          err?.response?.data?.error ||
+          err?.message ||
+          "Unable to update order status. Please try again.";
+        toast.error(message);
+      } finally {
+        setStatusUpdatingMap((prev) => {
+          const next = { ...prev };
+          delete next[order.id];
+          return next;
+        });
+      }
+    },
+    [setRawOrders],
+  );
 
   const restaurantOptions = useMemo(() => {
     return ownerRestaurants.map((restaurant) => ({
@@ -556,129 +607,137 @@ const Orders = () => {
       )}
 
       <section className="mt-6 space-y-4">
-        {filteredOrders.map((order) => (
-          <article
-            key={order.id}
-            className="bg-white rounded-xl shadow-sm border border-slate-100"
-          >
-            <header className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between border-b border-slate-100 px-6 py-4">
-              <div>
-                <p className="text-xs uppercase tracking-wide text-slate-500">
-                  Order {order.displayCode}
-                </p>
-                <p className="text-xs font-semibold text-emerald-600">
-                  {order.restaurantName} • {order.branchName}
-                </p>
-                <p className="text-sm text-slate-500">
-                  Placed on{" "}
-                  {order.createdAt
-                    ? new Date(order.createdAt).toLocaleString(undefined, {
+        {filteredOrders.map((order) => {
+          const isStatusUpdating = Boolean(statusUpdatingMap[order.id]);
+          return (
+            <article
+              key={order.id}
+              className="bg-white rounded-xl shadow-sm border border-slate-100"
+            >
+              <header className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between border-b border-slate-100 px-6 py-4">
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-slate-500">
+                    Order {order.displayCode}
+                  </p>
+                  <p className="text-xs font-semibold text-emerald-600">
+                    {order.restaurantName} • {order.branchName}
+                  </p>
+                  <p className="text-sm text-slate-500">
+                    Placed on{" "}
+                    {order.createdAt
+                      ? new Date(order.createdAt).toLocaleString(undefined, {
+                          dateStyle: "medium",
+                          timeStyle: "short",
+                        })
+                      : "N/A"}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-3">
+                  <StatusSelect
+                    value={order.status}
+                    disabled={isStatusUpdating}
+                    loading={isStatusUpdating}
+                    onChange={(value) => handleStatusChange(order, value)}
+                  />
+                  <PaymentStatus
+                    paid={order.isPaid}
+                    amount={order.totalAmount}
+                    currency={currency}
+                  />
+                </div>
+              </header>
+
+              <div className="px-6 py-4 grid grid-cols-1 gap-6 lg:grid-cols-3">
+                <div className="space-y-3 lg:col-span-2">
+                  <h3 className="text-sm font-semibold text-slate-700 uppercase">
+                    Order Items
+                  </h3>
+                  <ul className="space-y-3">
+                    {order.items.map((item) => (
+                      <li
+                        key={item.id}
+                        className="rounded-lg border border-slate-100 bg-slate-50 px-4 py-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between"
+                      >
+                        <div>
+                          <p className="font-semibold text-slate-800">
+                            {item.name}
+                          </p>
+                          <p className="text-xs text-slate-500">
+                            Size: {item.size} · Quantity: {item.quantity}
+                          </p>
+                        </div>
+                        <p className="text-sm font-semibold text-slate-700">
+                          {currency}
+                          {resolveItemTotal(item).toLocaleString()}
+                        </p>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="rounded-lg border border-slate-100 bg-slate-50 px-4 py-3">
+                    <h3 className="text-sm font-semibold text-slate-700 uppercase">
+                      Customer & Delivery
+                    </h3>
+                    <p className="mt-2 text-sm text-slate-600 font-medium">
+                      {order.customerName || "Customer"}
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      Phone: {order.address.phone || "N/A"}
+                    </p>
+                    <p className="text-xs text-slate-500 mt-2 leading-5">
+                      {[order.address.street, order.address.district, order.address.city]
+                        .filter(Boolean)
+                        .join(", ")}
+                      {order.address.state ? `, ${order.address.state}` : ""}
+                      {order.address.country ? ` • ${order.address.country}` : ""}
+                      {order.address.zipcode ? ` • ${order.address.zipcode}` : ""}
+                    </p>
+                  </div>
+
+                  <div className="rounded-lg border border-slate-100 bg-slate-50 px-4 py-3 space-y-2 text-sm text-slate-600">
+                    <div className="flex items-center justify-between">
+                      <span>Payment Method</span>
+                      <span className="font-semibold">{order.paymentMethod}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span>Total Amount</span>
+                      <span className="font-semibold">
+                        {currency}
+                        {Number(order.totalAmount || 0).toLocaleString()}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-xs text-slate-500">
+                      <span>Status</span>
+                      <span className="capitalize">{order.status}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <footer className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between border-t border-slate-100 px-6 py-4 bg-slate-50/60">
+                <div className="flex flex-wrap gap-3">
+                  <button className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 transition">
+                    Print Receipt
+                  </button>
+                  <button className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 transition">
+                    Contact Customer
+                  </button>
+                </div>
+                <div className="text-xs text-slate-500">
+                  Last updated{" "}
+                  {order.updatedAt
+                    ? new Date(order.updatedAt).toLocaleString(undefined, {
                         dateStyle: "medium",
                         timeStyle: "short",
                       })
                     : "N/A"}
-                </p>
-              </div>
-              <div className="flex flex-wrap gap-3">
-                <StatusSelect defaultValue={order.status} />
-                <PaymentStatus
-                  paid={order.isPaid}
-                  amount={order.totalAmount}
-                  currency={currency}
-                />
-              </div>
-            </header>
-
-            <div className="px-6 py-4 grid grid-cols-1 gap-6 lg:grid-cols-3">
-              <div className="space-y-3 lg:col-span-2">
-                <h3 className="text-sm font-semibold text-slate-700 uppercase">
-                  Order Items
-                </h3>
-                <ul className="space-y-3">
-                  {order.items.map((item) => (
-                    <li
-                      key={item.id}
-                      className="rounded-lg border border-slate-100 bg-slate-50 px-4 py-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between"
-                    >
-                      <div>
-                        <p className="font-semibold text-slate-800">
-                          {item.name}
-                        </p>
-                        <p className="text-xs text-slate-500">
-                          Size: {item.size} · Quantity: {item.quantity}
-                        </p>
-                      </div>
-                      <p className="text-sm font-semibold text-slate-700">
-                        {currency}
-                        {resolveItemTotal(item).toLocaleString()}
-                      </p>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-
-              <div className="space-y-4">
-                <div className="rounded-lg border border-slate-100 bg-slate-50 px-4 py-3">
-                  <h3 className="text-sm font-semibold text-slate-700 uppercase">
-                    Customer & Delivery
-                  </h3>
-                  <p className="mt-2 text-sm text-slate-600 font-medium">
-                    {order.customerName || "Customer"}
-                  </p>
-                  <p className="text-xs text-slate-500">
-                    Phone: {order.address.phone || "N/A"}
-                  </p>
-                  <p className="text-xs text-slate-500 mt-2 leading-5">
-                    {[order.address.street, order.address.district, order.address.city]
-                      .filter(Boolean)
-                      .join(", ")}
-                    {order.address.state ? `, ${order.address.state}` : ""}
-                    {order.address.country ? ` • ${order.address.country}` : ""}
-                    {order.address.zipcode ? ` • ${order.address.zipcode}` : ""}
-                  </p>
                 </div>
-
-                <div className="rounded-lg border border-slate-100 bg-slate-50 px-4 py-3 space-y-2 text-sm text-slate-600">
-                  <div className="flex items-center justify-between">
-                    <span>Payment Method</span>
-                    <span className="font-semibold">{order.paymentMethod}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span>Total Amount</span>
-                    <span className="font-semibold">
-                      {currency}
-                      {Number(order.totalAmount || 0).toLocaleString()}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between text-xs text-slate-500">
-                    <span>Status</span>
-                    <span className="capitalize">{order.status}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <footer className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between border-t border-slate-100 px-6 py-4 bg-slate-50/60">
-              <div className="flex flex-wrap gap-3">
-                <button className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 transition">
-                  Print Receipt
-                </button>
-                <button className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 transition">
-                  Contact Customer
-                </button>
-              </div>
-              <div className="text-xs text-slate-500">
-                Last updated{" "}
-                {order.updatedAt
-                  ? new Date(order.updatedAt).toLocaleString(undefined, {
-                      dateStyle: "medium",
-                      timeStyle: "short",
-                    })
-                  : "N/A"}
-              </div>
-            </footer>
-          </article>
-        ))}
+              </footer>
+            </article>
+          );
+        })}
 
         {!ordersLoading && !restaurantsLoading && !filteredOrders.length ? (
           <div className="rounded-xl border border-dashed border-slate-200 bg-white px-6 py-12 text-center text-slate-500">
@@ -690,18 +749,41 @@ const Orders = () => {
   );
 };
 
-const StatusSelect = ({ defaultValue }) => (
-  <select
-    defaultValue={defaultValue}
-    className="rounded-lg border border-slate-200 bg-white py-2 px-3 text-xs font-semibold text-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/60"
-  >
-    {ORDER_STATUS_TABS.filter((tab) => tab.key !== "all").map((tab) => (
-      <option key={tab.key} value={tab.key}>
-        {tab.label}
-      </option>
-    ))}
-  </select>
-);
+const StatusSelect = ({ value, onChange, disabled, loading }) => {
+  const isDisabled = disabled || loading;
+  const resolvedValue = typeof value === "string" && value.length ? value : "pending";
+  return (
+    <div className="relative">
+      <select
+        value={resolvedValue}
+        onChange={(event) => onChange?.(event.target.value)}
+        disabled={isDisabled}
+        className="rounded-lg border border-slate-200 bg-white py-2 px-3 text-xs font-semibold text-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 disabled:cursor-not-allowed disabled:opacity-60 pr-8"
+      >
+        {ORDER_STATUS_TABS.filter((tab) => tab.key !== "all").map((tab) => (
+          <option key={tab.key} value={tab.key}>
+            {tab.label}
+          </option>
+        ))}
+      </select>
+      {loading ? (
+        <svg
+          className="absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 animate-spin text-slate-400"
+          xmlns="http://www.w3.org/2000/svg"
+          fill="none"
+          viewBox="0 0 24 24"
+        >
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+          <path
+            className="opacity-75"
+            fill="currentColor"
+            d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
+          />
+        </svg>
+      ) : null}
+    </div>
+  );
+};
 
 const PaymentStatus = ({ paid, amount, currency }) => (
   <div className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold">
