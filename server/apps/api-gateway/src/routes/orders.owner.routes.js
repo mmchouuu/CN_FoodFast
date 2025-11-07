@@ -1,11 +1,16 @@
 const express = require('express');
 const { createProxyMiddleware } = require('http-proxy-middleware');
 const jwt = require('jsonwebtoken');
+const config = require('../config');
 const restaurantClient = require('../services/restaurant.client');
 
 const router = express.Router();
 
-const ORDER_SERVICE_URL = process.env.ORDER_SERVICE_URL || 'http://order-service:3003';
+const ORDER_SERVICE_URL = (
+  process.env.ORDER_SERVICE_URL ||
+  config.orderServiceUrl ||
+  'http://localhost:3003'
+).replace(/\/+$/, '');
 const JWT_SECRET = process.env.JWT_SECRET || 'secret';
 
 const proxy = (target) => {

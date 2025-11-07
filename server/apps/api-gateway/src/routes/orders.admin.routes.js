@@ -1,9 +1,14 @@
 const express = require('express');
 const { createProxyMiddleware } = require('http-proxy-middleware');
+const config = require('../config');
 
 const router = express.Router();
 
-const ORDER_SERVICE_URL = process.env.ORDER_SERVICE_URL || 'http://order-service:3003';
+const ORDER_SERVICE_URL = (
+  process.env.ORDER_SERVICE_URL ||
+  config.orderServiceUrl ||
+  'http://localhost:3003'
+).replace(/\/+$/, '');
 
 const proxy = (target) => {
   const url = new URL(target);
