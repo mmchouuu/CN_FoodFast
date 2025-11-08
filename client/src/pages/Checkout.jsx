@@ -10,8 +10,8 @@ const Checkout = () => {
     getDiscountAmount,
     applyDiscountCode,
     appliedDiscountCode,
-    bankAccounts,
-    cardAccounts,
+    momoWallets,
+    cardAccounts: contextCardAccounts,
     method,
     setMethod,
     addresses,
@@ -23,6 +23,8 @@ const Checkout = () => {
     addNewAddress,
     openCustomerProfilePanel,
   } = useAppContext();
+  const walletAccounts = Array.isArray(momoWallets) ? momoWallets : [];
+  const cardAccounts = Array.isArray(contextCardAccounts) ? contextCardAccounts : [];
 
   const [discountCode, setDiscountCode] = useState(
     appliedDiscountCode?.code || ""
@@ -79,14 +81,15 @@ const Checkout = () => {
 
   useEffect(() => {
     const fallbackMethod = paymentMethods[0]?.id || "cod";
-    if (method === "wallet" && bankAccounts.length === 0) {
+    if (method === "wallet" && walletAccounts.length === 0) {
       setMethod(fallbackMethod);
       return;
     }
     if (method === "card" && cardAccounts.length === 0) {
       setMethod(fallbackMethod);
     }
-  }, [method, bankAccounts.length, cardAccounts.length, setMethod, paymentMethods]);
+
+  }, [method, walletAccounts.length, cardAccounts.length, setMethod, paymentMethods]);
 
   const handleApplyDiscount = () => {
     applyDiscountCode(discountCode);
@@ -398,7 +401,7 @@ const Checkout = () => {
               const isSelected = method === option.id;
               const isWallet = option.id === "wallet";
               const isCard = option.id === "card";
-              const walletUnavailable = isWallet && bankAccounts.length === 0;
+              const walletUnavailable = isWallet && walletAccounts.length === 0;
               const cardUnavailable = isCard && cardAccounts.length === 0;
               const isDisabled = walletUnavailable || cardUnavailable;
 
@@ -407,9 +410,9 @@ const Checkout = () => {
                   ? "1 saved card ready to use."
                   : `${cardAccounts.length} saved cards ready to use.`;
               const walletBankLabel =
-                bankAccounts.length === 1
+                walletAccounts.length === 1
                   ? "1 linked account ready to use."
-                  : `${bankAccounts.length} linked accounts ready to use.`;
+                  : `${walletAccounts.length} linked accounts ready to use.`;
               return (
                 <button
                   key={option.id}

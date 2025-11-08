@@ -1,82 +1,81 @@
+// payment-service/src/services/paymentMethod.service.js
+
 const paymentMethodModel = require('../models/paymentMethod.model');
 
-const ACCOUNT_NUMBER_REGEX = /^[0-9]{6,20}$/;
+const PHONE_REGEX = /^[0-9]{8,13}$/;
 
-function sanitizeString(value) {
-  return typeof value === 'string' ? value.trim() : '';
+const sanitizeString = (value) =>
+  typeof value === 'string' ? value.trim() : value == null ? '' : String(value).trim();
+
+const formatPhoneForDisplay = (phoneNumber) => {
+  const digits = phoneNumber ? String(phoneNumber).replace(/\D/g, '') : '';
+  if (!digits) return '';
+  return `${digits.slice(0, 3)} **** ${digits.slice(-3)}`.trim();
+};
+
+async function listWallets(userId) {
+  const rows = await paymentMethodModel.listMomoWallets(userId);
+  return rows.map((row) => {
+    const providerData =
+      row.provider_data && typeof row.provider_data === 'object' ? row.provider_data : {};
+    return {
+      id: row.id,
+      walletName:
+        providerData.display_name || providerData.owner_name || providerData.wallet_name || 'MoMo Wallet',
+      phoneNumber: providerData.phone_number || null,
+      walletId: providerData.wallet_id || null,
+      maskedPhone: providerData.phone_number ? formatPhoneForDisplay(providerData.phone_number) : null,
+      isDefault: row.is_default,
+      createdAt: row.created_at,
+      verifiedAt: row.verified_at,
+    };
+  });
 }
 
-function maskAccountNumber(raw) {
-  const digits = raw ? String(raw) : '';
-  if (digits.length <= 4) {
-    return digits;
-  }
-  return `${'*'.repeat(Math.max(0, digits.length - 4))}${digits.slice(-4)}`;
-}
-
-async function listBankAccounts(userId) {
-  const rows = await paymentMethodModel.listBankAccounts(userId);
-  return rows.map((row) => ({
-    id: row.id,
-    bankName: row.bank_name,
-    bankCode: row.bank_code,
-    accountHolder: row.account_holder,
-    accountNumberMasked: maskAccountNumber(row.account_number),
-    isDefault: row.is_default,
-    verifiedAt: row.verified_at,
-    createdAt: row.created_at,
-  }));
-}
-
-async function createBankAccount(userId, payload) {
-  const bankName = sanitizeString(payload.bankName);
-  const bankCode = sanitizeString(payload.bankCode).toUpperCase() || null;
-  const accountHolder = sanitizeString(payload.accountHolder);
-  const accountNumber = sanitizeString(payload.accountNumber).replace(/\s+/g, '');
+async function createWallet(userId, payload) {
+  const walletName = sanitizeString(payload.walletName || payload.accountHolder || payload.ownerName);
+  const phoneNumberRaw = sanitizeString(payload.phoneNumber || '');
+  const walletId = sanitizeString(payload.walletId || payload.momoId || '');
   const isDefault = payload.isDefault === true;
 
-  if (!bankName) {
-    throw Object.assign(new Error('Bank name is required'), { statusCode: 400 });
+  if (!walletName) {
+    throw Object.assign(new Error('MoMo account name is required'), { statusCode: 400 });
   }
-  if (!accountHolder) {
-    throw Object.assign(new Error('Account holder is required'), { statusCode: 400 });
-  }
-  if (!ACCOUNT_NUMBER_REGEX.test(accountNumber)) {
-    throw Object.assign(new Error('Account number must contain 6-20 digits'), {
-      statusCode: 400,
-    });
+  const digitsOnly = phoneNumberRaw.replace(/\D/g, '');
+  const normalizedPhone =
+    digitsOnly.startsWith('84') && digitsOnly.length >= 11 ? `0${digitsOnly.slice(2)}` : digitsOnly;
+  if (!normalizedPhone || !PHONE_REGEX.test(normalizedPhone)) {
+    throw Object.assign(new Error('Please enter a valid MoMo phone number'), { statusCode: 400 });
   }
 
-  try {
-    const record = await paymentMethodModel.createBankAccount({
-      userId,
-      bankName,
-      bankCode,
-      accountHolder,
-      accountNumber,
-      isDefault,
-    });
-    return {
-      id: record.id,
-      bankName: record.bank_name,
-      bankCode: record.bank_code,
-      accountHolder: record.account_holder,
-      accountNumberMasked: maskAccountNumber(record.account_number),
-      isDefault: record.is_default,
-      verifiedAt: record.verified_at,
-      createdAt: record.created_at,
-    };
-  } catch (error) {
-    if (error.code === '23505') {
-      throw Object.assign(new Error('This bank account is already linked'), {
-        statusCode: 409,
-      });
-    }
-    throw error;
-  }
+  const record = await paymentMethodModel.createMomoWallet({
+    userId,
+    displayName: walletName,
+    phoneNumber: normalizedPhone,
+    walletId: walletId || null,
+    isDefault,
+    providerData: {
+      display_name: walletName,
+      phone_number: normalizedPhone,
+      wallet_id: walletId || null,
+    },
+  });
+
+  return {
+    id: record.id,
+    walletName: walletName,
+    phoneNumber: normalizedPhone,
+    walletId: walletId || null,
+    maskedPhone: formatPhoneForDisplay(normalizedPhone),
+    isDefault: record.is_default,
+    createdAt: record.created_at,
+    verifiedAt: record.verified_at,
+  };
 }
 
 module.exports = {
-  listBankAccounts,
-  createBankAccount,
+  listWallets,
+  createWallet,
+  listBankAccounts: listWallets,
+  createBankAccount: createWallet,
 };

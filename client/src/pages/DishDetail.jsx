@@ -1104,6 +1104,7 @@ const DishDetail = () => {
                     value.priceDelta !== undefined && value.priceDelta !== null
                       ? ` ${formatOptionPrice(value.priceDelta)}`
                       : "";
+
                   return (
                     <button
                       type="button"

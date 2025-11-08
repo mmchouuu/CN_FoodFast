@@ -1282,6 +1282,7 @@ const BranchCard = ({ branch, onToggleStatus, onEdit }) => {
     if (lon) return lon;
     return "...";
   })();
+
   const schedule = formatOpeningSchedule(branch.openingHours);
   const ratingValue = Number(
     branch.ratingSummary?.avgRating ?? branch.rating ?? branch.ratingSummary?.avg_branch_rating ?? 0,
@@ -1324,6 +1325,7 @@ const BranchCard = ({ branch, onToggleStatus, onEdit }) => {
             <p className="text-xs uppercase tracking-wide text-slate-500">{badgeLabel}</p>
           </div>
           <div className="grid gap-1 text-sm text-slate-600">
+
             <span className="inline-flex items-center gap-2">
               <span className={`inline-block h-2.5 w-2.5 rounded-full ${statusDot}`} />
               {statusLabel}

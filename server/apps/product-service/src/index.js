@@ -49,5 +49,4 @@ async function bootstrap() {
     console.log(`[product-service] listening on port ${port}`);
   });
 }
-
 bootstrap();

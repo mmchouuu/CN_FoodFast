@@ -37,3 +37,4 @@ module.exports = function requireRoles(required) {
     return next();
   };
 };
+

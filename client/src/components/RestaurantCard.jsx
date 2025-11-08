@@ -30,19 +30,15 @@ const RestaurantCard = ({ restaurant, variant = "default" }) => {
       : [];
   const ratingValue = restaurant.rating ?? restaurant.brand?.rating ?? 0;
   const addressLine = restaurant.address || restaurant.brand?.description || "Address updating soon.";
-
-
   return (
     <Link
       to={`/restaurants/${restaurant.id}`}
-      className={`group flex flex-col overflow-hidden rounded-3xl bg-white shadow-sm transition hover:-translate-y-1 hover:shadow-lg ${
-        variant === "compact" ? "sm:flex-row" : ""
-      }`}
+      className={`group flex flex-col overflow-hidden rounded-3xl bg-white shadow-sm transition hover:-translate-y-1 hover:shadow-lg ${variant === "compact" ? "sm:flex-row" : ""
+        }`}
     >
       <div
-        className={`relative w-full ${
-          variant === "compact" ? "sm:w-48" : ""
-        } aspect-[4/3] overflow-hidden`}
+        className={`relative w-full ${variant === "compact" ? "sm:w-48" : ""
+          } aspect-[4/3] overflow-hidden`}
       >
         <img
           src={coverImage}
@@ -95,20 +91,4 @@ const RestaurantCard = ({ restaurant, variant = "default" }) => {
 };
 
 export default RestaurantCard;
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 

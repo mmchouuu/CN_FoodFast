@@ -7,3 +7,4 @@ router.get('/payments', controller.listPayments);
 router.get('/refunds', controller.listRefunds);
 
 module.exports = router;
+

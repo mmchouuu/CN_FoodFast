@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { useAppContext } from '../context/AppContext';
 
@@ -70,4 +71,3 @@ const Settings = () => {
 };
 
 export default Settings;
-

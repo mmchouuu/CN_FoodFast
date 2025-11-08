@@ -59,5 +59,4 @@ const restaurantManagerService = {
     return data;
   },
 };
-
 export default restaurantManagerService;

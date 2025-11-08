@@ -8,6 +8,7 @@ const adminOrderRoutes = require('./routes/orders.admin.routes');
 const auth = require('./middleware/auth');
 const requireRoles = require('./middleware/authorize');
 
+
 const app = express();
 
 // Allow larger carts/options payloads to pass through without 413
@@ -30,5 +31,4 @@ const mountScopedRoute = (path, middleware, handler) => {
 mountScopedRoute('/customer/orders', requireRoles(['customer', 'user']), customerOrderRoutes);
 mountScopedRoute('/owner/orders', requireRoles(['owner', 'manager']), ownerOrderRoutes);
 mountScopedRoute('/admin/orders', requireRoles(['admin', 'superadmin']), adminOrderRoutes);
-
 module.exports = app;

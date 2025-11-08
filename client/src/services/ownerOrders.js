@@ -106,7 +106,7 @@ const ownerOrdersService = {
     if (!orderId) {
       throw new Error('orderId is required');
     }
-    const config = withOwnerAuth();
+  const config = withOwnerAuth();
     const { data } = await api.get(`${basePath}/${orderId}`, config);
     return data;
   },
@@ -125,6 +125,7 @@ const ownerOrdersService = {
     if (!orderId) {
       throw new Error('orderId is required');
     }
+    
     const config = withOwnerAuth();
     const { data } = await api.post(`${basePath}/${orderId}/revisions`, payload, config);
     return data;

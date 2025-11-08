@@ -281,7 +281,6 @@ async function listBranchInventory(restaurantId, branchId, req) {
   });
   return res.data;
 }
-
 async function upsertBranchInventory(restaurantId, branchId, productId, payload, req) {
   const res = await productClient.put(
     `/${restaurantId}/branches/${branchId}/inventory/${productId}`,

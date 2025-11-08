@@ -231,6 +231,7 @@ const Orders = () => {
   const [selectedBranchId, setSelectedBranchId] = useState("all");
   const [statusUpdatingMap, setStatusUpdatingMap] = useState({});
 
+
   const lookups = useMemo(
     () => buildLookups(ownerRestaurants),
     [ownerRestaurants],
@@ -738,7 +739,6 @@ const Orders = () => {
             </article>
           );
         })}
-
         {!ordersLoading && !restaurantsLoading && !filteredOrders.length ? (
           <div className="rounded-xl border border-dashed border-slate-200 bg-white px-6 py-12 text-center text-slate-500">
             No orders found in this state. Switch status tabs or reset your search.

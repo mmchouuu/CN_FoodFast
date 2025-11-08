@@ -1,4 +1,4 @@
-﻿const adminService = require('../services/admin.service');
+const adminService = require('../services/admin.service');
 const menuService = require('../services/menu.service');
 
 async function createTaxTemplate(req, res, next) {

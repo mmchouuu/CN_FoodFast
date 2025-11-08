@@ -21,7 +21,6 @@ const Item = ({ product }) => {
   };
 
   const displayPrice = resolveDisplayPrice(size || product.sizes?.[0] || "Standard");
-
   if (!product) return null;
 
   const productImage = pickFirstImageUrl(
@@ -97,7 +96,6 @@ const Item = ({ product }) => {
           </span>
         </p>
       </div>
-
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4 text-xs text-gray-500">
             <div>

@@ -191,8 +191,3 @@ const StatCard = ({ label, value, subtitle }) => (
 
 export default RevenueStatistics;
 
-
-
-
-
-

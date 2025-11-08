@@ -93,21 +93,3 @@ const RestaurantBestSellerCard = ({ restaurant, dish, currency }) => {
 
 export default RestaurantBestSellerCard;
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

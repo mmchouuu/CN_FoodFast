@@ -33,4 +33,17 @@ module.exports = {
   STRIPE_WEBHOOK_SECRET: process.env.STRIPE_WEBHOOK_SECRET || '',
   DEFAULT_CURRENCY: process.env.DEFAULT_CURRENCY || 'VND',
   SETTLEMENT_CRON: process.env.SETTLEMENT_CRON || '0 3 * * *',
+
+  MOMO: {
+    partnerCode: process.env.MOMO_PARTNER_CODE || '',
+    accessKey: process.env.MOMO_ACCESS_KEY || '',
+    secretKey: process.env.MOMO_SECRET_KEY || '',
+    apiBase: process.env.MOMO_API_BASE || 'https://test-payment.momo.vn',
+    redirectUrl:
+      process.env.MOMO_REDIRECT_URL ||
+      'https://localhost:5173/payments/momo/callback',
+    ipnUrl:
+      process.env.MOMO_IPN_URL || 'https://api.foodfast.io/api/payments/webhook/momo',
+  },
+  HTTPS_ENFORCED: process.env.ENABLE_PAYMENT_HTTPS === 'true',
 };

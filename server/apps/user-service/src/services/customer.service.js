@@ -1,4 +1,4 @@
-﻿const bcrypt = require('../utils/bcrypt');
+const bcrypt = require('../utils/bcrypt');
 const jwt = require('../utils/jwt');
 const { generateOTP } = require('../utils/otp');
 const { sendOtpEmail } = require('../utils/emailQueue');
@@ -70,6 +70,7 @@ async function registerCustomer(payload) {
       if (roles.includes('customer') && existing.email_verified) {
         throw createError('Email already registered', 409);
       }
+
       user = await userRepository.updateUser(
         existing.id,
         {
@@ -95,6 +96,7 @@ async function registerCustomer(payload) {
       );
     }
 
+
     await userRepository.assignRole(user.id, role.id, client);
     const passwordHash = await bcrypt.hash(password);
     await userRepository.upsertCredential(
@@ -104,6 +106,7 @@ async function registerCustomer(payload) {
         passwordHash,
         isTemp: false,
       },
+
       client,
     );
     await userRepository.createCustomerProfile(user.id, client);

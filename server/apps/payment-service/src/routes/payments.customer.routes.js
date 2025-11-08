@@ -8,3 +8,4 @@ router.post('/stripe/confirm', controller.confirmStripePaymentMethod);
 router.get('/', controller.listPaymentMethods);
 
 module.exports = router;
+

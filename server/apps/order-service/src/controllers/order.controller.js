@@ -1,5 +1,92 @@
 const OrderService = require('../services/order.service');
 
+const CANONICAL_DELIVERY_STATUSES = new Set([
+  'preparing',
+  'dispatched',
+  'arriving',
+  'delivered',
+  'failed',
+  'cancelled',
+]);
+
+const DELIVERY_STATUS_ALIASES = {
+  pending: 'preparing',
+  assigned: 'dispatched',
+  dispatching: 'dispatched',
+  delivering: 'arriving',
+  enroute: 'arriving',
+  completed: 'delivered',
+  complete: 'delivered',
+  done: 'delivered',
+  canceled: 'cancelled',
+  cancelled: 'cancelled',
+  preparing: 'preparing',
+  dispatched: 'dispatched',
+  arriving: 'arriving',
+  delivered: 'delivered',
+  failed: 'failed',
+};
+
+const DEFAULT_CANONICAL_DELIVERY_STATUS =
+  normalizeDeliveryStatusValue('pending') || 'preparing';
+const DELIVERY_STATUS_ERROR_MESSAGE =
+  'delivery_status must be one of: pending, assigned, delivering, dispatched, arriving, delivered, failed, cancelled';
+
+function normalizeDeliveryStatusValue(value) {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  const asString =
+    typeof value === 'string'
+      ? value
+      : typeof value.toString === 'function'
+      ? value.toString()
+      : null;
+  if (!asString) {
+    return null;
+  }
+  const key = asString.trim().toLowerCase();
+  if (!key) {
+    return null;
+  }
+  const canonical = DELIVERY_STATUS_ALIASES[key] || key;
+  return CANONICAL_DELIVERY_STATUSES.has(canonical) ? canonical : null;
+}
+
+function resolveDeliveryStatusFromPayload(payload, selectedAddress, requireStatus) {
+  const candidate =
+    payload.delivery_status ??
+    payload.deliveryStatus ??
+    payload.delivery_state ??
+    payload.delivery?.delivery_status ??
+    payload.delivery?.status ??
+    payload.delivery?.state ??
+    selectedAddress?.delivery_status ??
+    selectedAddress?.status ??
+    payload.selectedAddress?.delivery_status ??
+    payload.selected_address?.delivery_status ??
+    payload.shipping_address?.delivery_status ??
+    payload.shipping_address?.status ??
+    payload.shippingAddress?.delivery_status ??
+    payload.shippingAddress?.status ??
+    null;
+
+  const normalizedCandidate = normalizeDeliveryStatusValue(candidate);
+  if (candidate !== undefined && candidate !== null && !normalizedCandidate) {
+    return { isValid: false, value: null };
+  }
+
+  if (normalizedCandidate) {
+    return { isValid: true, value: normalizedCandidate };
+  }
+
+  if (!requireStatus) {
+    return { isValid: true, value: null };
+  }
+
+  return { isValid: true, value: DEFAULT_CANONICAL_DELIVERY_STATUS };
+}
+
 const respondWithError = (res, error) => {
   const status =
     Number.isInteger(error?.statusCode) && error.statusCode >= 400 && error.statusCode < 600
@@ -71,13 +158,48 @@ exports.createOrder = async (req, res) => {
       payload.shipping_address ||
       null;
 
+    const hasDeliveryContext =
+      Boolean(
+        payload.delivery ||
+          payload.delivery_address ||
+          payload.shipping_address ||
+          payload.shippingAddress ||
+          payload.selectedAddress ||
+          payload.selected_address ||
+          selectedAddress,
+      );
+
+    const {
+      isValid: isDeliveryStatusValid,
+      value: normalizedDeliveryStatus,
+    } = resolveDeliveryStatusFromPayload(payload, selectedAddress, hasDeliveryContext);
+
+    if (!isDeliveryStatusValid) {
+      return res.status(400).json({ error: DELIVERY_STATUS_ERROR_MESSAGE });
+    }
+
     const orderPayload = {
       ...payload,
       user_id: normalizedUserId,
     };
 
     if (selectedAddress) {
-      orderPayload.selectedAddress = selectedAddress;
+      orderPayload.selectedAddress =
+        normalizedDeliveryStatus && typeof selectedAddress === 'object'
+          ? { ...selectedAddress, delivery_status: normalizedDeliveryStatus }
+          : selectedAddress;
+    }
+
+    if (normalizedDeliveryStatus) {
+      orderPayload.delivery_status = normalizedDeliveryStatus;
+      orderPayload.deliveryStatus = normalizedDeliveryStatus;
+      if (orderPayload.delivery && typeof orderPayload.delivery === 'object') {
+        orderPayload.delivery = {
+          ...orderPayload.delivery,
+          delivery_status: normalizedDeliveryStatus,
+          status: normalizedDeliveryStatus,
+        };
+      }
     }
 
     if (normalizedPaymentMethod) {

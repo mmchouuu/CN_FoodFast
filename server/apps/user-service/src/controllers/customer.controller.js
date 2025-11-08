@@ -1,4 +1,4 @@
-﻿const customerService = require('../services/customer.service');
+const customerService = require('../services/customer.service');
 
 function getUserId(req) {
   return req.user?.userId || req.headers['x-user-id'] || null;

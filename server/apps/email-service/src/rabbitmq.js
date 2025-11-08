@@ -1,4 +1,4 @@
-﻿import amqp from 'amqplib';
+import amqp from 'amqplib';
 import config from './config.js';
 import { sendMail } from './mailer.js';
 

@@ -384,3 +384,4 @@ npm run preview    # xem trước bản build
 - Gợi ý: thêm **rate limit** ở Gateway, **idempotency-key** cho API tạo đơn, **retry + DLQ** cho consumer.
 
 ---
+

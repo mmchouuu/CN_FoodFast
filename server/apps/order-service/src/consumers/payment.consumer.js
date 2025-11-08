@@ -25,3 +25,4 @@ async function startPaymentConsumer() {
 module.exports = {
   startPaymentConsumer,
 };
+

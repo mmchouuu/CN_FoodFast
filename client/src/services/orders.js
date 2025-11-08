@@ -1,6 +1,7 @@
 import api from './api';
 
 const basePath = '/api/orders';
+const ownerBasePath = '/owner/orders';
 
 const unwrapCollection = (payload) => {
   if (Array.isArray(payload)) return payload;
@@ -17,16 +18,16 @@ const unwrapRecord = (payload) => {
   return payload;
 };
 
-export async function listOrders() {
-  const { data } = await api.get(basePath);
+export async function listOrders(params = {}) {
+  const { data } = await api.get(basePath, { params });
   return unwrapCollection(data);
 }
 
-export async function listOrdersByUser(userId) {
+export async function listOrdersByUser(userId, params = {}) {
   if (!userId) {
     throw new Error('userId is required to list orders by user');
   }
-  const { data } = await api.get(`${basePath}/user/${userId}`);
+  const { data } = await api.get(`${basePath}/user/${userId}`, { params });
   return unwrapCollection(data);
 }
 
@@ -40,11 +41,29 @@ export async function createOrder(payload) {
   return Array.isArray(data) ? data : unwrapRecord(data);
 }
 
+export async function listOwnerOrders(params = {}) {
+  const { data } = await api.get(ownerBasePath, { params });
+  return data;
+}
+
+export async function getOwnerOrder(orderId) {
+  const { data } = await api.get(`${ownerBasePath}/${orderId}`);
+  return data;
+}
+
+export async function updateOwnerOrderStatus(orderId, payload) {
+  const { data } = await api.patch(`${ownerBasePath}/${orderId}/status`, payload);
+  return data;
+}
+
 const ordersService = {
   list: listOrders,
   listByUser: listOrdersByUser,
   get: getOrder,
   createOrder,
+  listOwner: listOwnerOrders,
+  getOwner: getOwnerOrder,
+  updateOwnerOrderStatus,
 };
 
 export default ordersService;

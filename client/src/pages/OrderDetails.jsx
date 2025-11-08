@@ -8,11 +8,96 @@ import {
 
 const StatusDot = ({ completed }) => (
   <span
-    className={`inline-block h-3 w-3 rounded-full ${
-      completed ? "bg-green-500" : "bg-gray-300"
-    }`}
+    className={`inline-block h-3 w-3 rounded-full ${completed ? "bg-green-500" : "bg-gray-300"
+      }`}
   />
 );
+
+const ORDER_STATUS_STEPS = [
+  { key: "pending", label: "Pending" },
+  { key: "confirmed", label: "Confirmed" },
+  { key: "preparing", label: "Preparing" },
+  { key: "ready", label: "Ready" },
+  { key: "delivering", label: "Delivering" },
+  { key: "completed", label: "Completed" },
+];
+
+const normaliseStatus = (value) =>
+  typeof value === "string" ? value.trim().toLowerCase() : "";
+
+const buildTrackingSteps = (status, placedAt) => {
+  const normalisedStatus = normaliseStatus(status);
+  const activeIndex = ORDER_STATUS_STEPS.findIndex(
+    (step) => step.key === normalisedStatus,
+  );
+  const placedTime = placedAt
+    ? new Date(placedAt).toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    })
+    : null;
+
+  return ORDER_STATUS_STEPS.map((step, index) => {
+    const completed =
+      activeIndex >= 0 ? index <= activeIndex : index === 0;
+
+    let timestamp = "Pending";
+    if (index === 0) {
+      timestamp = placedTime || "Pending";
+    } else if (activeIndex === index) {
+      timestamp = "In progress";
+    } else if (index < activeIndex) {
+      timestamp = "Completed";
+    }
+
+    return {
+      id: `step-${step.key}`,
+      label: step.label,
+      completed,
+      timestamp,
+    };
+  });
+};
+
+const parseAmount = (value) => {
+  if (value === null || value === undefined) return 0;
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  if (typeof value === "string") {
+    const normalised = value.replace(/[^0-9.-]+/g, "");
+    const parsed = Number(normalised);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
+};
+
+const resolveTotals = (order) => {
+  const raw = order?.raw || {};
+  const metadataPricing =
+    order?.metadata && typeof order.metadata.pricing === "object"
+      ? order.metadata.pricing
+      : {};
+
+  const subtotal = parseAmount(
+    order?.subtotal ?? raw.items_subtotal ?? metadataPricing.items_subtotal,
+  );
+  const shippingFee = parseAmount(
+    order?.shippingFee ?? raw.shipping_fee ?? metadataPricing.shipping_fee,
+  );
+  const vat = parseAmount(
+    order?.taxTotal ?? raw.tax_total ?? metadataPricing.tax_total,
+  );
+  let discount = parseAmount(order?.discount ?? metadataPricing.discount);
+  if (!discount) {
+    const orderDiscount = parseAmount(raw.order_discount);
+    const itemsDiscount = parseAmount(raw.items_discount);
+    discount = orderDiscount + itemsDiscount;
+  }
+  const total = parseAmount(
+    order?.totalAmount ?? raw.total_amount ?? metadataPricing.total_amount ?? metadataPricing.total,
+  );
+
+  return { subtotal, shippingFee, vat, discount, total };
+};
 
 const OrderDetails = () => {
   const { orderId } = useParams();
@@ -132,7 +217,12 @@ const OrderDetails = () => {
     .filter(Boolean)
     .join(", ");
 
-  const timeline = Array.isArray(order.timeline) ? order.timeline : [];
+  const timeline = useMemo(
+    () => buildTrackingSteps(order.status, order.placedAt),
+    [order.status, order.placedAt],
+  );
+  const totals = useMemo(() => resolveTotals(order), [order]);
+
 
   return (
     <div className="max-padd-container space-y-8 py-24">
@@ -194,9 +284,8 @@ const OrderDetails = () => {
                     <StatusDot completed={Boolean(step.completed)} />
                     <div>
                       <p
-                        className={`text-sm font-semibold ${
-                          step.completed ? "text-gray-900" : "text-gray-500"
-                        }`}
+                        className={`text-sm font-semibold ${step.completed ? "text-gray-900" : "text-gray-500"
+                          }`}
                       >
                         {step.label}
                       </p>
@@ -258,87 +347,97 @@ const OrderDetails = () => {
                 );
               })}
             </ul>
-
             <div className="mt-4 border-t border-gray-200 pt-4 text-sm text-gray-600">
               <div className="flex justify-between">
                 <span>Subtotal</span>
                 <span className="font-semibold">
                   {currency}
                   {order.subtotal.toLocaleString()}
-                </span>
-              </div>
+
+                </span >
+              </div >
               <div className="flex justify-between text-gray-500">
                 <span>Shipping</span>
                 <span>
                   {currency}
-                  {order.shippingFee.toLocaleString()}
+                  {totals.shippingFee.toLocaleString()}
                 </span>
               </div>
+              <div className="flex justify-between text-gray-500">
+                <span>VAT</span>
+                <span>
+                  {currency}
+                  {totals.vat.toLocaleString()}
+                </span >
+              </div >
               <div className="flex justify-between text-green-600">
                 <span>Discount</span>
                 <span>
                   -{currency}
+
                   {order.discount.toLocaleString()}
-                </span>
-              </div>
+
+                </span >
+              </div >
               <div className="mt-3 flex justify-between text-lg font-bold text-gray-900">
                 <span>Total</span>
                 <span>
                   {currency}
                   {order.totalAmount.toLocaleString()}
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
+                  origin/mchau
+                </span >
+              </div >
+            </div >
+          </div >
+        </div >
 
-        <aside className="space-y-6">
-          <div className="rounded-3xl bg-white p-6 shadow-sm">
-            <h3 className="text-sm font-semibold uppercase text-gray-400">
-              Payment
-            </h3>
-            <p className="mt-2 text-base font-semibold text-gray-900">
-              Method: {order.paymentMethod}
-            </p>
-            <p className="text-sm text-gray-500">
-              Status: {order.paymentStatus || "pending"}
-            </p>
-            <p className="mt-2 text-xs text-gray-400">
-              Reference: {order.metadata?.payment?.reference || "N/A"}
-            </p>
-          </div>
-
-          <div className="rounded-3xl bg-white p-6 shadow-sm">
-            <h3 className="text-sm font-semibold uppercase text-gray-400">
-              Delivery address
-            </h3>
-            <p className="mt-2 text-sm text-gray-600">
-              {deliveryAddressLine
-                ? deliveryAddressLine
-                : "Address not provided."}
-            </p>
-            {deliveryAddress.instructions ? (
-              <p className="mt-2 text-xs text-gray-400">
-                Note: {deliveryAddress.instructions}
-              </p>
-            ) : null}
-          </div>
-
-          <div className="rounded-3xl bg-white p-6 shadow-sm">
-            <h3 className="text-sm font-semibold uppercase text-gray-400">
-              Need help?
-            </h3>
-            <p className="mt-2 text-sm text-gray-600">
-              If something doesn&apos;t look right, get in touch with support
-              and share your order reference.
-            </p>
-            <button className="mt-4 w-full rounded-full border border-gray-200 px-5 py-3 text-sm font-semibold text-gray-600 transition hover:border-orange-300 hover:text-orange-500">
-              Contact support
-            </button>
-          </div>
-        </aside>
-      </section>
+  <aside className="space-y-6">
+    <div className="rounded-3xl bg-white p-6 shadow-sm">
+      <h3 className="text-sm font-semibold uppercase text-gray-400">
+        Payment
+      </h3>
+      <p className="mt-2 text-base font-semibold text-gray-900">
+        Method: {order.paymentMethod}
+      </p>
+      <p className="text-sm text-gray-500">
+        Status: {order.paymentStatus || "pending"}
+      </p>
+      <p className="mt-2 text-xs text-gray-400">
+        Reference: {order.metadata?.payment?.reference || "N/A"}
+      </p>
     </div>
+
+    <div className="rounded-3xl bg-white p-6 shadow-sm">
+      <h3 className="text-sm font-semibold uppercase text-gray-400">
+        Delivery address
+      </h3>
+      <p className="mt-2 text-sm text-gray-600">
+        {deliveryAddressLine
+          ? deliveryAddressLine
+          : "Address not provided."}
+      </p>
+      {deliveryAddress.instructions ? (
+        <p className="mt-2 text-xs text-gray-400">
+          Note: {deliveryAddress.instructions}
+        </p>
+      ) : null}
+    </div>
+
+    <div className="rounded-3xl bg-white p-6 shadow-sm">
+      <h3 className="text-sm font-semibold uppercase text-gray-400">
+        Need help?
+      </h3>
+      <p className="mt-2 text-sm text-gray-600">
+        If something doesn&apos;t look right, get in touch with support
+        and share your order reference.
+      </p>
+      <button className="mt-4 w-full rounded-full border border-gray-200 px-5 py-3 text-sm font-semibold text-gray-600 transition hover:border-orange-300 hover:text-orange-500">
+        Contact support
+      </button>
+    </div>
+  </aside>
+      </section >
+    </div >
   );
 };
 

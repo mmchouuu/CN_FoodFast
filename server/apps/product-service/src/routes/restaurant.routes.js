@@ -1,4 +1,4 @@
-﻿const express = require('express');
+const express = require('express');
 const restaurantController = require('../controllers/restaurant.controller');
 const menuController = require('../controllers/menu.controller');
 const catalogController = require('../controllers/catalog.controller');

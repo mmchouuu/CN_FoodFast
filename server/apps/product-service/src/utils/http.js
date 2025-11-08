@@ -1,4 +1,3 @@
-
 async function ensureFetch() {
   if (typeof fetch === 'function') {
     return fetch;

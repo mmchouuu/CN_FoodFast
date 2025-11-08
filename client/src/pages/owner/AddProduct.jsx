@@ -124,7 +124,3 @@ const allCategories = [
 export default AddProduct
 
 
-
-
-
-

@@ -1,4 +1,4 @@
-﻿const adminService = require('../services/admin.service');
+const adminService = require('../services/admin.service');
 
 async function listCustomers(req, res, next) {
   try {

@@ -189,6 +189,7 @@ const CurrentOrder = () => {
               <span>
                 {currency}
                 {order.shippingFee.toLocaleString()}
+
               </span>
             </div>
             <div className="flex justify-between text-green-600">
@@ -196,6 +197,7 @@ const CurrentOrder = () => {
               <span>
                 -{currency}
                 {order.discount.toLocaleString()}
+
               </span>
             </div>
           </div>

@@ -172,8 +172,3 @@ const RatingStars = ({ rating }) => (
 
 export default CustomerFeedback;
 
-
-
-
-
-

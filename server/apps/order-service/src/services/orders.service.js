@@ -41,6 +41,40 @@ const PAYMENT_FLOWS = {
   bank_transfer: 'cash',
 };
 
+const hasClientPricingHint = (metadata) => {
+  if (!metadata || typeof metadata !== 'object') {
+    return false;
+  }
+  if (metadata.force_client_pricing || metadata.forceClientPricing) {
+    return true;
+  }
+  const mode = metadata.pricing_mode || metadata.pricingMode;
+  if (typeof mode === 'string' && mode.toLowerCase() === 'client') {
+    return true;
+  }
+  return false;
+};
+
+const shouldUseClientPricingSnapshot = (payload = {}, request = {}) => {
+  if (!payload || typeof payload !== 'object') {
+    return false;
+  }
+  if (payload.force_client_pricing || payload.forceClientPricing || payload.forcePricingFallback) {
+    return true;
+  }
+  const mode = payload.pricing_mode || payload.pricingMode;
+  if (typeof mode === 'string' && mode.toLowerCase() === 'client') {
+    return true;
+  }
+  if (hasClientPricingHint(payload.metadata)) {
+    return true;
+  }
+  if (hasClientPricingHint(request.metadata)) {
+    return true;
+  }
+  return false;
+};
+
 class ServiceError extends Error {
   constructor(message, status = 500, details = null) {
     super(message);
@@ -540,6 +574,12 @@ async function computePricingSnapshot({ userId, payload, context }) {
     delivery: payload.delivery,
   };
 
+  const forceClientPricing = shouldUseClientPricingSnapshot(payload, request);
+  if (forceClientPricing) {
+    console.warn('[order-service] Skipping product-service quote and using client pricing snapshot');
+    return buildFallbackPricing(payload);
+  }
+
   try {
     const quote = await productClient.quoteOrderPricing(request, {
       authorization: context?.authorization,
@@ -561,7 +601,7 @@ async function computePricingSnapshot({ userId, payload, context }) {
       '[order-service] Failed to fetch pricing from product-service:',
       error?.message || error,
     );
-    if (!ALLOW_CLIENT_PRICING_FALLBACK) {
+    if (!ALLOW_CLIENT_PRICING_FALLBACK && !forceClientPricing) {
       throw new ValidationError('Unable to confirm pricing with product-service', {
         reason: error?.message,
       });

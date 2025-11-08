@@ -3,7 +3,6 @@ const paymentModel = require('../models/payment.model');
 const paymentMethodModel = require('../models/paymentMethod.model');
 const stripeService = require('./stripe.service');
 const { publishEvent } = require('../publishers/outbox.publisher');
-
 const normalizeNumber = (value) => {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return null;
@@ -217,8 +216,77 @@ async function getPaymentForUser(paymentId, userId) {
   return paymentModel.getPaymentForUser(paymentId, userId);
 }
 
+async function getPaymentByTransactionId(transactionId) {
+  return paymentModel.findPaymentByTransactionId(transactionId);
+}
+
+async function markPaymentSucceeded({
+  paymentId,
+  transactionId,
+  provider,
+  amount,
+  currency,
+  metadata = {},
+}) {
+  if (!paymentId) {
+    throw Object.assign(new Error('payment id is required'), { statusCode: 400 });
+  }
+  const payment = await paymentModel.updatePayment(paymentId, {
+    status: 'succeeded',
+    transaction_id: transactionId || undefined,
+    paid_at: new Date(),
+  });
+  await paymentModel.insertPaymentLog(
+    {
+      paymentId,
+      action: 'PaymentSucceeded',
+      data: { provider, transactionId, metadata },
+    },
+    null,
+  );
+
+  await publishEvent('PaymentSucceeded', {
+    order_id: payment.order_id,
+    payment_id: payment.id,
+    transaction_id: payment.transaction_id,
+    amount: amount || payment.amount,
+    currency: currency || payment.currency,
+    provider,
+  });
+  return payment;
+}
+
+async function markPaymentFailed({ paymentId, transactionId, provider, reason, metadata = {} }) {
+  if (!paymentId) {
+    throw Object.assign(new Error('payment id is required'), { statusCode: 400 });
+  }
+  const payment = await paymentModel.updatePayment(paymentId, {
+    status: 'failed',
+    transaction_id: transactionId || undefined,
+  });
+  await paymentModel.insertPaymentLog(
+    {
+      paymentId,
+      action: 'PaymentFailed',
+      data: { provider, transactionId, reason, metadata },
+    },
+    null,
+  );
+  await publishEvent('PaymentFailed', {
+    order_id: payment.order_id,
+    payment_id: payment.id,
+    transaction_id: payment.transaction_id,
+    reason: reason || 'payment_failed',
+    provider,
+  });
+  return payment;
+}
+
 module.exports = {
   handlePaymentPending,
   listPayments,
   getPaymentForUser,
+  getPaymentByTransactionId,
+  markPaymentSucceeded,
+  markPaymentFailed,
 };

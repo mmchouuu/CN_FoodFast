@@ -1,4 +1,4 @@
-﻿const adminClient = require('../services/admin.client');
+const adminClient = require('../services/admin.client');
 
 function withRequestHeaders(req) {
   return { headers: { 'x-request-id': req.id } };
