@@ -6,6 +6,52 @@ const CARD_TYPE = 'card';
 const STRIPE_PROVIDER = 'stripe';
 const MOMO_PROVIDER = 'momo';
 
+async function findPaymentMethodById(id, userId = null) {
+  if (!id) return null;
+  const result = await pool.query(
+    `SELECT id,
+            user_id,
+            type,
+            provider,
+            provider_data,
+            last4,
+            brand,
+            exp_month,
+            exp_year,
+            is_default,
+            created_at
+       FROM payment_methods
+      WHERE id = $1
+        AND ($2::uuid IS NULL OR user_id = $2)
+      LIMIT 1`,
+    [id, userId || null],
+  );
+  return result.rows[0] || null;
+}
+
+async function findPaymentMethodByProviderPaymentId(providerPaymentId, userId = null) {
+  if (!providerPaymentId) return null;
+  const result = await pool.query(
+    `SELECT id,
+            user_id,
+            type,
+            provider,
+            provider_data,
+            last4,
+            brand,
+            exp_month,
+            exp_year,
+            is_default,
+            created_at
+       FROM payment_methods
+      WHERE provider_data ->> 'payment_method_id' = $1
+        AND ($2::uuid IS NULL OR user_id = $2)
+      LIMIT 1`,
+    [providerPaymentId, userId || null],
+  );
+  return result.rows[0] || null;
+}
+
 async function listMomoWallets(userId) {
   const result = await pool.query(
     `SELECT id,
@@ -113,6 +159,8 @@ async function createMomoWallet({
 module.exports = {
   listMomoWallets,
   createMomoWallet,
+  findPaymentMethodById,
+  findPaymentMethodByProviderPaymentId,
   async findStripeCustomer(userId) {
     const res = await pool.query(
       `SELECT provider_data

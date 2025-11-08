@@ -35,4 +35,19 @@ async function updateOrderPayment(orderId, payload, authorization) {
   }
 }
 
-module.exports = { updateOrderPayment };
+async function fetchOrderById(orderId) {
+  if (!orderId) throw new Error('orderId is required');
+  try {
+    const response = await client.get(`/api/orders/${orderId}`);
+    return response.data;
+  } catch (err) {
+    const error = new Error(
+      err.response?.data?.error || 'failed to load order from order-service',
+    );
+    error.status = err.response?.status || 502;
+    error.data = err.response?.data;
+    throw error;
+  }
+}
+
+module.exports = { updateOrderPayment, fetchOrderById };

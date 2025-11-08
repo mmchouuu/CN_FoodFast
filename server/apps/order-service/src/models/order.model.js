@@ -62,8 +62,18 @@ async function createOrderWithItems(orderPayload, items, options = {}) {
     const insertedItems = [];
     for (const item of items) {
       const itemRes = await client.query(
-        `INSERT INTO order_items (order_id, product_id, variant_id, product_snapshot, quantity, unit_price, total_price)
-         VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+        `INSERT INTO order_items (
+          order_id,
+          product_id,
+          variant_id,
+          product_snapshot,
+          quantity,
+          unit_price,
+          total_price,
+          branch_product_id,
+          branch_category_id
+        )
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
         [
           order.id,
           item.product_id,
@@ -72,6 +82,8 @@ async function createOrderWithItems(orderPayload, items, options = {}) {
           item.quantity,
           item.unit_price,
           item.total_price,
+          item.branch_product_id || null,
+          item.branch_category_id || null,
         ],
       );
       insertedItems.push(itemRes.rows[0]);

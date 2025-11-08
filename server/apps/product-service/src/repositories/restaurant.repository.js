@@ -124,6 +124,16 @@ async function createBranch({
   return result.rows[0];
 }
 
+async function findBranchByUuid(branchId, client) {
+  if (!branchId) return null;
+  const executor = getExecutor(client);
+  const result = await executor.query(
+    `SELECT * FROM restaurant_branches WHERE id = $1 LIMIT 1`,
+    [branchId],
+  );
+  return result.rows[0] || null;
+}
+
 async function setOpeningHours(branchId, hours = [], client) {
   const executor = getExecutor(client);
   await executor.query('DELETE FROM branch_opening_hours WHERE branch_id = $1', [branchId]);
@@ -436,6 +446,7 @@ module.exports = {
   updateRestaurant,
   listBranches,
   findBranchById,
+  findBranchByUuid,
   updateBranch,
   deleteBranch,
   getBranchOpeningHours,

@@ -80,7 +80,11 @@ const toNumber = (value, fallback = 0) => {
 const toCurrency = (currency) => {
   if (!currency || typeof currency !== 'string') return DEFAULT_CURRENCY;
   const trimmed = currency.trim();
-  return trimmed.length ? trimmed.toUpperCase() : DEFAULT_CURRENCY;
+  if (!trimmed.length) return DEFAULT_CURRENCY;
+  if (/^[a-zA-Z]{3}$/.test(trimmed)) {
+    return trimmed.toUpperCase();
+  }
+  return DEFAULT_CURRENCY;
 };
 
 const ensureArray = (value) => {
@@ -290,21 +294,36 @@ const normaliseQuoteItem = (item, index) => {
   const taxes = ensureArray(item.taxes || item.tax_breakdown || item.taxBreakdown)
     .map(normaliseTaxEntry)
     .filter(Boolean);
+  const snapshot =
+    item.product_snapshot ||
+    item.snapshot ||
+    item.product ||
+    item.catalog_snapshot ||
+    item.catalog ||
+    {};
+  const branchProductId =
+    item.branch_product_id ||
+    item.branchProductId ||
+    snapshot.branch_product_id ||
+    snapshot.branchProductId ||
+    null;
+  const branchCategoryId =
+    item.branch_category_id ||
+    item.branchCategoryId ||
+    snapshot.branch_category_id ||
+    snapshot.branchCategoryId ||
+    null;
 
   return {
     product_id: productId,
     variant_id: variantId,
+    branch_product_id: branchProductId,
+    branch_category_id: branchCategoryId,
     quantity,
     unit_price: Number(unitPrice.toFixed(2)),
     total_price: Number(totalPrice.toFixed(2)),
     discount_total: Number(discount.toFixed(2)),
-    product_snapshot:
-      item.product_snapshot ||
-      item.snapshot ||
-      item.product ||
-      item.catalog_snapshot ||
-      item.catalog ||
-      {},
+    product_snapshot: snapshot,
     options,
     taxes,
     name: item.name || item.product_name || null,
@@ -547,6 +566,9 @@ const enrichMetadata = ({ payload, pricing, payment, user }) => {
   paymentMeta.status = payment.status;
   paymentMeta.amount = pricing.totals.total_amount;
   paymentMeta.currency = pricing.totals.currency;
+  if (payment.payment_method_id !== undefined) {
+    paymentMeta.payment_method_id = payment.payment_method_id;
+  }
 
   const pricingMeta =
     base.pricing && typeof base.pricing === 'object' ? { ...base.pricing } : {};
@@ -676,9 +698,11 @@ async function insertOrderGraph({
           product_snapshot,
           quantity,
           unit_price,
-          total_price
+          total_price,
+          branch_product_id,
+          branch_category_id
         )
-        VALUES ($1,$2,$3,$4,$5,$6,$7)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
         RETURNING *
       `,
       [
@@ -689,6 +713,8 @@ async function insertOrderGraph({
         item.quantity,
         item.unit_price,
         item.total_price,
+        item.branch_product_id || null,
+        item.branch_category_id || null,
       ],
     );
     const inserted = itemResult.rows[0];
@@ -1173,9 +1199,38 @@ async function createCustomerOrder({ user, payload = {}, context = {} }) {
   if (!userId) {
     throw new ValidationError('unable to resolve current user');
   }
-  if (!payload.restaurant_id) {
+  let branchId = normaliseUuid(payload.branch_id || payload.branchId || null);
+  let restaurantId = normaliseUuid(payload.restaurant_id || payload.restaurantId || null);
+
+  if (branchId) {
+    try {
+      const branchInfo = await productClient.fetchBranchById(branchId);
+      if (!branchInfo) {
+        throw new ValidationError('branch not found');
+      }
+      const resolvedRestaurantId = normaliseUuid(branchInfo.restaurant_id || branchInfo.restaurantId);
+      if (!resolvedRestaurantId) {
+        throw new ValidationError('Unable to resolve restaurant for branch');
+      }
+      if (!restaurantId || restaurantId === branchId) {
+        restaurantId = resolvedRestaurantId;
+      }
+      branchId = branchInfo.id || branchId;
+    } catch (error) {
+      if (error instanceof ValidationError) {
+        throw error;
+      }
+      throw new ValidationError('Unable to resolve branch information', {
+        reason: error.message,
+      });
+    }
+  }
+
+  if (!restaurantId) {
     throw new ValidationError('restaurant_id is required');
   }
+  payload.restaurant_id = restaurantId;
+  payload.branch_id = branchId || payload.branch_id || null;
   if (!Array.isArray(payload.items) || !payload.items.length) {
     throw new ValidationError('order items are required');
   }
@@ -1184,6 +1239,14 @@ async function createCustomerOrder({ user, payload = {}, context = {} }) {
     payload.payment_method || payload.paymentMethod || payload.method || 'cod';
   const paymentMethod = String(paymentMethodRaw).trim().toLowerCase() || 'cod';
   const paymentFlow = determinePaymentFlow(paymentMethod);
+  const paymentMethodIdRaw =
+    payload.payment_method_id ||
+    payload.paymentMethodId ||
+    (payload.payment &&
+      (payload.payment.payment_method_id || payload.payment.paymentMethodId)) ||
+    null;
+  const paymentMethodId =
+    paymentFlow === 'cash' ? null : normaliseUuid(paymentMethodIdRaw);
 
   const pricing = await computePricingSnapshot({ userId, payload, context });
 
@@ -1200,6 +1263,7 @@ async function createCustomerOrder({ user, payload = {}, context = {} }) {
         method: paymentMethod,
         flow: paymentFlow,
         status: paymentFlow === 'online' ? 'pending' : 'unpaid',
+        payment_method_id: paymentMethodId,
       },
     });
 
@@ -1216,6 +1280,7 @@ async function createCustomerOrder({ user, payload = {}, context = {} }) {
       payload: {
         payment_method: paymentMethod,
         payment_flow: paymentFlow,
+        payment_method_id: paymentMethodId,
         totals: pricing.totals,
       },
     });
@@ -1237,6 +1302,7 @@ async function createCustomerOrder({ user, payload = {}, context = {} }) {
         restaurant_id: order.restaurant_id,
         total: pricing.totals.total_amount,
         payment_method: paymentMethod,
+        payment_method_id: paymentMethodId,
         flow: paymentFlow,
       },
     });
@@ -1253,6 +1319,9 @@ async function createCustomerOrder({ user, payload = {}, context = {} }) {
         restaurant_id: order.restaurant_id,
         amount: pricing.totals.total_amount,
         currency: pricing.totals.currency,
+        payment_method: paymentMethod,
+        payment_method_id: paymentMethodId,
+        flow: paymentFlow,
       });
 
       await publishOrderEvent('PaymentPending', {
@@ -1263,6 +1332,7 @@ async function createCustomerOrder({ user, payload = {}, context = {} }) {
         currency: pricing.totals.currency,
         flow: paymentFlow,
         method: paymentMethod,
+        payment_method_id: paymentMethodId,
         branch_id: order.branch_id,
       });
     } catch (eventError) {

@@ -42,6 +42,8 @@ const Checkout = () => {
     appliedDiscountCode,
     momoWallets,
     cardAccounts,
+    selectedCardId,
+    setSelectedCardId,
     method,
     setMethod,
     addresses,
@@ -110,6 +112,21 @@ const Checkout = () => {
     ],
     [],
   );
+
+  const getCardLabel = (card) => {
+    const brand = (card.brand || "CARD").toUpperCase();
+    const last4 = card.last4 || card.providerData?.last4 || "0000";
+    return `${brand} •••• ${last4}`;
+  };
+
+  const getCardExpiry = (card) => {
+    const expMonth = card.expMonth ?? card.exp_month;
+    const expYear = card.expYear ?? card.exp_year;
+    if (!expMonth || !expYear) return null;
+    const paddedMonth = String(expMonth).padStart(2, "0");
+    const shortYear = String(expYear).slice(-2);
+    return `${paddedMonth}/${shortYear}`;
+  };
 
   useEffect(() => {
     // const normalized = typeof method === "string" ? method.trim().toLowerCase() : "";
@@ -529,6 +546,64 @@ const Checkout = () => {
             })}
           </div>
         </div>
+
+        {method === "card" && cardAccounts.length > 0 ? (
+          <div className="mt-4 rounded-3xl border border-orange-200 bg-orange-50/30 p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-semibold text-gray-900">
+                  Select a saved card
+                </p>
+                <p className="text-xs text-gray-500">
+                  Choose which card you want to charge for this order.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="text-xs font-semibold text-orange-500 hover:text-orange-600"
+                onClick={openCustomerProfilePanel}
+              >
+                Manage cards
+              </button>
+            </div>
+            <div className="mt-4 space-y-3">
+              {cardAccounts.map((card) => {
+                const cardId = card.id;
+                const isSelectedCard = selectedCardId
+                  ? selectedCardId === cardId
+                  : Boolean(card.isDefault);
+                const expiry = getCardExpiry(card);
+                return (
+                  <label
+                    key={cardId}
+                    className={`flex cursor-pointer items-center justify-between rounded-2xl border bg-white px-4 py-3 transition ${
+                      isSelectedCard
+                        ? "border-orange-500 ring-2 ring-orange-100"
+                        : "border-gray-200 hover:border-orange-300"
+                    }`}
+                  >
+                    <div>
+                      <p className="text-sm font-semibold text-gray-900">
+                        {getCardLabel(card)}
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        {expiry ? `Expires ${expiry}` : "Expiration unavailable"}
+                        {card.isDefault ? " • Default card" : ""}
+                      </p>
+                    </div>
+                    <input
+                      type="radio"
+                      name="selected-card"
+                      className="h-4 w-4 text-orange-500 focus:ring-orange-400"
+                      checked={isSelectedCard}
+                      onChange={() => setSelectedCardId(cardId)}
+                    />
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
 
         <div className="rounded-3xl bg-white p-8 shadow-sm">
           <h2 className="text-xl font-semibold text-gray-900">

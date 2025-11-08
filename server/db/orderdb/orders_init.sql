@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS order_items (
   branch_product_id UUID,                         -- soft ref: product-service.branch_products.id
   title VARCHAR(200) NOT NULL,                    -- snapshot tên
   image TEXT,
+  branch_category_id UUID,
   category_id UUID,                               -- soft ref
 
   unit_price NUMERIC(12,2) NOT NULL DEFAULT 0,    -- base sau rule/override

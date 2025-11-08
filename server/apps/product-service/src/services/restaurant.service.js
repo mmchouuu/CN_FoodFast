@@ -353,6 +353,13 @@ async function getRestaurantById(restaurantId) {
   return buildRestaurantPayload(restaurant);
 }
 
+async function getBranchByUuid(branchId) {
+  if (!branchId) return null;
+  const branch = await restaurantRepository.findBranchByUuid(branchId);
+  if (!branch) return null;
+  return hydrateBranch(branch, null);
+}
+
 async function updateRestaurantDetails(restaurantId, payload = {}) {
   if (!restaurantId) {
     throw new Error('restaurantId is required');
@@ -437,4 +444,5 @@ module.exports = {
   listRestaurantBranches,
   updateBranchDetails,
   deleteBranch,
+  getBranchByUuid,
 };

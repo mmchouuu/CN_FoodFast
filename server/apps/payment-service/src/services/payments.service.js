@@ -3,6 +3,7 @@ const paymentModel = require('../models/payment.model');
 const paymentMethodModel = require('../models/paymentMethod.model');
 const stripeService = require('./stripe.service');
 const { publishEvent } = require('../publishers/outbox.publisher');
+const { fetchOrderById } = require('../clients/order.client');
 
 const normalizeNumber = (value) => {
   const parsed = Number(value);
@@ -10,7 +11,34 @@ const normalizeNumber = (value) => {
   return parsed;
 };
 
-const selectDefaultStripeMethod = async (userId) => {
+const selectDefaultStripeMethod = async (userId, preferredMethodId = null) => {
+  if (preferredMethodId) {
+    let preferredRecord = await paymentMethodModel.findPaymentMethodById(
+      preferredMethodId,
+      userId,
+    );
+    if (
+      (!preferredRecord ||
+        preferredRecord.type !== 'card' ||
+        preferredRecord.provider !== 'stripe' ||
+        !preferredRecord.provider_data?.payment_method_id) &&
+      typeof preferredMethodId === 'string' &&
+      preferredMethodId.startsWith('pm_')
+    ) {
+      preferredRecord = await paymentMethodModel.findPaymentMethodByProviderPaymentId(
+        preferredMethodId,
+        userId,
+      );
+    }
+    if (
+      preferredRecord &&
+      preferredRecord.type === 'card' &&
+      preferredRecord.provider === 'stripe' &&
+      preferredRecord.provider_data?.payment_method_id
+    ) {
+      return preferredRecord;
+    }
+  }
   const methods = await paymentMethodModel.listStripePaymentMethods(userId);
   if (!methods.length) {
     return null;
@@ -19,19 +47,74 @@ const selectDefaultStripeMethod = async (userId) => {
   return preferred || methods[0];
 };
 
+const normalizeCurrency = (value) => {
+  if (typeof value !== 'string') {
+    return 'VND';
+  }
+  const trimmed = value.trim();
+  if (/^[A-Za-z]{3}$/.test(trimmed)) {
+    return trimmed.toUpperCase();
+  }
+  return 'VND';
+};
+
+const parseJson = (value) => {
+  if (!value) return null;
+  if (typeof value === 'object') return value;
+  if (typeof value === 'string') {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  return null;
+};
+
+const extractRestaurantContext = (order = {}) => {
+  const metadata = parseJson(order.metadata) || {};
+  const restaurantId =
+    order.restaurant_id ||
+    order.restaurantId ||
+    metadata.restaurant_id ||
+    metadata.restaurantId ||
+    metadata.restaurant_snapshot?.id ||
+    metadata.restaurant?.id ||
+    null;
+  const branchId =
+    order.branch_id ||
+    order.branchId ||
+    metadata.branch_id ||
+    metadata.branchId ||
+    metadata.branch_snapshot?.id ||
+    (Array.isArray(metadata.branch_ids) && metadata.branch_ids.length === 1
+      ? metadata.branch_ids[0]
+      : null);
+  return {
+    restaurantId: restaurantId || null,
+    branchId: branchId || null,
+  };
+};
+
 async function handlePaymentPending(event) {
   const {
     order_id: orderId,
     user_id: userId,
-    restaurant_id: restaurantId,
-    branch_id: branchId,
+    restaurant_id: restaurantIdRaw = null,
+    restaurantId: restaurantIdCamel = null,
+    branch_id: branchIdRaw = null,
+    branchId: branchIdCamel = null,
     amount,
     currency = 'VND',
     flow = 'online',
     method,
+    payment_method_id: requestedPaymentMethodId = null,
     idempotency_key: idempotencyKey = null,
     metadata = {},
   } = event || {};
+  let restaurantId = restaurantIdRaw || restaurantIdCamel || null;
+  let branchId = branchIdRaw || branchIdCamel || null;
+  const currencyCode = normalizeCurrency(currency);
 
   if (!orderId || !userId || !normalizeNumber(amount)) {
     console.error('[payment-service] invalid PaymentPending payload', event);
@@ -51,6 +134,59 @@ async function handlePaymentPending(event) {
       return existing;
     }
 
+    let stripeMethod = null;
+    let cachedOrder = null;
+    let attemptedOrderFetch = false;
+
+    const ensureOrderContext = async () => {
+      if (attemptedOrderFetch) return cachedOrder;
+      attemptedOrderFetch = true;
+      try {
+        cachedOrder = await fetchOrderById(orderId);
+      } catch (orderErr) {
+        console.error(
+          '[payment-service] Failed to fetch order for payment context:',
+          orderErr?.message || orderErr,
+        );
+        cachedOrder = null;
+      }
+      return cachedOrder;
+    };
+
+    if (!restaurantId || !branchId) {
+      const orderData = await ensureOrderContext();
+      if (orderData) {
+        const context = extractRestaurantContext(orderData);
+        if (!restaurantId) restaurantId = context.restaurantId;
+        if (!branchId) branchId = context.branchId;
+      } else if (!restaurantId) {
+        console.warn(
+          '[payment-service] Missing restaurant_id and unable to load order context for',
+          orderId,
+        );
+      }
+    }
+
+    if (!restaurantId) {
+      await client.query('ROLLBACK');
+      const error = new Error('restaurant_id is required to create payment');
+      error.status = 400;
+      throw error;
+    }
+
+    if (flow === 'online') {
+      stripeMethod = await selectDefaultStripeMethod(userId, requestedPaymentMethodId);
+      if (!stripeMethod || !stripeMethod.provider_data?.customer_id) {
+        await client.query('ROLLBACK');
+        await publishEvent('PaymentFailed', {
+          order_id: orderId,
+          payment_id: null,
+          reason: 'no_payment_method',
+        });
+        return null;
+      }
+    }
+
     const payment = await paymentModel.createPayment(
       {
         order_id: orderId,
@@ -58,7 +194,8 @@ async function handlePaymentPending(event) {
         restaurant_id: restaurantId,
         branch_id: branchId,
         amount,
-        currency,
+        currency: currencyCode,
+        payment_method_id: stripeMethod?.id || null,
         idempotency_key: idempotencyKey,
         status: flow === 'cash' ? 'succeeded' : 'pending',
         flow,
@@ -92,25 +229,9 @@ async function handlePaymentPending(event) {
         payment_id: updated.id,
         amount,
         flow,
+        currency: currencyCode,
       });
       return updated;
-    }
-
-    // flow === 'online'
-    const stripeMethod = await selectDefaultStripeMethod(userId);
-    if (!stripeMethod || !stripeMethod.provider_data?.customer_id) {
-      await paymentModel.updatePayment(
-        payment.id,
-        { status: 'failed' },
-        client,
-      );
-      await client.query('COMMIT');
-      await publishEvent('PaymentFailed', {
-        order_id: orderId,
-        payment_id: payment.id,
-        reason: 'no_payment_method',
-      });
-      return null;
     }
 
     try {
@@ -118,7 +239,7 @@ async function handlePaymentPending(event) {
         customerId: stripeMethod.provider_data.customer_id,
         paymentMethodId: stripeMethod.provider_data.payment_method_id,
         amount,
-        currency,
+        currency: currencyCode,
         metadata: {
           orderId,
           userId,
@@ -160,13 +281,14 @@ async function handlePaymentPending(event) {
           payment_id: payment.id,
           transaction_id: paymentIntent.id,
           amount,
-          currency,
+          currency: currencyCode,
         });
       } else {
         await publishEvent('PaymentPending', {
           order_id: orderId,
           payment_id: payment.id,
           status: paymentIntent.status,
+          currency: currencyCode,
         });
       }
 
@@ -190,6 +312,7 @@ async function handlePaymentPending(event) {
         order_id: orderId,
         payment_id: payment.id,
         reason: error.message,
+        currency: currencyCode,
       });
       console.error('[payment-service] Stripe charge failed:', error);
       return null;

@@ -124,6 +124,18 @@ async function inviteMember(req, res, next) {
   }
 }
 
+async function getBranchById(req, res, next) {
+  try {
+    const branch = await restaurantService.getBranchByUuid(req.params.branchId);
+    if (!branch) {
+      return res.status(404).json({ message: 'Branch not found' });
+    }
+    return res.json(branch);
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
   createRestaurant,
   getRestaurant,
@@ -136,4 +148,5 @@ module.exports = {
   deleteBranch,
   updateBranchSchedules,
   inviteMember,
+  getBranchById,
 };
