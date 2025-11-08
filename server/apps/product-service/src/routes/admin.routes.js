@@ -1,4 +1,4 @@
-﻿const express = require('express');
+const express = require('express');
 const adminController = require('../controllers/admin.controller');
 
 const router = express.Router();
@@ -9,3 +9,4 @@ router.post('/calendars', adminController.createCalendar);
 router.post('/promotions/global', adminController.createGlobalPromotion);
 
 module.exports = router;
+

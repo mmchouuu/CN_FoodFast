@@ -19,6 +19,7 @@ const STATUS_DESCRIPTIONS = {
 };
 
 const RestaurantVerify = () => {
+
   const navigate = useNavigate();
   const location = useLocation();
 

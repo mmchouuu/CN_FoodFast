@@ -514,3 +514,4 @@ export async function removeCategory(id) {
   await deleteCategoryRecord(id);
   return category;
 }
+

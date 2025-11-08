@@ -1,4 +1,4 @@
-﻿import amqp from 'amqplib';
+import amqp from 'amqplib';
 import config from './config.js';
 import { sendMail } from './mailer.js';
 
@@ -51,4 +51,3 @@ export async function startRabbitMQ() {
     console.error('[email-service] Failed to connect to RabbitMQ:', error?.message || error);
     process.exit(1);
   }
-}

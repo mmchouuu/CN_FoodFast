@@ -1,4 +1,5 @@
 const paymentMethodService = require('../services/paymentMethod.service');
+
 const paymentMethodsService = require('../services/paymentMethods.service');
 
 const resolveUserId = (req, body = {}) =>
@@ -54,6 +55,7 @@ exports.listPaymentMethods = async (req, res) => {
 
 exports.createPaymentMethod = async (req, res) => {
   const body = req.body || {};
+
   try {
     const userId = resolveUserId(req, req.query);
     if (!userId) {
@@ -102,6 +104,7 @@ exports.listWallets = async (req, res) => {
 };
 
 exports.createWallet = async (req, res) => {
+
   const body = req.body || {};
   try {
     const userId = resolveUserId(req, body);

@@ -3,6 +3,7 @@ import api from './api';
 const basePath = '/api/orders';
 const ownerBasePath = '/owner/orders';
 
+
 const unwrapCollection = (payload) => {
   if (Array.isArray(payload)) return payload;
   if (Array.isArray(payload?.orders)) return payload.orders;
@@ -56,14 +57,14 @@ export async function updateOwnerOrderStatus(orderId, payload) {
   return data;
 }
 
+
 const ordersService = {
   list: listOrders,
   listByUser: listOrdersByUser,
   get: getOrder,
   createOrder,
-  listOwner: listOwnerOrders,
-  getOwner: getOwnerOrder,
-  updateOwnerOrderStatus,
+
+
 };
 
 export default ordersService;

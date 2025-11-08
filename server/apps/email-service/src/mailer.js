@@ -1,4 +1,4 @@
-﻿import nodemailer from 'nodemailer';
+import nodemailer from 'nodemailer';
 import config from './config.js';
 
 let transporter;

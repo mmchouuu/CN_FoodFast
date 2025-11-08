@@ -94,6 +94,7 @@ async function attachPaymentMethod({ customerId, paymentMethodId, setDefault = t
   }
 
   return paymentMethod;
+
 }
 
 async function createPaymentIntent({

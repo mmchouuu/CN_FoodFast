@@ -663,6 +663,33 @@ const deriveRestaurantId = (payload, items) => {
   return null;
 };
 
+const deriveBranchId = (payload, items) => {
+  const metadata = payload.metadata && typeof payload.metadata === 'object' ? payload.metadata : {};
+  const directValue =
+    payload.branch_id ||
+    payload.branchId ||
+    metadata.branch_id ||
+    metadata.branchId ||
+    (Array.isArray(metadata.branch_ids) && metadata.branch_ids.length && metadata.branch_ids[0]) ||
+    (Array.isArray(payload.branch_ids) && payload.branch_ids.length && payload.branch_ids[0]) ||
+    null;
+  if (directValue) return directValue;
+
+  for (const item of items) {
+    if (item.branch_id || item.branchId) {
+      return item.branch_id || item.branchId;
+    }
+    if (item.product_snapshot) {
+      const snapshot = item.product_snapshot;
+      if (snapshot.branch_id || snapshot.branchId) {
+        return snapshot.branch_id || snapshot.branchId;
+      }
+    }
+  }
+
+  return null;
+};
+
 const createOrder = async (payload, userContext = null) => {
   const client = await pool.connect();
   try {
@@ -709,6 +736,7 @@ const createOrder = async (payload, userContext = null) => {
       payload.branchId ||
       (payload.metadata && (payload.metadata.branch_id || payload.metadata.branchId)) ||
       null;
+
 
     const deliveryInput =
       payload.delivery ||
@@ -905,6 +933,7 @@ const createOrder = async (payload, userContext = null) => {
         )
         VALUES (
           $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18
+
         )`,
         [
           orderRow.id,

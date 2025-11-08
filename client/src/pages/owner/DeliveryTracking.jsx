@@ -133,9 +133,3 @@ const DeliveryTracking = () => {
 };
 
 export default DeliveryTracking;
-
-
-
-
-
-

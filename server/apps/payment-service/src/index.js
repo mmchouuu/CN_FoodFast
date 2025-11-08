@@ -81,4 +81,3 @@ app.listen(port, () => console.log(`payment-service listening ${port}`));
 startOrderConsumer().catch((error) => {
   console.error('[payment-service] Failed to start order consumer:', error);
 });
-

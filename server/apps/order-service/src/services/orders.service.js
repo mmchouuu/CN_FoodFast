@@ -149,6 +149,44 @@ const extractRestaurantScope = (user = {}) => {
   );
 };
 
+async function resolveOwnerRestaurantScope(user = {}) {
+  const directScope = extractRestaurantScope(user);
+  if (directScope.length) {
+    return directScope;
+  }
+
+  const ownerId = resolveUserId(user);
+  if (!ownerId) {
+    return [];
+  }
+
+  try {
+    const restaurants = await productClient.listRestaurantsByOwner(ownerId);
+    const items = Array.isArray(restaurants) ? restaurants : [];
+    const ids = unique(
+      items
+        .map((item) => item && (item.id || item.restaurant_id || item.restaurantId || null))
+        .filter(Boolean)
+        .map((value) => value.toString().trim())
+        .filter((value) => value.length),
+    );
+
+    if (ids.length) {
+      const merged = unique([...(user.restaurant_ids || []), ...ids]);
+      user.restaurant_ids = merged;
+      user.restaurantIds = merged;
+    }
+
+    return ids;
+  } catch (error) {
+    console.error(
+      '[order-service] failed to resolve owner restaurant scope:',
+      error?.message || error,
+    );
+    return [];
+  }
+}
+
 const extractBranchScope = (user = {}) => {
   const list = ensureArray(user.branch_ids)
     .concat(ensureArray(user.branchIds))
@@ -219,6 +257,7 @@ function computePricingTotals(items, overrides = {}) {
     currency: toCurrency(overrides.currency || DEFAULT_CURRENCY),
   };
 }
+
 
 const normaliseOptionEntry = (entry) => {
   if (!entry) return null;
@@ -1239,6 +1278,7 @@ async function createCustomerOrder({ user, payload = {}, context = {} }) {
     payload.payment_method || payload.paymentMethod || payload.method || 'cod';
   const paymentMethod = String(paymentMethodRaw).trim().toLowerCase() || 'cod';
   const paymentFlow = determinePaymentFlow(paymentMethod);
+
   const paymentMethodIdRaw =
     payload.payment_method_id ||
     payload.paymentMethodId ||
@@ -1253,7 +1293,6 @@ async function createCustomerOrder({ user, payload = {}, context = {} }) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-
     const order = await insertOrderGraph({
       client,
       userId,
@@ -1323,6 +1362,7 @@ async function createCustomerOrder({ user, payload = {}, context = {} }) {
         payment_method_id: paymentMethodId,
         flow: paymentFlow,
       });
+
 
       await publishOrderEvent('PaymentPending', {
         order_id: order.id,

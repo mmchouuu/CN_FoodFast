@@ -75,3 +75,4 @@ app.get("/health", (_, res) => res.send("OK"));
 server.listen(PORT, () => {
   console.log(`${process.env.APP_NAME || "SocketGateway"} is running on port ${PORT}`);
 });
+

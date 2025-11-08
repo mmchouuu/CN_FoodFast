@@ -29,3 +29,4 @@ module.exports = {
   ORDER_EVENTS_QUEUE: process.env.ORDER_EVENTS_QUEUE || 'order_events',
   PAYMENT_EVENTS_QUEUE: process.env.PAYMENT_EVENTS_QUEUE || 'payment_events',
 };
+

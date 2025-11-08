@@ -346,6 +346,7 @@ const OrderDetails = () => {
                 <span className="font-semibold">
                   {currency}
                   {totals.subtotal.toLocaleString()}
+
                 </span>
               </div>
               <div className="flex justify-between text-gray-500">
@@ -360,6 +361,7 @@ const OrderDetails = () => {
                 <span>
                   {currency}
                   {totals.vat.toLocaleString()}
+
                 </span>
               </div>
               <div className="flex justify-between text-green-600">

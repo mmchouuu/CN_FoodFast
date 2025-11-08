@@ -1,5 +1,6 @@
 import api from './api';
 
+
 const basePath = '/api/payments';
 
 export async function createPayment(payload) {
@@ -13,6 +14,7 @@ export async function getPayment(paymentId) {
 }
 
 export async function listMomoWallets({ userId } = {}) {
+
   const config = {};
   if (userId) {
     config.params = { user_id: userId };
@@ -25,6 +27,7 @@ export async function listMomoWallets({ userId } = {}) {
 }
 
 export async function linkMomoWallet(payload = {}) {
+
   const config = {};
   if (payload?.user_id) {
     config.params = { user_id: payload.user_id };
@@ -54,6 +57,7 @@ export async function createStripeSetupIntent() {
 
 export async function confirmStripePaymentMethod(payload) {
   const { data } = await api.post(`${basePath}/stripe/confirm`, payload);
+
   return data;
 }
 

@@ -1,4 +1,4 @@
-﻿const config = require('../config');
+const config = require('../config');
 const { httpRequest } = require('./http');
 
 async function createOwnerMainAccount({
@@ -49,3 +49,4 @@ module.exports = {
   createOwnerMainAccount,
   createRestaurantMember,
 };
+

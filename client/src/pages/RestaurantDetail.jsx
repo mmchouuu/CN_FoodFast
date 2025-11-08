@@ -8,6 +8,7 @@ import {
   restaurantPlaceholderImage,
 } from "../utils/imageHelpers";
 
+
 const getBasePrice = (dish) => {
   if (!dish || !dish.price) return 0;
   const prices =
@@ -589,3 +590,4 @@ const RestaurantDetail = () => {
 };
 
 export default RestaurantDetail;
+

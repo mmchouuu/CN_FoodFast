@@ -114,6 +114,7 @@ async function updateBranchSchedules(req, res, next) {
   }
 }
 
+
 async function inviteMember(req, res, next) {
   try {
     const { restaurantId } = req.params;

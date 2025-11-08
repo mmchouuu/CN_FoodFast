@@ -39,6 +39,7 @@ const selectDefaultStripeMethod = async (userId, preferredMethodId = null) => {
       return preferredRecord;
     }
   }
+
   const methods = await paymentMethodModel.listStripePaymentMethods(userId);
   if (!methods.length) {
     return null;
@@ -96,6 +97,7 @@ const extractRestaurantContext = (order = {}) => {
   };
 };
 
+
 async function handlePaymentPending(event) {
   const {
     order_id: orderId,
@@ -120,7 +122,6 @@ async function handlePaymentPending(event) {
     console.error('[payment-service] invalid PaymentPending payload', event);
     return;
   }
-
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -196,6 +197,7 @@ async function handlePaymentPending(event) {
         amount,
         currency: currencyCode,
         payment_method_id: stripeMethod?.id || null,
+
         idempotency_key: idempotencyKey,
         status: flow === 'cash' ? 'succeeded' : 'pending',
         flow,
@@ -413,4 +415,5 @@ module.exports = {
   getPaymentByTransactionId,
   markPaymentSucceeded,
   markPaymentFailed,
+
 };

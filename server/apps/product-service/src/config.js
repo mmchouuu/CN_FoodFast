@@ -12,3 +12,4 @@ module.exports = {
     timeoutMs: Number(process.env.USER_SERVICE_TIMEOUT || 5000),
   },
 };
+

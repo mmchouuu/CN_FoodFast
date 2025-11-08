@@ -120,8 +120,3 @@ const AdminAccount = () => {
 
 export default AdminAccount;
 
-
-
-
-
-

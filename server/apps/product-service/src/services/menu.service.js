@@ -1,4 +1,4 @@
-﻿const { withTransaction } = require('../db');
+const { withTransaction } = require('../db');
 const menuRepository = require('../repositories/menu.repository');
 const restaurantRepository = require('../repositories/restaurant.repository');
 const optionsRepository = require('../repositories/options.repository');

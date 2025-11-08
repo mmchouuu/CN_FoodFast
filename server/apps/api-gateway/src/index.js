@@ -1,4 +1,5 @@
-﻿﻿// // api-gateway/src/index.js
+// api-gateway/src/index.js
+
 // require('dotenv').config();
 // const fs = require('fs');
 // const path = require('path');
@@ -125,6 +126,7 @@ require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
+
 const express = require('express');
 const bodyParser = require('body-parser');
 const config = require('./config');
@@ -137,6 +139,7 @@ const health = require('./health');
 const customersRoutes = require('./routes/customers.routes');
 const restaurantsRoutes = require('./routes/restaurants.routes');
 const adminRoutes = require('./routes/admin.routes');
+
 const ordersRoutes = require('./routes/orders.routes');
 const paymentsRoutes = require('./routes/payments.routes');
 const customerOrderRoutes = require('./routes/orders.customer.routes');
@@ -203,6 +206,7 @@ app.use((req, res, next) => {
 // ======================================================
 // 🔹 CORS + Request ID
 // ======================================================
+
 app.use((req, res, next) => {
   const origin = req.headers.origin || '*';
   res.header('Access-Control-Allow-Origin', origin);
@@ -222,12 +226,15 @@ app.use(requestId);
 // ======================================================
 // 🔹 ROUTES
 // ======================================================
+
 app.use('/api/customers', customersRoutes);
 app.use('/api/customer', customersRoutes);
 app.use('/api/restaurants', restaurantsRoutes);
 app.use('/api/admin', adminRoutes);
+
 app.use('/api/orders', ordersRoutes);
 app.use('/api/payments', paymentsRoutes);
+
 app.use('/customer/orders', customerOrderRoutes);
 app.use('/owner/orders', ownerOrderRoutes);
 app.use('/admin/orders', adminOrderRoutes);

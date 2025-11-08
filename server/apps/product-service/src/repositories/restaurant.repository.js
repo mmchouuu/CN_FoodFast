@@ -1,4 +1,4 @@
-﻿const { pool } = require('../db');
+const { pool } = require('../db');
 
 function getExecutor(client) {
   return client || pool;
@@ -447,9 +447,4 @@ module.exports = {
   listBranches,
   findBranchById,
   findBranchByUuid,
-  updateBranch,
-  deleteBranch,
-  getBranchOpeningHours,
-  getBranchSpecialHours,
-  listAllRestaurants,
-};
+}

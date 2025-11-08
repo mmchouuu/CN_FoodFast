@@ -13,6 +13,7 @@ import { restaurantPlaceholderImage, dishPlaceholderImage } from '../utils/image
 
 // --- Auth Systems ---
 import authService from '../services/auth';
+import restaurantAuth from '../services/restaurantAuth';
 import {
     dishes as menuDishes,
     restaurants as restaurantList,
@@ -2039,6 +2040,43 @@ export const AppContextProvider = ({ children }) => {
         }
     }, [restaurantProfile]);
 
+    useEffect(() => {
+        if (typeof window === 'undefined') {
+            return;
+        }
+        if (!restaurantProfile) {
+            return;
+        }
+        try {
+            const storedToken = localStorage.getItem('restaurant_token');
+            if (storedToken) {
+                return;
+            }
+            if (restaurantProfile.authToken) {
+                localStorage.setItem('restaurant_token', restaurantProfile.authToken);
+                return;
+            }
+            setRestaurantProfile(null);
+            setIsOwner(false);
+            toast.error('Owner session expired. Please sign in again.');
+        } catch (error) {
+            console.warn('Failed to sync owner session', error);
+        }
+    }, [restaurantProfile, setIsOwner]);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') {
+            return undefined;
+        }
+        const handleOwnerExpiry = () => {
+            setRestaurantProfile(null);
+            setIsOwner(false);
+            toast.error('Owner session expired. Please sign in again.');
+        };
+        window.addEventListener('restaurant:expired', handleOwnerExpiry);
+        return () => window.removeEventListener('restaurant:expired', handleOwnerExpiry);
+    }, [setIsOwner]);
+
     // Persist local auth
     useEffect(() => {
         if (authToken) localStorage.setItem('auth_token', authToken); else localStorage.removeItem('auth_token');
@@ -2055,10 +2093,11 @@ export const AppContextProvider = ({ children }) => {
 
 
     // --- Local auth actions ---
-    const loginWithCredentials = async (email, password) => {
-        try {
-            const res = await authService.login(email, password);
+    const loginWithCredentials = async (email, password, options = {}) => {
+        const { accountType = 'auto' } = options;
+        const normalizedEmail = typeof email === 'string' ? email.trim() : email;
 
+        const handleCustomerSuccess = async (res) => {
             let sanitizedUser = null;
             if (res?.token) {
                 setAuthToken(res.token);
@@ -2069,6 +2108,10 @@ export const AppContextProvider = ({ children }) => {
                 setAuthProfile(sanitizedUser);
                 localStorage.setItem('auth_profile', JSON.stringify(sanitizedUser));
             }
+            localStorage.removeItem('restaurant_token');
+            localStorage.removeItem('restaurant_profile');
+            setIsOwner(false);
+            setRestaurantProfile(null);
             toast.success(res?.message || 'Logged in successfully');
             try {
                 const pendingRaw = localStorage.getItem('pending_address');
@@ -2088,13 +2131,93 @@ export const AppContextProvider = ({ children }) => {
                     await refreshAddresses();
                     toast.success('Saved your pending address.');
                 }
-            } catch { }
-            return res;
-        } catch (error) {
-            const message = error?.response?.data?.message || error.message || 'Login failed';
-            toast.error(message);
-            throw error;
+            } catch {
+                // ignore persistence failures
+            }
+            return { type: 'customer', response: res, user: sanitizedUser || res?.user || null };
+        };
+
+        const handleOwnerSuccess = (data) => {
+            const ownerToken = data?.token || null;
+            const ownerProfile = data?.user
+                ? {
+                    ...data.user,
+                    authToken: ownerToken || data.user?.authToken || null,
+                }
+                : null;
+
+            try {
+                if (ownerToken) {
+                    localStorage.setItem('restaurant_token', ownerToken);
+                } else {
+                    localStorage.removeItem('restaurant_token');
+                }
+            } catch (storageErr) {
+                console.warn('Failed to persist owner token', storageErr);
+            }
+
+            setRestaurantProfile(ownerProfile);
+            try {
+                if (ownerProfile) {
+                    localStorage.setItem('restaurant_profile', JSON.stringify(ownerProfile));
+                } else {
+                    localStorage.removeItem('restaurant_profile');
+                }
+            } catch (storageErr) {
+                console.warn('Failed to persist owner profile', storageErr);
+            }
+
+            setIsOwner(Boolean(ownerProfile));
+            setAuthToken(null);
+            setAuthProfile(null);
+            localStorage.removeItem('auth_token');
+            localStorage.removeItem('auth_profile');
+            toast.success(data?.message || 'Signed in successfully.');
+            return { type: 'owner', response: data, user: ownerProfile };
+        };
+
+        const shouldTryCustomer = accountType !== 'owner';
+        const shouldTryOwner = accountType !== 'customer';
+        let lastError = null;
+
+        if (shouldTryCustomer) {
+            try {
+                const result = await authService.login(normalizedEmail, password);
+                return await handleCustomerSuccess(result);
+            } catch (error) {
+                lastError = error;
+                if (accountType === 'customer') {
+                    const message = error?.response?.data?.message || error.message || 'Login failed';
+                    toast.error(message);
+                    throw error;
+                }
+            }
         }
+
+        if (shouldTryOwner) {
+            try {
+                const ownerResult = await restaurantAuth.login({ email: normalizedEmail, password });
+                return handleOwnerSuccess(ownerResult);
+            } catch (error) {
+                lastError = error;
+                if (accountType === 'owner') {
+                    const message =
+                        error?.response?.data?.message ||
+                        error.message ||
+                        'Unable to sign in to restaurant account.';
+                    toast.error(message);
+                    throw error;
+                }
+            }
+        }
+
+        const message =
+            lastError?.response?.data?.message || lastError?.message || 'Login failed. Please try again.';
+        toast.error(message);
+        if (lastError) {
+            throw lastError;
+        }
+        throw new Error(message);
     };
 
     const signupWithCredentials = async ({ firstName, lastName, email, password, phone }) => {
@@ -2125,12 +2248,17 @@ export const AppContextProvider = ({ children }) => {
         setAuthProfile(null);
         setAddresses([]);
         setSelectedAddressId(null);
-        setBankAccounts([]);
+        setMomoWallets([]);
         setCardAccounts([]);
+        setSelectedCardId(null);
         setCustomerProfileOpen(false);
+        setIsOwner(false);
+        setRestaurantProfile(null);
         localStorage.removeItem('auth_token');
         localStorage.removeItem('auth_profile');
         localStorage.removeItem('pending_user_id');
+        localStorage.removeItem('restaurant_token');
+        localStorage.removeItem('restaurant_profile');
         toast('Logged out');
     };
 

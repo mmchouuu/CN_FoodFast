@@ -1,4 +1,3 @@
-﻿const express = require('express');
 const controller = require('../controllers/restaurants.controller');
 
 const router = express.Router();

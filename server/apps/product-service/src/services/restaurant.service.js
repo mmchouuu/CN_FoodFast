@@ -445,4 +445,5 @@ module.exports = {
   updateBranchDetails,
   deleteBranch,
   getBranchByUuid,
+
 };

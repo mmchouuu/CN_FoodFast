@@ -23,3 +23,4 @@ function getStripeClient() {
 module.exports = {
   getStripeClient,
 };
+

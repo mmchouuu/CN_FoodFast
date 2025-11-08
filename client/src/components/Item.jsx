@@ -7,6 +7,7 @@ import {
   pickFirstImageUrl,
 } from "../utils/imageHelpers";
 
+
 const Item = ({ product }) => {
   const { currency, addToCart } = useAppContext();
   const [size, setSize] = useState(product.sizes?.[0] || "");
@@ -89,6 +90,7 @@ const Item = ({ product }) => {
               </button>
             ))}
         </div>
+
         <p className="text-lg font-semibold text-orange-500">
           {currency}
           {displayPrice.toLocaleString()}

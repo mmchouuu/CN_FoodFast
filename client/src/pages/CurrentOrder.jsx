@@ -264,6 +264,7 @@ const CurrentOrder = () => {
               <span className="font-semibold">
                 {currency}
                 {totals.subtotal.toLocaleString()}
+
               </span>
             </div>
             <div className="flex justify-between text-gray-500">
@@ -278,6 +279,7 @@ const CurrentOrder = () => {
               <span>
                 {currency}
                 {totals.vat.toLocaleString()}
+
               </span>
             </div>
             <div className="flex justify-between text-green-600">
@@ -285,6 +287,7 @@ const CurrentOrder = () => {
               <span>
                 -{currency}
                 {totals.discount.toLocaleString()}
+
               </span>
             </div>
           </div>

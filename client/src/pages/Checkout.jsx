@@ -34,6 +34,7 @@ const getActivePaymentOptionId = (value) => {
 };
 
 const Checkout = () => {
+
   const {
     getCartAmount,
     delivery_charges,
@@ -604,6 +605,7 @@ const Checkout = () => {
             </div>
           </div>
         ) : null}
+
 
         <div className="rounded-3xl bg-white p-8 shadow-sm">
           <h2 className="text-xl font-semibold text-gray-900">

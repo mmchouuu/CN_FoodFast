@@ -1,4 +1,4 @@
-﻿const { createAxiosInstance } = require('../utils/httpClient');
+const { createAxiosInstance } = require('../utils/httpClient');
 const config = require('../config');
 
 const userAdminClient = createAxiosInstance({

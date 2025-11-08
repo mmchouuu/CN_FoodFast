@@ -84,6 +84,7 @@ exports.createPayment = async (req, res) => {
       body.user_id ||
       body.userId ||
       resolveUserId(req, body);
+
     if (!userId) {
       return res.status(401).json({ error: 'user id is required' });
     }
@@ -127,6 +128,7 @@ exports.createPayment = async (req, res) => {
       flow,
       method: body.payment_method || body.paymentMethod || null,
       payment_method_id: paymentMethodId,
+
       idempotency_key: body.idempotency_key || body.idempotencyKey || null,
       metadata: body.metadata || {},
     });
