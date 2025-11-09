@@ -3,9 +3,10 @@ import toast from "react-hot-toast";
 import ownerOrdersService from "../../services/ownerOrders";
 import restaurantManagerService from "../../services/restaurantManager";
 import { useAppContext } from "../../context/AppContext";
+import { formatPaymentMethodLabel, formatPaymentStatusLabel } from "../../utils/paymentDisplay";
 
 const containerClasses = "bg-white shadow-sm rounded-2xl p-6 space-y-6";
-const PAID_STATUSES = new Set(["paid", "authorized", "partially_refunded", "refunded"]);
+const PAID_STATUSES = new Set(["paid", "authorized", "partially_refunded", "refunded", "succeeded"]);
 
 const ORDER_STATUS_TABS = [
   { key: "all", label: "All" },
@@ -22,6 +23,8 @@ const resolveItemTotal = (item) => {
   if (!item) return 0;
   if (item.totalPrice !== undefined) return Number(item.totalPrice) || 0;
   if (item.total_price !== undefined) return Number(item.total_price) || 0;
+  if (item.lineTotal !== undefined) return Number(item.lineTotal) || 0;
+  if (item.line_total !== undefined) return Number(item.line_total) || 0;
   const qty = Number(item.quantity) || 0;
   const unit = Number(item.unitPrice ?? item.unit_price ?? 0) || 0;
   return qty * unit;
@@ -151,37 +154,55 @@ const adaptOwnerOrder = (order, lookups) => {
     null;
 
   const items = Array.isArray(order.items)
-    ? order.items.map((item) => ({
-        id: item.id,
-        name:
-          item.product_snapshot?.title ||
-          item.product_snapshot?.name ||
-          item.product_name ||
-          "Menu item",
-        quantity: Number(item.quantity) || 0,
-        unitPrice:
-          Number(item.unit_price ?? item.product_snapshot?.price ?? 0) || 0,
-        totalPrice:
+    ? order.items.map((item) => {
+        const quantity = Number(item.quantity) || 0;
+        const unitPrice =
+          Number(item.unit_price ?? item.product_snapshot?.price ?? 0) || 0;
+        const totalPrice =
           Number(
             item.total_price ??
-              (Number(item.unit_price ?? 0) || 0) *
-                (Number(item.quantity ?? 0) || 0),
-          ) || 0,
-        size:
-          item.product_snapshot?.size ||
-          item.product_snapshot?.variant ||
-          "Standard",
-      }))
+              item.line_total ??
+              unitPrice * quantity,
+          ) || 0;
+
+        return {
+          id: item.id,
+          name:
+            item.product_snapshot?.title ||
+            item.product_snapshot?.name ||
+            item.product_name ||
+            "Menu item",
+          quantity,
+          unitPrice,
+          totalPrice,
+          lineTotal: Number(item.line_total ?? totalPrice) || totalPrice,
+          size:
+            item.product_snapshot?.size ||
+            item.product_snapshot?.variant ||
+            "Standard",
+        };
+      })
     : [];
 
   const totalAmount =
     Number(order.total_amount ?? metadata?.pricing?.total ?? 0) || 0;
-  const paymentStatus = (order.payment_status || "").toLowerCase();
+  const paymentStatusRaw = order.payment_status || "";
   const paymentMethodRaw =
     paymentMeta.method ||
     order.payment_method ||
     order.paymentMethod ||
     "cod";
+  const paymentDetails = order.payment_details || null;
+  const paymentStatusSource = paymentDetails?.status || paymentStatusRaw || "";
+  const paymentStatus =
+    paymentStatusSource.toLowerCase() === "succeeded"
+      ? "paid"
+      : paymentStatusSource.toLowerCase();
+  const paymentMethodLabel = formatPaymentMethodLabel(paymentDetails, paymentMethodRaw);
+  const paymentStatusLabel = formatPaymentStatusLabel(
+    paymentDetails,
+    paymentStatusSource || paymentStatus || "pending"
+  );
 
   const customerName =
     metadata.customer_name ||
@@ -203,7 +224,10 @@ const adaptOwnerOrder = (order, lookups) => {
     branchName: branchName || "Branch",
     status: (order.status || "").toLowerCase(),
     paymentStatus,
-    paymentMethod: String(paymentMethodRaw).toUpperCase(),
+    paymentStatusLabel,
+    paymentMethod: paymentMethodLabel,
+    paymentMethodLabel,
+    paymentDetails,
     isPaid: PAID_STATUSES.has(paymentStatus),
     totalAmount,
     createdAt: order.created_at || order.createdAt,
@@ -641,6 +665,7 @@ const Orders = () => {
                   />
                   <PaymentStatus
                     paid={order.isPaid}
+                    statusLabel={order.paymentStatusLabel || order.paymentStatus}
                     amount={order.totalAmount}
                     currency={currency}
                   />
@@ -653,25 +678,30 @@ const Orders = () => {
                     Order Items
                   </h3>
                   <ul className="space-y-3">
-                    {order.items.map((item) => (
-                      <li
-                        key={item.id}
-                        className="rounded-lg border border-slate-100 bg-slate-50 px-4 py-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between"
-                      >
-                        <div>
-                          <p className="font-semibold text-slate-800">
-                            {item.name}
-                          </p>
-                          <p className="text-xs text-slate-500">
-                            Size: {item.size} · Quantity: {item.quantity}
-                          </p>
-                        </div>
-                        <p className="text-sm font-semibold text-slate-700">
-                          {currency}
-                          {resolveItemTotal(item).toLocaleString()}
-                        </p>
-                      </li>
-                    ))}
+                    {order.items.map((item) => {
+                      const itemTotal = resolveItemTotal(item);
+                      return (
+                        <li
+                          key={item.id}
+                          className="rounded-lg border border-slate-100 bg-slate-50 px-4 py-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between"
+                        >
+                          <div>
+                            <p className="font-semibold text-slate-800">
+                              {item.name}
+                            </p>
+                            <p className="text-xs text-slate-500">
+                              Size: {item.size} · Quantity: {item.quantity}
+                            </p>
+                          </div>
+                          {itemTotal > 0 ? (
+                            <p className="text-sm font-semibold text-slate-700">
+                              {currency}
+                              {itemTotal.toLocaleString()}
+                            </p>
+                          ) : null}
+                        </li>
+                      );
+                    })}
                   </ul>
                 </div>
 
@@ -699,7 +729,9 @@ const Orders = () => {
                   <div className="rounded-lg border border-slate-100 bg-slate-50 px-4 py-3 space-y-2 text-sm text-slate-600">
                     <div className="flex items-center justify-between">
                       <span>Payment Method</span>
-                      <span className="font-semibold">{order.paymentMethod}</span>
+                      <span className="font-semibold">
+                        {order.paymentMethodLabel || order.paymentMethod}
+                      </span>
                     </div>
                     <div className="flex items-center justify-between">
                       <span>Total Amount</span>
@@ -709,8 +741,8 @@ const Orders = () => {
                       </span>
                     </div>
                     <div className="flex items-center justify-between text-xs text-slate-500">
-                      <span>Status</span>
-                      <span className="capitalize">{order.status}</span>
+                      <span>Payment Status</span>
+                      <span className="capitalize">{order.paymentStatusLabel || order.paymentStatus}</span>
                     </div>
                   </div>
                 </div>
@@ -785,16 +817,21 @@ const StatusSelect = ({ value, onChange, disabled, loading }) => {
   );
 };
 
-const PaymentStatus = ({ paid, amount, currency }) => (
-  <div className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold">
-    <span className={paid ? "text-emerald-600" : "text-orange-600"}>
-      {paid ? "Paid" : "Awaiting Payment"}
-    </span>
-    <span className="text-slate-500">
-      {currency}
-      {Number(amount || 0).toLocaleString()}
-    </span>
-  </div>
-);
+const PaymentStatus = ({ paid, statusLabel, amount, currency }) => {
+  const normalizedStatus = (statusLabel || '').toLowerCase();
+  const isPaid = paid || normalizedStatus === 'succeeded';
+  const displayLabel = statusLabel || (isPaid ? 'Paid' : 'Awaiting Payment');
+  return (
+    <div className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold">
+      <span className={isPaid ? "text-emerald-600" : "text-orange-600"}>
+        {displayLabel}
+      </span>
+      <span className="text-slate-500">
+        {currency}
+        {Number(amount || 0).toLocaleString()}
+      </span>
+    </div>
+  );
+};
 
 export default Orders;

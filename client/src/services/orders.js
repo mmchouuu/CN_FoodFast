@@ -2,6 +2,7 @@ import api from './api';
 
 const basePath = '/api/orders';
 const ownerBasePath = '/owner/orders';
+const customerBasePath = '/customer/orders';
 
 
 const unwrapCollection = (payload) => {
@@ -28,11 +29,36 @@ export async function listOrdersByUser(userId, params = {}) {
   if (!userId) {
     throw new Error('userId is required to list orders by user');
   }
+
+  try {
+    const { data } = await api.get(customerBasePath, { params });
+    return unwrapCollection(data);
+  } catch (error) {
+    if (error?.response?.status !== 404) {
+      throw error;
+    }
+  }
+
   const { data } = await api.get(`${basePath}/user/${userId}`, { params });
   return unwrapCollection(data);
 }
 
-export async function getOrder(orderId) {
+export async function getOrder(orderId, { scope = 'customer' } = {}) {
+  if (!orderId) {
+    throw new Error('orderId is required');
+  }
+
+  if (scope === 'customer') {
+    try {
+      const { data } = await api.get(`${customerBasePath}/${orderId}`);
+      return unwrapRecord(data);
+    } catch (error) {
+      if (error?.response?.status !== 404) {
+        throw error;
+      }
+    }
+  }
+
   const { data } = await api.get(`${basePath}/${orderId}`);
   return unwrapRecord(data);
 }
@@ -68,4 +94,3 @@ const ordersService = {
 };
 
 export default ordersService;
-

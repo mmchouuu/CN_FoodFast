@@ -44,7 +44,7 @@ const Header = () => {
     openCustomerProfilePanel,
     closeCustomerProfilePanel,
   } = useAppContext();
-  const [menuOpen, setMenuOpen] = useState(false);EAD
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const unreadNotifications = useMemo(
     () => notifications.filter((notification) => !notification.read).length,

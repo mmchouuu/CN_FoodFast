@@ -408,6 +408,56 @@ async function markPaymentFailed({ paymentId, transactionId, provider, reason, m
   return payment;
 }
 
+async function getPaymentsForOrders(orderIds = []) {
+  if (!Array.isArray(orderIds) || !orderIds.length) {
+    return [];
+  }
+
+  const rows = await paymentModel.findLatestPaymentsByOrderIds(orderIds);
+
+  return rows.map((row) => {
+    const details = {
+      type: row.method_type || null,
+      provider: row.method_provider || null,
+      brand: row.method_brand || null,
+      last4: row.method_last4 || null,
+      exp_month: row.method_exp_month || null,
+      exp_year: row.method_exp_year || null,
+      provider_data: row.method_provider_data || null,
+    };
+
+    let displayName = null;
+    if (row.flow === 'cash') {
+      displayName = 'Cash on Delivery';
+    } else if (details.type === 'card') {
+      const labelBrand = details.brand || (details.provider ? details.provider.toUpperCase() : 'Card');
+      displayName = details.last4
+        ? `${labelBrand} •••• ${details.last4}`
+        : labelBrand;
+    } else if (details.type === 'wallet') {
+      const providerLabel = details.provider ? details.provider.toUpperCase() : 'Wallet';
+      displayName = details.last4
+        ? `${providerLabel} •••• ${details.last4}`
+        : providerLabel;
+    } else if (row.flow === 'online') {
+      displayName = 'Online payment';
+    }
+
+    return {
+      order_id: row.order_id,
+      payment_id: row.id,
+      status: row.status,
+      flow: row.flow,
+      amount: normalizeNumber(row.amount),
+      currency: row.currency,
+      paid_at: row.paid_at,
+      payment_method_id: row.payment_method_id,
+      method_details: details,
+      display_name: displayName,
+    };
+  });
+}
+
 module.exports = {
   handlePaymentPending,
   listPayments,
@@ -415,5 +465,5 @@ module.exports = {
   getPaymentByTransactionId,
   markPaymentSucceeded,
   markPaymentFailed,
-
+  getPaymentsForOrders,
 };

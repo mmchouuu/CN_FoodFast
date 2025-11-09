@@ -149,58 +149,28 @@ const adminOrderRoutes = require('./routes/orders.admin.routes');
 const app = express();
 
 // ======================================================
-// 🔹 Capture raw body BEFORE body-parser consumes it
+// 🔹 Body parsing (preserve raw body for signature verification)
 // ======================================================
-app.use((req, res, next) => {
-  const chunks = [];
-  req.on('data', chunk => chunks.push(chunk));
-  req.on('end', () => {
-    if (chunks.length > 0) {
-      req.rawBody = Buffer.concat(chunks);
-    }
-  });
-  next();
-});
+const captureRawBody = (req, res, buf) => {
+  if (buf && buf.length) {
+    req.rawBody = Buffer.from(buf);
+  }
+};
 
-// ======================================================
-// 🔹 Parse JSON / urlencoded with verify hook
-// ======================================================
-// app.use(
-//   bodyParser.json({
-//     limit: '50mb',
-//     verify: (req, res, buf) => {
-//       if (buf && buf.length && !req.rawBody) req.rawBody = Buffer.from(buf);
-//     },
-//   })
-// );
-// app.use(
-//   bodyParser.urlencoded({
-//     limit: '50mb',
-//     extended: true,
-//     verify: (req, res, buf) => {
-//       if (buf && buf.length && !req.rawBody) req.rawBody = Buffer.from(buf);
-//     },
-//   })
-// );
+app.use(
+  bodyParser.json({
+    limit: '50mb',
+    verify: captureRawBody,
+  }),
+);
 
-app.use((req, res, next) => {
-  let data = [];
-  req.on('data', chunk => data.push(chunk));
-  req.on('end', () => {
-    if (data.length > 0) {
-      req.rawBody = Buffer.concat(data);
-      try {
-        // Nếu là JSON thì parse, để req.body không undefined
-        if (req.headers['content-type']?.includes('application/json')) {
-          req.body = JSON.parse(req.rawBody.toString('utf8'));
-        }
-      } catch {
-        req.body = undefined;
-      }
-    }
-    next();
-  });
-});
+app.use(
+  bodyParser.urlencoded({
+    limit: '50mb',
+    extended: true,
+    verify: captureRawBody,
+  }),
+);
 
 
 // ======================================================

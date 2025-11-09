@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 const { pool } = require('../db');
 
 function getExecutor(client) {

@@ -10,6 +10,7 @@ import catalogService from '../services/catalog';
 import ordersService from '../services/orders';
 import paymentsService from '../services/payments';
 import { restaurantPlaceholderImage, dishPlaceholderImage } from '../utils/imageHelpers';
+import { formatPaymentMethodLabel, formatPaymentStatusLabel } from '../utils/paymentDisplay';
 
 // --- Auth Systems ---
 import authService from '../services/auth';
@@ -719,7 +720,54 @@ const adaptOrderFromApi = (order) => {
             : typeof order.payment_method === 'string'
                 ? order.payment_method
                 : 'cod';
-    const paymentMethod = paymentMethodRaw.toUpperCase();
+    const paymentDetailsRaw = order.payment_details || null;
+    const paymentFlowSource =
+        paymentDetailsRaw?.flow ||
+        paymentMeta.flow ||
+        order.payment_flow ||
+        order.flow ||
+        null;
+    const paymentFlow =
+        typeof paymentFlowSource === 'string' && paymentFlowSource.trim()
+            ? paymentFlowSource.trim().toLowerCase()
+            : 'cash';
+    const paymentDetails =
+        paymentDetailsRaw && !paymentDetailsRaw.flow && paymentFlow
+            ? { ...paymentDetailsRaw, flow: paymentFlow }
+            : paymentDetailsRaw;
+    const paymentMethodFallback =
+        paymentFlow === 'online' && (!paymentDetails || paymentMethodRaw === 'cod')
+            ? paymentMeta.method || 'online'
+            : paymentMethodRaw;
+    const paymentMethodLabel = formatPaymentMethodLabel(
+        paymentDetails,
+        paymentMethodFallback,
+    );
+    const paymentMethod = (paymentMethodFallback || 'cod').toUpperCase();
+    const paymentStatusSourceRaw =
+        paymentDetails?.status || paymentMeta.status || order.payment_status || '';
+    const paymentStatusSource =
+        typeof paymentStatusSourceRaw === 'string'
+            ? paymentStatusSourceRaw.toLowerCase()
+            : '';
+    const resolvedPaymentStatus =
+        paymentStatusSource === 'succeeded'
+            ? 'paid'
+            : paymentStatusSource || (order.payment_status || '').toLowerCase() || 'pending';
+    const paymentStatusLabel = formatPaymentStatusLabel(
+        paymentDetails || { status: resolvedPaymentStatus },
+        paymentStatusSourceRaw || resolvedPaymentStatus || 'pending',
+    );
+    const paymentMethodId =
+        paymentDetails?.payment_method_id ||
+        paymentMeta.payment_method_id ||
+        order.payment_method_id ||
+        null;
+    const paymentReference =
+        paymentDetails?.payment_id ||
+        paymentDetails?.transaction_id ||
+        paymentMeta.reference ||
+        null;
     const restaurantName =
         restaurantSnapshotMeta?.name ||
         metadata.restaurant_name ||
@@ -744,9 +792,17 @@ const adaptOrderFromApi = (order) => {
         restaurantId: order.restaurant_id,
         branchId: order.branch_id,
         status: order.status,
-        paymentStatus: order.payment_status,
+        paymentStatus: resolvedPaymentStatus,
+        paymentStatusLabel,
         paymentMethod,
+        paymentMethodLabel,
         paymentMethodKey: paymentMethodRaw,
+        paymentMethodId,
+        paymentReference: paymentReference || null,
+        paymentFlow,
+        paymentDetails: paymentDetails
+            ? { ...paymentDetails, displayLabel: paymentMethodLabel }
+            : null,
         totalAmount,
         subtotal: itemsSubtotal,
         shippingFee,
@@ -821,6 +877,21 @@ const splitOrdersByStatus = (orders) => {
         active: sortOrdersByPlacedAt(active),
         past: sortOrdersByPlacedAt(past),
     };
+};
+
+const shouldEnrichPaymentDetails = (order) => {
+    if (!order) return false;
+    const flow = (order.paymentFlow || '').toLowerCase();
+    if (flow !== 'online') {
+        return false;
+    }
+    if (
+        order.paymentDetails &&
+        (order.paymentDetails.method_details || order.paymentDetails.displayLabel)
+    ) {
+        return false;
+    }
+    return !order.paymentDetails;
 };
 
 
@@ -1001,6 +1072,35 @@ export const AppContextProvider = ({ children }) => {
         return () => controller.abort();
     }, [refreshCatalog]);
 
+    const enrichOrdersWithPaymentDetails = useCallback(async (ordersList) => {
+        const orders = Array.isArray(ordersList) ? ordersList : [];
+        const pending = orders.filter(shouldEnrichPaymentDetails);
+        if (!pending.length) {
+            return orders;
+        }
+
+        const replacements = new Map();
+        await Promise.all(
+            pending.map(async (order) => {
+                try {
+                    const data = await ordersService.get(order.id);
+                    const adapted = adaptOrderFromApi(data);
+                    if (adapted?.id) {
+                        replacements.set(adapted.id, adapted);
+                    }
+                } catch (error) {
+                    console.warn('[orders] failed to enrich payment details for order', order.id, error);
+                }
+            }),
+        );
+
+        if (!replacements.size) {
+            return orders;
+        }
+
+        return orders.map((order) => replacements.get(order.id) || order);
+    }, []);
+
     // --- Local auth (via API Gateway) ---
     const [authToken, setAuthToken] = useState(() => localStorage.getItem('auth_token'));
     const [authProfile, setAuthProfile] = useState(() => {
@@ -1036,7 +1136,8 @@ export const AppContextProvider = ({ children }) => {
                         ? response.data
                         : [];
             const adapted = rawList.map(adaptOrderFromApi).filter(Boolean);
-            const { active, past } = splitOrdersByStatus(adapted);
+            const paymentAware = await enrichOrdersWithPaymentDetails(adapted);
+            const { active, past } = splitOrdersByStatus(paymentAware);
             setActiveOrders(active);
             setPastOrders(past);
             return { success: true, active, past };
@@ -1048,7 +1149,7 @@ export const AppContextProvider = ({ children }) => {
         } finally {
             setOrdersLoading(false);
         }
-    }, [authToken, authProfileId]);
+    }, [authToken, authProfileId, enrichOrdersWithPaymentDetails]);
 
     const refreshAddresses = useCallback(async () => {
         if (!authToken && !authProfileId) {

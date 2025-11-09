@@ -2,7 +2,8 @@
 
 const { pool } = require('../db');
 const productClient = require('../clients/product.client');
-const { publishOrderEvent, ensureQueueReady } = require('../utils/rabbitmq');
+const paymentClient = require('../clients/payment.client');
+const { publishOrderEvent } = require('../utils/rabbitmq');
 
 const ALLOW_CLIENT_PRICING_FALLBACK = process.env.ALLOW_CLIENT_PRICING_FALLBACK === 'true';
 const DEFAULT_CURRENCY = 'VND';
@@ -77,6 +78,13 @@ const toNumber = (value, fallback = 0) => {
   return Number.isFinite(numeric) ? numeric : fallback;
 };
 
+const dispatchOrderEvent = (eventType, payload, contextLabel = null) => {
+  publishOrderEvent(eventType, payload).catch((error) => {
+    const scope = contextLabel ? ` (${contextLabel})` : '';
+    console.error(`[order-service] Failed to publish ${eventType} event${scope}:`, error);
+  });
+};
+
 const toCurrency = (currency) => {
   if (!currency || typeof currency !== 'string') return DEFAULT_CURRENCY;
   const trimmed = currency.trim();
@@ -149,44 +157,6 @@ const extractRestaurantScope = (user = {}) => {
   );
 };
 
-async function resolveOwnerRestaurantScope(user = {}) {
-  const directScope = extractRestaurantScope(user);
-  if (directScope.length) {
-    return directScope;
-  }
-
-  const ownerId = resolveUserId(user);
-  if (!ownerId) {
-    return [];
-  }
-
-  try {
-    const restaurants = await productClient.listRestaurantsByOwner(ownerId);
-    const items = Array.isArray(restaurants) ? restaurants : [];
-    const ids = unique(
-      items
-        .map((item) => item && (item.id || item.restaurant_id || item.restaurantId || null))
-        .filter(Boolean)
-        .map((value) => value.toString().trim())
-        .filter((value) => value.length),
-    );
-
-    if (ids.length) {
-      const merged = unique([...(user.restaurant_ids || []), ...ids]);
-      user.restaurant_ids = merged;
-      user.restaurantIds = merged;
-    }
-
-    return ids;
-  } catch (error) {
-    console.error(
-      '[order-service] failed to resolve owner restaurant scope:',
-      error?.message || error,
-    );
-    return [];
-  }
-}
-
 const extractBranchScope = (user = {}) => {
   const list = ensureArray(user.branch_ids)
     .concat(ensureArray(user.branchIds))
@@ -202,6 +172,88 @@ const extractBranchScope = (user = {}) => {
       .filter((value) => value && value.length),
   );
 };
+
+async function fetchOwnerRestaurantsFromProduct(user = {}) {
+  if (user.__ownerRestaurantsCache) {
+    return user.__ownerRestaurantsCache;
+  }
+
+  const ownerId = resolveUserId(user);
+  if (!ownerId) {
+    user.__ownerRestaurantsCache = [];
+    return [];
+  }
+
+  try {
+    const restaurants = await productClient.listRestaurantsByOwner(ownerId);
+    const items = Array.isArray(restaurants?.items)
+      ? restaurants.items
+      : Array.isArray(restaurants)
+        ? restaurants
+        : [];
+    user.__ownerRestaurantsCache = items;
+    return items;
+  } catch (error) {
+    console.error(
+      '[order-service] failed to load owner restaurants:',
+      error?.message || error,
+    );
+    user.__ownerRestaurantsCache = [];
+    return [];
+  }
+}
+
+async function resolveOwnerRestaurantScope(user = {}) {
+  const directScope = extractRestaurantScope(user);
+  if (directScope.length) {
+    return directScope;
+  }
+
+  const restaurants = await fetchOwnerRestaurantsFromProduct(user);
+  const ids = unique(
+    restaurants
+      .map((item) => item && (item.id || item.restaurant_id || item.restaurantId || null))
+      .filter(Boolean)
+      .map((value) => value.toString().trim())
+      .filter((value) => value.length),
+  );
+
+  if (ids.length) {
+    const merged = unique([...(user.restaurant_ids || []), ...ids]);
+    user.restaurant_ids = merged;
+    user.restaurantIds = merged;
+  }
+
+  return ids;
+}
+
+async function resolveOwnerBranchScope(user = {}) {
+  const directScope = extractBranchScope(user);
+  if (directScope.length) {
+    return directScope;
+  }
+
+  const restaurants = await fetchOwnerRestaurantsFromProduct(user);
+  const branchIds = unique(
+    restaurants
+      .flatMap((restaurant) =>
+        (Array.isArray(restaurant?.branches) ? restaurant.branches : []).map(
+          (branch) => branch && (branch.id || branch.branch_id || branch.branchId || null),
+        ),
+      )
+      .filter(Boolean)
+      .map((value) => value.toString().trim())
+      .filter((value) => value.length),
+  );
+
+  if (branchIds.length) {
+    const merged = unique([...(user.branch_ids || []), ...branchIds]);
+    user.branch_ids = merged;
+    user.branchIds = merged;
+  }
+
+  return branchIds;
+}
 
 const normaliseFulfillmentType = (value) => {
   if (!value || typeof value !== 'string') return 'delivery';
@@ -1133,6 +1185,15 @@ async function fetchOrdersByIds(orderIds, { client, includeEvents = false, inclu
   }
 
   const hydratedOrders = [];
+  let paymentSummaries = [];
+  try {
+    paymentSummaries = await paymentClient.lookupPayments(orderIds);
+  } catch (error) {
+    paymentSummaries = [];
+  }
+  const paymentsByOrder = new Map(
+    paymentSummaries.map((summary) => [summary.order_id, summary]),
+  );
   for (const orderId of orderIds) {
     const orderRow = ordersById.get(orderId);
     if (!orderRow) continue;
@@ -1163,6 +1224,12 @@ async function fetchOrdersByIds(orderIds, { client, includeEvents = false, inclu
 
     if (includeRevisions) {
       order.revisions = revisionsByOrder.get(orderId) || [];
+    }
+
+    if (paymentsByOrder.has(orderId)) {
+      order.payment_details = paymentsByOrder.get(orderId);
+    } else {
+      order.payment_details = null;
     }
 
     hydratedOrders.push(order);
@@ -1350,9 +1417,9 @@ async function createCustomerOrder({ user, payload = {}, context = {} }) {
 
     const finalOrder = await fetchOrderById(order.id);
 
-    try {
-      await ensureQueueReady();
-      await publishOrderEvent('order.created', {
+    dispatchOrderEvent(
+      'order.created',
+      {
         order_id: order.id,
         user_id: order.user_id,
         restaurant_id: order.restaurant_id,
@@ -1361,10 +1428,13 @@ async function createCustomerOrder({ user, payload = {}, context = {} }) {
         payment_method: paymentMethod,
         payment_method_id: paymentMethodId,
         flow: paymentFlow,
-      });
+      },
+      'order.created',
+    );
 
-
-      await publishOrderEvent('PaymentPending', {
+    dispatchOrderEvent(
+      'PaymentPending',
+      {
         order_id: order.id,
         user_id: order.user_id,
         restaurant_id: order.restaurant_id,
@@ -1374,10 +1444,9 @@ async function createCustomerOrder({ user, payload = {}, context = {} }) {
         method: paymentMethod,
         payment_method_id: paymentMethodId,
         branch_id: order.branch_id,
-      });
-    } catch (eventError) {
-      console.error('[order-service] Failed to publish order events:', eventError);
-    }
+      },
+      'PaymentPending',
+    );
 
     return finalOrder;
   } catch (error) {
@@ -1904,16 +1973,15 @@ async function cancelCustomerOrder({ user, orderId, payload = {} }) {
 
     const updated = await fetchOrderById(orderId);
 
-    try {
-      await ensureQueueReady();
-      await publishOrderEvent('order.status_updated', {
+    dispatchOrderEvent(
+      'order.status_updated',
+      {
         order_id: orderId,
         status: 'cancelled',
         actor: userId,
-      });
-    } catch (eventError) {
-      console.error('[order-service] Failed to publish cancellation event:', eventError);
-    }
+      },
+      'customer-cancel',
+    );
 
     return updated;
   } catch (error) {
@@ -1925,7 +1993,7 @@ async function cancelCustomerOrder({ user, orderId, payload = {} }) {
 }
 
 async function listOwnerOrders({ user, query = {} }) {
-  const restaurantScope = extractRestaurantScope(user);
+  const restaurantScope = await resolveOwnerRestaurantScope(user);
   if (!restaurantScope.length) {
     throw new ForbiddenError('owner does not manage any restaurants');
   }
@@ -1952,12 +2020,14 @@ async function listOwnerOrders({ user, query = {} }) {
       }
     }
 
-    if (query.branch_id) {
-      const branchId = normaliseUuid(query.branch_id);
-      if (branchId) {
-        params.push(branchId);
-        whereClause += ` AND branch_id = $${params.length}`;
+    const branchId = normaliseUuid(query.branch_id);
+    if (branchId && branchId !== 'all') {
+      const branchScope = await resolveOwnerBranchScope(user);
+      if (branchScope.length && !branchScope.includes(branchId)) {
+        throw new ForbiddenError('owner does not manage this branch');
       }
+      params.push(branchId);
+      whereClause += ` AND branch_id = $${params.length}`;
     }
 
     if (query.start_date) {
@@ -2009,7 +2079,7 @@ async function listOwnerOrders({ user, query = {} }) {
 }
 
 async function getOwnerOrder({ user, orderId }) {
-  const restaurantScope = extractRestaurantScope(user);
+  const restaurantScope = await resolveOwnerRestaurantScope(user);
   if (!restaurantScope.length) {
     throw new ForbiddenError('owner does not manage any restaurants');
   }
@@ -2036,7 +2106,7 @@ async function getOwnerOrder({ user, orderId }) {
 }
 
 async function updateOwnerOrderStatus({ user, orderId, payload = {} }) {
-  const restaurantScope = extractRestaurantScope(user);
+  const restaurantScope = await resolveOwnerRestaurantScope(user);
   if (!restaurantScope.length) {
     throw new ForbiddenError('owner does not manage any restaurants');
   }
@@ -2101,17 +2171,16 @@ async function updateOwnerOrderStatus({ user, orderId, payload = {} }) {
 
     const updated = await fetchOrderById(orderId);
 
-    try {
-      await ensureQueueReady();
-      await publishOrderEvent('order.status_updated', {
+    dispatchOrderEvent(
+      'order.status_updated',
+      {
         order_id: orderId,
         previous: order.status,
         next: nextStatus,
         actor: resolveUserId(user),
-      });
-    } catch (eventError) {
-      console.error('[order-service] Failed to publish status update event:', eventError);
-    }
+      },
+      'owner-status-update',
+    );
 
     return updated;
   } catch (error) {
@@ -2123,7 +2192,7 @@ async function updateOwnerOrderStatus({ user, orderId, payload = {} }) {
 }
 
 async function createOwnerOrderRevision({ user, orderId, payload = {} }) {
-  const restaurantScope = extractRestaurantScope(user);
+  const restaurantScope = await resolveOwnerRestaurantScope(user);
   if (!restaurantScope.length) {
     throw new ForbiddenError('owner does not manage any restaurants');
   }

@@ -5,6 +5,7 @@ import {
   restaurantPlaceholderImage,
   dishPlaceholderImage,
 } from "../utils/imageHelpers";
+import { buildRestaurantLink } from "../utils/orderHelpers";
 
 const OrderHistory = () => {
   const {
@@ -82,16 +83,16 @@ const OrderHistory = () => {
                   <div>
                     <p className="text-sm uppercase text-gray-400">
                       {new Date(order.placedAt).toLocaleDateString()} -{" "}
-                      {order.paymentMethod}
+                      {order.paymentMethodLabel || order.paymentMethod}
                     </p>
                     <h2 className="text-xl font-semibold text-gray-900">
                       {restaurantDisplayName}
                     </h2>
                     <p className="text-sm text-gray-500">
                       Order #{order.id} • {order.status}
-                      {order.paymentStatus ? (
+                      {order.paymentStatusLabel || order.paymentStatus ? (
                         <span className="ml-2 inline-block rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-600">
-                          Payment: {order.paymentStatus}
+                          Payment: {order.paymentStatusLabel || order.paymentStatus}
                         </span>
                       ) : null}
                       {branchAddress ? (
@@ -120,8 +121,7 @@ const OrderHistory = () => {
                       View details
                     </Link>
                     <Link
-                      to={`/restaurants/${order.branchId || order.restaurantId || ""}`}
-
+                      to={buildRestaurantLink(order)}
                       className="rounded-full border border-gray-200 px-4 py-2 text-xs font-semibold text-gray-600 hover:border-orange-300 hover:text-orange-500"
                     >
                       Order again

@@ -1,5 +1,6 @@
 const express = require('express');
 const { createProxyMiddleware } = require('http-proxy-middleware');
+const forwardProxyBody = require('../utils/forwardProxyBody');
 
 const router = express.Router();
 
@@ -13,6 +14,7 @@ const proxy = (target) => {
     target: url.origin,
     changeOrigin: true,
     pathRewrite: (path) => `${basePath}${path === '/' ? '' : path}`,
+    onProxyReq: forwardProxyBody,
     onError: (err, req, res) => {
       if (res.headersSent) return;
       res.status(502).json({

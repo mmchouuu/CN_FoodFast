@@ -11,13 +11,17 @@ export const api = axios.create({
 
 // Attach Authorization header if token exists
 api.interceptors.request.use((config) => {
-  const customerToken = localStorage.getItem('auth_token');
-  const ownerToken = localStorage.getItem('restaurant_token');
-  const token = customerToken || ownerToken;
-  if (token) {
-    config.headers = config.headers || {};
-    config.headers.Authorization = `Bearer ${token}`;
+  config.headers = config.headers || {};
+
+  if (!config.headers.Authorization) {
+    const customerToken = localStorage.getItem('auth_token');
+    const ownerToken = localStorage.getItem('restaurant_token');
+    const token = customerToken || ownerToken;
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
   }
+
   return config;
 });
 

@@ -5,9 +5,16 @@ import PromotionCarousel from "../components/PromotionCarousel";
 import RestaurantCard from "../components/RestaurantCard";
 import Item from "../components/Item";
 import RestaurantBestSellerCard from "../components/RestaurantBestSellerCard";
+import { resolveBranchDishes } from "../utils/branchProducts";
 
 const Home = () => {
-  const { restaurants, products, currency, searchQuery } = useAppContext();
+  const {
+    restaurants,
+    products,
+    currency,
+    searchQuery,
+    getDishesByRestaurant,
+  } = useAppContext();
 
   const popularRestaurants = useMemo(() => {
     return [...restaurants]
@@ -29,25 +36,35 @@ const Home = () => {
   }, [restaurants]);
 
   const bestSellerCombos = useMemo(() => {
-    const dishesByRestaurant = products.reduce((map, dish) => {
-      if (!map[dish.restaurantId]) {
-        map[dish.restaurantId] = [];
-      }
-      map[dish.restaurantId].push(dish);
-      return map;
-    }, {});
+    const combos = [];
+    restaurants
+      .filter((branch) => branch.distanceKm <= 4)
+      .forEach((branch) => {
+        const dishes = resolveBranchDishes({
+          branch,
+          getDishesByRestaurant,
+          fallbackRestaurantId: branch.restaurantId || branch.brandRestaurantId,
+        });
 
-    return restaurants
-      .filter((restaurant) => restaurant.distanceKm <= 4)
-      .map((restaurant) => {
-        const dishes = dishesByRestaurant[restaurant.id] || [];
-        const bestSeller = [...dishes]
-          .sort((a, b) => (b.reviewCount || 0) - (a.reviewCount || 0))
+        const candidateDishes = dishes.length
+          ? dishes
+          : products.filter((product) => product.branchId === branch.id);
+
+        if (!candidateDishes.length) {
+          return;
+        }
+
+        const bestSeller = [...candidateDishes]
+          .sort((a, b) => (b.reviewCount || b.rating || 0) - (a.reviewCount || a.rating || 0))
           .shift();
-        return bestSeller ? { restaurant, dish: bestSeller } : null;
-      })
-      .filter(Boolean);
-  }, [restaurants, products]);
+
+        if (bestSeller) {
+          combos.push({ restaurant: branch, dish: bestSeller });
+        }
+      });
+
+    return combos.slice(0, 3);
+  }, [restaurants, getDishesByRestaurant, products]);
 
   const highlightedDishes = useMemo(() => {
     return [...products]

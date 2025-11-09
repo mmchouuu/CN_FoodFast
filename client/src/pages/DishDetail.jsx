@@ -730,6 +730,7 @@ import {
   dishPlaceholderImage,
   pickFirstImageUrl,
 } from "../utils/imageHelpers";
+import { resolveBranchDishes } from "../utils/branchProducts";
 
 
 const DishDetail = () => {
@@ -746,11 +747,21 @@ const DishDetail = () => {
   
   const restaurant = getRestaurantById(restaurantId);
 
-  const relatedDishes = useMemo(() => {
-    return getDishesByRestaurant(restaurantId).filter(
-      (item) => item._id !== dishId
-    );
-  }, [getDishesByRestaurant, restaurantId, dishId]);
+  const branchDishes = useMemo(
+    () =>
+      resolveBranchDishes({
+        branch: restaurant,
+        getDishesByRestaurant,
+        fallbackRestaurantId:
+          dish?.restaurantId || restaurant?.restaurantId || restaurantId,
+      }),
+    [restaurant, getDishesByRestaurant, dish?.restaurantId, restaurantId],
+  );
+
+  const relatedDishes = useMemo(
+    () => branchDishes.filter((item) => item._id !== dishId),
+    [branchDishes, dishId],
+  );
 
   const optionGroups = useMemo(
     () => (Array.isArray(dish?.options) ? dish.options : []),

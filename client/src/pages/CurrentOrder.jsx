@@ -5,6 +5,8 @@ import {
   restaurantPlaceholderImage,
   dishPlaceholderImage,
 } from "../utils/imageHelpers";
+import { buildRestaurantLink } from "../utils/orderHelpers";
+import resolvePaymentSummary from "../utils/paymentSummary";
 
 const StatusDot = ({ completed }) => (
   <span
@@ -143,6 +145,10 @@ const CurrentOrder = () => {
     [order.status, order.placedAt],
   );
   const totals = useMemo(() => resolveTotals(order), [order]);
+  const paymentSummary = useMemo(
+    () => resolvePaymentSummary(order),
+    [order],
+  );
   const deliveryAddressLine = [
     deliveryAddress.street,
     deliveryAddress.ward,
@@ -176,7 +182,7 @@ const CurrentOrder = () => {
                 - Expected in {order.etaMinutes} minutes
               </p>
               <Link
-                to={`/restaurants/${order.restaurantId}`}
+                to={buildRestaurantLink(order)}
                 className="mt-3 inline-block text-sm font-semibold text-orange-500 hover:underline"
               >
                 {restaurantDisplayName}
@@ -282,19 +288,26 @@ const CurrentOrder = () => {
 
               </span>
             </div>
+          {totals.discount > 0 ? (
             <div className="flex justify-between text-green-600">
               <span>Discount</span>
               <span>
                 -{currency}
                 {totals.discount.toLocaleString()}
-
               </span>
             </div>
+          ) : null}
           </div>
+          <p className="text-sm text-gray-500">
+            Payment method:{" "}
+            <span className="font-semibold text-gray-900">
+              {paymentSummary.method}
+            </span>
+          </p>
           <p className="mt-4 text-sm text-gray-500">
             Payment status:{" "}
             <span className="font-semibold text-gray-900">
-              {order.paymentStatus || "pending"}
+              {paymentSummary.status}
             </span>
           </p>
         </div>

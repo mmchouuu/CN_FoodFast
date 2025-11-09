@@ -7,6 +7,7 @@ import {
   pickFirstImageUrl,
   restaurantPlaceholderImage,
 } from "../utils/imageHelpers";
+import { resolveBranchDishes } from "../utils/branchProducts";
 
 
 const getBasePrice = (dish) => {
@@ -103,8 +104,20 @@ const DishCard = ({ dish, restaurantId, currency, onAdd }) => {
   );
 };
 
+const formatBranchAddress = (branch) =>
+  branch
+    ? [
+        branch.street,
+        branch.ward,
+        branch.district,
+        branch.city,
+      ]
+        .filter(Boolean)
+        .join(", ")
+    : "";
+
 const RestaurantDetail = () => {
-  const { restaurantId } = useParams();
+  const { restaurantId: branchId } = useParams();
   const {
     getRestaurantById,
     getDishesByRestaurant,
@@ -114,11 +127,56 @@ const RestaurantDetail = () => {
     currency,
   } = useAppContext();
 
-  const restaurant = getRestaurantById(restaurantId);
-  const dishes = useMemo(
-    () => getDishesByRestaurant(restaurantId),
-    [getDishesByRestaurant, restaurantId]
-  );
+  const restaurant = getRestaurantById(branchId);
+
+  const dishes = useMemo(() =>
+    resolveBranchDishes({
+      branch: restaurant,
+      getDishesByRestaurant,
+      fallbackRestaurantId: branchId,
+    }),
+  [restaurant, branchId, getDishesByRestaurant]);
+
+  const branchCategoryFilters = useMemo(() => {
+    if (!restaurant) return [];
+    const assignments = Array.isArray(restaurant.categoryAssignments)
+      ? restaurant.categoryAssignments
+      : [];
+    if (assignments.length) {
+      return assignments
+        .map((assignment) => {
+          if (!assignment) return null;
+          const name =
+            assignment.name ||
+            assignment.category_name ||
+            assignment.category ||
+            assignment.label ||
+            null;
+          const id =
+            assignment.category_id ||
+            assignment.id ||
+            assignment.categoryId ||
+            name;
+          if (!id || !name) return null;
+          return {
+            id,
+            name,
+            isActive: assignment.is_active !== false,
+            isVisible: assignment.is_visible !== false,
+          };
+        })
+        .filter(Boolean);
+    }
+    const fallbackNames = Array.isArray(restaurant.categories)
+      ? restaurant.categories.filter(Boolean)
+      : [];
+    return fallbackNames.map((name) => ({
+      id: name,
+      name,
+      isActive: true,
+      isVisible: true,
+    }));
+  }, [restaurant]);
 
   const [activeCategory, setActiveCategory] = useState("all");
   const [dishSearch, setDishSearch] = useState("");
@@ -130,21 +188,34 @@ const RestaurantDetail = () => {
   const pageSize = 6;
 
   const categories = useMemo(() => {
+    const assignedNames = branchCategoryFilters
+      .filter((category) => category.isActive && category.isVisible)
+      .map((category) => category.name);
+    if (assignedNames.length) {
+      return ["all", ...Array.from(new Set(assignedNames))];
+    }
     const set = new Set(["all"]);
     dishes.forEach((dish) => {
-      if (dish.category) set.add(dish.category);
+      if (dish?.category) {
+        set.add(dish.category);
+      }
     });
     return Array.from(set);
-  }, [dishes]);
+  }, [branchCategoryFilters, dishes]);
 
+  const ratingTargetId = restaurant?.id || branchId;
   const reviewsForRestaurant = useMemo(
-    () => getReviewsForRestaurant(restaurantId),
-    [getReviewsForRestaurant, restaurantId]
+    () => getReviewsForRestaurant(ratingTargetId),
+    [getReviewsForRestaurant, ratingTargetId]
   );
   const ratingSummary = useMemo(
-    () => getRestaurantRatingSummary(restaurantId),
-    [getRestaurantRatingSummary, restaurantId]
+    () => getRestaurantRatingSummary(ratingTargetId),
+    [getRestaurantRatingSummary, ratingTargetId]
   );
+
+  useEffect(() => {
+    setActiveCategory("all");
+  }, [restaurant?.id]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -152,10 +223,36 @@ const RestaurantDetail = () => {
 
   const heroImage = pickFirstImageUrl(
     restaurantPlaceholderImage,
-    restaurant.heroImage,
-    restaurant.coverImage,
-    restaurant.images,
+    restaurant?.heroImage,
+    restaurant?.coverImage,
+    restaurant?.images,
   );
+  const branchAddressLine =
+    formatBranchAddress(restaurant) || restaurant?.address || "";
+  const contactPhone =
+    restaurant?.branch_phone ||
+    restaurant?.branchPhone ||
+    restaurant?.phone ||
+    restaurant?.brand?.phone ||
+    "";
+  const contactEmail =
+    restaurant?.branch_email ||
+    restaurant?.branchEmail ||
+    restaurant?.email ||
+    restaurant?.brand?.email ||
+    "";
+  const branchOpenState = restaurant?.is_open ?? restaurant?.isOpen;
+  const isBranchOpen = typeof branchOpenState === "boolean" ? branchOpenState : null;
+  const hoursLabel =
+    isBranchOpen !== null
+      ? isBranchOpen
+        ? "Open now"
+        : "Closed at the moment"
+      : restaurant?.shortHours || restaurant?.brand?.shortHours || "Open daily";
+  const todaysBranchHours =
+    Array.isArray(restaurant?.openingHours) && restaurant.openingHours.length
+      ? restaurant.openingHours[0]
+      : null;
 
   const filteredDishes = useMemo(() => {
     return dishes
@@ -251,9 +348,16 @@ const RestaurantDetail = () => {
                 Restaurant
               </p>
               <h1 className="text-3xl font-bold md:text-4xl">
-                {restaurant.name}
+                {restaurant.displayName || restaurant.name}
               </h1>
-              <p className="mt-2 text-sm text-gray-100">{restaurant.address}</p>
+              {restaurant.brand?.name ? (
+                <p className="mt-1 text-sm text-orange-200">
+                  Brand · {restaurant.brand.name}
+                </p>
+              ) : null}
+              <p className="mt-2 text-sm text-gray-100">
+                {branchAddressLine}
+              </p>
             </div>
             <div className="flex flex-col gap-3 text-sm md:flex-row md:items-center md:gap-6">
               <div className="flex items-center gap-2 rounded-full bg-white/20 px-3 py-1">
@@ -264,7 +368,7 @@ const RestaurantDetail = () => {
                 </span>
               </div>
               <span className="rounded-full bg-white/20 px-3 py-1 font-semibold uppercase tracking-wide">
-                {restaurant.shortHours}
+                {hoursLabel || "Open daily"}
               </span>
               <span className="rounded-full bg-white/20 px-3 py-1 font-semibold uppercase tracking-wide">
                 {restaurant.distanceKm ? restaurant.distanceKm.toFixed(1) : "—"} km away
@@ -318,13 +422,40 @@ const RestaurantDetail = () => {
                 <h4 className="text-base font-semibold text-gray-900">
                   Contact information
                 </h4>
+                {restaurant?.name ? (
+                  <p className="text-xs uppercase text-orange-500">
+                    {restaurant.name}
+                  </p>
+                ) : null}
                 <p className="mt-3 font-semibold text-gray-800">
-                  {restaurant.phone}
+                  {contactPhone || "Updating phone number"}
                 </p>
-                <p>{restaurant.mapHint}</p>
+                {contactEmail ? (
+                  <p className="text-sm text-gray-500">{contactEmail}</p>
+                ) : null}
+                <p>{branchAddressLine || restaurant.mapHint}</p>
                 <p className="mt-3 text-xs uppercase text-orange-500">
                   Fast delivery · Friendly packaging · Secure payments
                 </p>
+                {isBranchOpen !== null || todaysBranchHours ? (
+                  <div className="mt-4 rounded-2xl border border-orange-100 bg-orange-50/60 p-4 text-sm text-gray-700">
+                    <p className="text-xs uppercase text-orange-500">
+                      Branch hours today
+                    </p>
+                    <p className="mt-1 font-semibold text-gray-900">
+                      {isBranchOpen === null
+                        ? "Hours updating"
+                        : isBranchOpen
+                          ? "Open now"
+                          : "Closed"}
+                    </p>
+                    {todaysBranchHours ? (
+                      <p className="text-xs text-gray-500">
+                        {todaysBranchHours.openTime} - {todaysBranchHours.closeTime}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
               <div className="rounded-3xl bg-orange-50/80 p-6 text-sm text-gray-700 shadow-sm">
                 <h4 className="text-base font-semibold text-orange-600">
@@ -424,7 +555,7 @@ const RestaurantDetail = () => {
                 <DishCard
                   key={dish._id}
                   dish={dish}
-                  restaurantId={restaurant.id}
+                  restaurantId={restaurant?.id || branchId}
                   currency={currency}
                   onAdd={(id, size) => addToCart(id, size)}
                 />
@@ -590,4 +721,3 @@ const RestaurantDetail = () => {
 };
 
 export default RestaurantDetail;
-

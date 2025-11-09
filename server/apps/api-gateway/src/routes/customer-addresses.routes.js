@@ -1,6 +1,7 @@
 const express = require('express');
 const { createProxyMiddleware } = require('http-proxy-middleware');
 const jwt = require('jsonwebtoken');
+const forwardProxyBody = require('../utils/forwardProxyBody');
 
 const router = express.Router();
 
@@ -50,6 +51,7 @@ router.use(
       const suffix = path === '/' ? '' : path;
       return `/api/customers/me/addresses${suffix}`;
     },
+    onProxyReq: forwardProxyBody,
     onError: (err, req, res) =>
       res.status(502).json({ error: 'bad gateway', detail: err.message }),
   })

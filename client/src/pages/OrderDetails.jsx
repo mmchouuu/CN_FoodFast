@@ -5,6 +5,8 @@ import {
   restaurantPlaceholderImage,
   dishPlaceholderImage,
 } from "../utils/imageHelpers";
+import { buildRestaurantLink } from "../utils/orderHelpers";
+import resolvePaymentSummary from "../utils/paymentSummary";
 
 const StatusDot = ({ completed }) => (
   <span
@@ -223,6 +225,10 @@ const OrderDetails = () => {
     [order.status, order.placedAt],
   );
   const totals = useMemo(() => resolveTotals(order), [order]);
+  const paymentSummary = useMemo(
+    () => resolvePaymentSummary(order),
+    [order],
+  );
 
   return (
     <div className="max-padd-container space-y-8 py-24">
@@ -247,7 +253,7 @@ const OrderDetails = () => {
             <p className="mt-1 text-sm text-gray-500">
               Restaurant:{" "}
               <Link
-                to={`/restaurants/${order.restaurantId}`}
+                to={buildRestaurantLink(order)}
                 className="font-semibold text-orange-500 hover:underline"
               >
                 {restaurantDisplay.name}
@@ -260,7 +266,7 @@ const OrderDetails = () => {
             Status: {order.status}
           </span>
           <span className="inline-flex items-center rounded-full bg-gray-100 px-4 py-2 text-sm font-semibold text-gray-700">
-            Payment: {order.paymentStatus || "pending"}
+            Payment: {paymentSummary.status}
           </span>
           <Link
             to="/orders/history"
@@ -388,13 +394,13 @@ const OrderDetails = () => {
               Payment
             </h3>
             <p className="mt-2 text-base font-semibold text-gray-900">
-              Method: {order.paymentMethod}
+              Method: {paymentSummary.method}
             </p>
             <p className="text-sm text-gray-500">
-              Status: {order.paymentStatus || "pending"}
+              Status: {paymentSummary.status}
             </p>
             <p className="mt-2 text-xs text-gray-400">
-              Reference: {order.metadata?.payment?.reference || "N/A"}
+              Reference: {paymentSummary.reference}
             </p>
           </div>
 

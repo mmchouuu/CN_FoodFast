@@ -107,7 +107,36 @@ async function fetchBranchById(branchId) {
   throw error;
 }
 
+async function listRestaurantsByOwner(ownerId) {
+  if (!ownerId) {
+    return [];
+  }
+
+  const { status, data } = await sendJsonRequest(`/api/restaurants/owner/${ownerId}/list`, {
+    method: 'GET',
+  });
+
+  if (status >= 200 && status < 300) {
+    if (Array.isArray(data?.items)) {
+      return data.items;
+    }
+    if (Array.isArray(data)) {
+      return data;
+    }
+    return [];
+  }
+
+  const error = new Error(
+    (data && (data.error || data.message)) ||
+      'failed to load restaurants by owner from product-service',
+  );
+  error.status = status;
+  error.data = data;
+  throw error;
+}
+
 module.exports = {
   quoteOrderPricing,
   fetchBranchById,
+  listRestaurantsByOwner,
 };

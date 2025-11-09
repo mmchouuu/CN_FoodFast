@@ -51,3 +51,4 @@ export async function startRabbitMQ() {
     console.error('[email-service] Failed to connect to RabbitMQ:', error?.message || error);
     process.exit(1);
   }
+}

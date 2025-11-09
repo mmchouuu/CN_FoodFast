@@ -447,4 +447,9 @@ module.exports = {
   listBranches,
   findBranchById,
   findBranchByUuid,
-}
+  updateBranch,
+  deleteBranch,
+  getBranchOpeningHours,
+  getBranchSpecialHours,
+  listAllRestaurants,
+};

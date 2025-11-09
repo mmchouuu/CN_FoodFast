@@ -157,8 +157,4 @@ async function buildOptionMap(productIds = [], branchIds = []) {
         row.is_required !== null && row.is_required !== undefined
           ? row.is_required
           : row.group_is_required !== null && row.group_is_required !== undefined
-<<<<<<< HEAD
             ? row.group_is_required
-=======
-            ? row.group_is_required
->>>>>>> e1903a6c2a79f913b83ae286c7238cad8b947f1d
