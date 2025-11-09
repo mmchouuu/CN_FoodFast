@@ -218,3 +218,24 @@ CREATE TABLE IF NOT EXISTS outbox (
 );
 CREATE INDEX IF NOT EXISTS idx_outbox_agg       ON outbox(aggregate_type, aggregate_id);
 CREATE INDEX IF NOT EXISTS idx_outbox_processed ON outbox(processed);
+
+-- =========================================================
+-- 9) DELIVERIES
+-- =========================================================
+
+CREATE TABLE IF NOT EXISTS deliveries (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  order_id UUID NOT NULL,             -- soft ref: orders.id
+  branch_id UUID NOT NULL,            -- soft ref: product-service.restaurant_branches.id
+  shipper_id UUID,                    -- soft ref: product-service.shippers.id
+  delivery_status VARCHAR(30) DEFAULT 'delivering'
+    CHECK (delivery_status IN ('delivering', 'completed', 'cancelled')),
+  driver_snapshot JSONB,              -- lấy từ product-service khi assign
+  delivery_address JSONB,             -- từ order snapshot
+  tracking_data JSONB,                -- optional
+  pickup_at TIMESTAMPTZ,
+  delivered_at TIMESTAMPTZ,
+  failed_reason TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);

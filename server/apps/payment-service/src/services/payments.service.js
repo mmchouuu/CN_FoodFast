@@ -1,6 +1,7 @@
 const { pool } = require('../models/payment.model');
 const paymentModel = require('../models/payment.model');
 const paymentMethodModel = require('../models/paymentMethod.model');
+const orderStatusModel = require('../models/orderStatus.model');
 const stripeService = require('./stripe.service');
 const { publishEvent } = require('../publishers/outbox.publisher');
 const { fetchOrderById } = require('../clients/order.client');
@@ -97,6 +98,272 @@ const extractRestaurantContext = (order = {}) => {
   };
 };
 
+const toAmount = (value, fractionDigits = 2) => {
+  if (value === null || value === undefined) return 0;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 0;
+  return Number(parsed.toFixed(fractionDigits));
+};
+
+const safeFetchOrder = async (orderId) => {
+  if (!orderId) return null;
+  try {
+    return await fetchOrderById(orderId);
+  } catch (error) {
+    console.warn(
+      '[payment-service] Unable to fetch order for payment side-effects:',
+      error?.message || error,
+    );
+    return null;
+  }
+};
+
+const linkPaymentToOrder = async (client, payment, amount) => {
+  if (!client || !payment?.order_id || !payment?.id) {
+    return;
+  }
+  const resolvedAmount = toAmount(
+    amount !== undefined && amount !== null ? amount : payment.amount,
+  );
+  await client.query(
+    `
+      INSERT INTO order_payments (order_id, payment_id, amount, role)
+      VALUES ($1,$2,$3,'charge')
+      ON CONFLICT (order_id, payment_id)
+      DO UPDATE SET amount = EXCLUDED.amount,
+                    role = EXCLUDED.role
+    `,
+    [payment.order_id, payment.id, resolvedAmount],
+  );
+};
+
+const persistTaxComponents = async (client, paymentId, currencyCode, orderSnapshot) => {
+  if (!client || !paymentId || !orderSnapshot) return;
+  const breakdowns = Array.isArray(orderSnapshot.tax_breakdowns)
+    ? orderSnapshot.tax_breakdowns
+    : Array.isArray(orderSnapshot.taxBreakdowns)
+    ? orderSnapshot.taxBreakdowns
+    : [];
+
+  const components = breakdowns
+    .map((tax) => {
+      const amount =
+        toAmount(
+          tax.tax_amount ??
+            tax.taxAmount ??
+            tax.amount ??
+            tax.value ??
+            null,
+        );
+      return amount > 0
+        ? {
+            amount,
+            metadata: {
+              tax_template_code:
+                tax.tax_template_code ??
+                tax.taxTemplateCode ??
+                tax.code ??
+                null,
+              tax_rate: tax.tax_rate ?? tax.taxRate ?? null,
+            },
+          }
+        : null;
+    })
+    .filter(Boolean);
+
+  if (!components.length) {
+    const taxTotal = toAmount(
+      orderSnapshot.tax_total ??
+        orderSnapshot.taxTotal ??
+        null,
+    );
+    if (taxTotal > 0) {
+      components.push({
+        amount: taxTotal,
+        metadata: { source: 'order.tax_total' },
+      });
+    }
+  }
+
+  if (!components.length) {
+    return;
+  }
+
+  await client.query(
+    `
+      DELETE FROM payment_fee_components
+      WHERE payment_id = $1
+        AND component_type = 'tax_withheld'
+    `,
+    [paymentId],
+  );
+
+  for (const component of components) {
+    await client.query(
+      `
+        INSERT INTO payment_fee_components (
+          payment_id,
+          component_type,
+          amount,
+          currency,
+          metadata
+        )
+        VALUES ($1,'tax_withheld',$2,$3,$4)
+      `,
+      [paymentId, component.amount, currencyCode, component.metadata || null],
+    );
+  }
+};
+
+const selectPrimaryPlatformBankAccountId = async (client) => {
+  if (!client) return null;
+  const result = await client.query(
+    `
+      SELECT id
+      FROM platform_bank_accounts
+      WHERE is_primary = TRUE
+        AND is_active = TRUE
+      ORDER BY updated_at DESC
+      LIMIT 1
+    `,
+  );
+  return result.rows[0]?.id || null;
+};
+
+const ensurePlatformTransactionRecord = async (
+  client,
+  { payment, bankAccountId, provider, amount, currencyCode, orderSnapshot },
+) => {
+  if (!client || !payment?.id || !bankAccountId || !amount) return;
+
+  const existing = await client.query(
+    `
+      SELECT id
+      FROM platform_transactions
+      WHERE payment_id = $1
+        AND txn_type = 'inflow_payment'
+      LIMIT 1
+    `,
+    [payment.id],
+  );
+  if (existing.rows.length) {
+    return;
+  }
+
+  const sourceLabel = provider || payment.flow || 'online';
+  const orderLabel =
+    orderSnapshot?.code ||
+    orderSnapshot?.order_code ||
+    orderSnapshot?.orderCode ||
+    orderSnapshot?.reference_code ||
+    payment.order_id;
+  const description = `Customer paid order ${orderLabel} via ${sourceLabel}`;
+
+  await client.query(
+    `
+      INSERT INTO platform_transactions (
+        payment_id,
+        platform_bank_account_id,
+        txn_type,
+        source,
+        description,
+        amount,
+        currency,
+        status
+      )
+      VALUES ($1,$2,'inflow_payment',$3,$4,$5,$6,'completed')
+    `,
+    [payment.id, bankAccountId, sourceLabel, description, amount, currencyCode],
+  );
+};
+
+const incrementPlatformLedgerBalance = async (
+  client,
+  { bankAccountId, amount, currencyCode },
+) => {
+  if (!client || !bankAccountId || !amount) return;
+  await client.query(
+    `
+      INSERT INTO platform_ledger_balances (
+        platform_bank_account_id,
+        current_balance,
+        currency,
+        last_updated_at
+      )
+      VALUES ($1,$2,$3,now())
+      ON CONFLICT (platform_bank_account_id)
+      DO UPDATE SET
+        current_balance = platform_ledger_balances.current_balance + EXCLUDED.current_balance,
+        currency = EXCLUDED.currency,
+        last_updated_at = now()
+    `,
+    [bankAccountId, amount, currencyCode],
+  );
+};
+
+const syncPaymentSuccessArtifacts = async ({
+  client,
+  payment,
+  provider,
+  amountOverride,
+  currencyOverride,
+  orderSnapshot = null,
+}) => {
+  if (!client || !payment) return;
+
+  const resolvedAmount = toAmount(amountOverride ?? payment.amount);
+  const currencyCode = normalizeCurrency(currencyOverride || payment.currency || 'VND');
+
+  await linkPaymentToOrder(client, payment, resolvedAmount);
+
+  if (payment.flow !== 'online') {
+    return;
+  }
+
+  const orderData = orderSnapshot || (await safeFetchOrder(payment.order_id));
+  if (orderData) {
+    await persistTaxComponents(client, payment.id, currencyCode, orderData);
+  }
+
+  if (!(resolvedAmount > 0)) {
+    return;
+  }
+
+  const bankAccountId = await selectPrimaryPlatformBankAccountId(client);
+  if (!bankAccountId) {
+    console.warn(
+      '[payment-service] Missing primary platform bank account, skip ledger update for payment',
+      payment.id,
+    );
+    return;
+  }
+
+  await ensurePlatformTransactionRecord(client, {
+    payment,
+    bankAccountId,
+    provider,
+    amount: resolvedAmount,
+    currencyCode,
+    orderSnapshot: orderData,
+  });
+
+  await incrementPlatformLedgerBalance(client, {
+    bankAccountId,
+    amount: resolvedAmount,
+    currencyCode,
+  });
+
+  try {
+    await orderStatusModel.markOrderPaymentPaid(payment.order_id);
+  } catch (error) {
+    console.error(
+      '[payment-service] Failed to update order payment_status for',
+      payment.order_id,
+      error?.message || error,
+    );
+  }
+};
+
 
 async function handlePaymentPending(event) {
   const {
@@ -183,6 +450,7 @@ async function handlePaymentPending(event) {
           order_id: orderId,
           payment_id: null,
           reason: 'no_payment_method',
+          flow,
         });
         return null;
       }
@@ -224,6 +492,15 @@ async function handlePaymentPending(event) {
         },
         client,
       );
+
+      await syncPaymentSuccessArtifacts({
+        client,
+        payment: updated,
+        provider: method || flow,
+        amountOverride: amount,
+        currencyOverride: currencyCode,
+        orderSnapshot: cachedOrder,
+      });
 
       await client.query('COMMIT');
       await publishEvent('PaymentSucceeded', {
@@ -275,6 +552,17 @@ async function handlePaymentPending(event) {
         client,
       );
 
+      if (paymentIntent.status === 'succeeded') {
+        await syncPaymentSuccessArtifacts({
+          client,
+          payment: updated,
+          provider: method || flow,
+          amountOverride: amount,
+          currencyOverride: currencyCode,
+          orderSnapshot: cachedOrder,
+        });
+      }
+
       await client.query('COMMIT');
 
       if (paymentIntent.status === 'succeeded') {
@@ -284,6 +572,7 @@ async function handlePaymentPending(event) {
           transaction_id: paymentIntent.id,
           amount,
           currency: currencyCode,
+          flow,
         });
       } else {
         await publishEvent('PaymentPending', {
@@ -291,6 +580,7 @@ async function handlePaymentPending(event) {
           payment_id: payment.id,
           status: paymentIntent.status,
           currency: currencyCode,
+          flow,
         });
       }
 
@@ -315,6 +605,7 @@ async function handlePaymentPending(event) {
         payment_id: payment.id,
         reason: error.message,
         currency: currencyCode,
+        flow,
       });
       console.error('[payment-service] Stripe charge failed:', error);
       return null;
@@ -357,19 +648,44 @@ async function markPaymentSucceeded({
   if (!paymentId) {
     throw Object.assign(new Error('payment id is required'), { statusCode: 400 });
   }
-  const payment = await paymentModel.updatePayment(paymentId, {
-    status: 'succeeded',
-    transaction_id: transactionId || undefined,
-    paid_at: new Date(),
-  });
-  await paymentModel.insertPaymentLog(
-    {
+  const client = await pool.connect();
+  let payment;
+  try {
+    await client.query('BEGIN');
+    payment = await paymentModel.updatePayment(
       paymentId,
-      action: 'PaymentSucceeded',
-      data: { provider, transactionId, metadata },
-    },
-    null,
-  );
+      {
+        status: 'succeeded',
+        transaction_id: transactionId || undefined,
+        paid_at: new Date(),
+      },
+      client,
+    );
+
+    await paymentModel.insertPaymentLog(
+      {
+        paymentId,
+        action: 'PaymentSucceeded',
+        data: { provider, transactionId, metadata },
+      },
+      client,
+    );
+
+    await syncPaymentSuccessArtifacts({
+      client,
+      payment,
+      provider,
+      amountOverride: amount,
+      currencyOverride: currency,
+    });
+
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
 
   await publishEvent('PaymentSucceeded', {
     order_id: payment.order_id,
@@ -378,6 +694,7 @@ async function markPaymentSucceeded({
     amount: amount || payment.amount,
     currency: currency || payment.currency,
     provider,
+    flow: payment.flow,
   });
   return payment;
 }
@@ -404,6 +721,7 @@ async function markPaymentFailed({ paymentId, transactionId, provider, reason, m
     transaction_id: payment.transaction_id,
     reason: reason || 'payment_failed',
     provider,
+    flow: payment.flow,
   });
   return payment;
 }

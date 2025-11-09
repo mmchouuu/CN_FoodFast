@@ -24,6 +24,26 @@ module.exports = {
     idleTimeoutMillis: parseNumber(process.env.DB_IDLE_TIMEOUT_MS, 30000),
     connectionTimeoutMillis: parseNumber(process.env.DB_CONNECTION_TIMEOUT_MS, 10000),
   },
+  ORDER_DB: {
+    host: process.env.ORDER_DB_HOST || process.env.ORDER_DB_HOSTNAME || 'orderdb',
+    port: parseNumber(process.env.ORDER_DB_PORT, 5432),
+    database: process.env.ORDER_DB_NAME || 'orderdb',
+    user: process.env.ORDER_DB_USER || 'postgres',
+    password: process.env.ORDER_DB_PASSWORD || '123',
+    ssl:
+      process.env.ORDER_DB_SSL === 'true'
+        ? {
+            rejectUnauthorized:
+              process.env.ORDER_DB_SSL_REJECT_UNAUTHORIZED === 'false' ? false : true,
+          }
+        : false,
+    max: parseNumber(process.env.ORDER_DB_POOL_MAX, 5),
+    idleTimeoutMillis: parseNumber(process.env.ORDER_DB_IDLE_TIMEOUT_MS, 30000),
+    connectionTimeoutMillis: parseNumber(
+      process.env.ORDER_DB_CONNECTION_TIMEOUT_MS,
+      10000,
+    ),
+  },
   JWT_SECRET: process.env.JWT_SECRET || 'secret',
   RABBITMQ_URL: process.env.RABBITMQ_URL || 'amqp://guest:guest@rabbitmq:5672',
   ORDER_EVENTS_QUEUE: process.env.ORDER_EVENTS_QUEUE || 'order_events',

@@ -18,12 +18,12 @@ CREATE INDEX IF NOT EXISTS idx_users_created_at ON users(created_at);
 CREATE INDEX IF NOT EXISTS idx_users_is_active  ON users(is_active);
 
 -- =====================================================================
--- 2) ROLES (global): customer / owner / admin
+-- 2) ROLES (global): customer / owner / admin / shipper
 -- =====================================================================
 CREATE TABLE IF NOT EXISTS roles (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   code        VARCHAR(30) UNIQUE NOT NULL
-                CHECK (code IN ('customer','owner','admin')),
+                CHECK (code IN ('customer','owner','admin', 'shipper')),
   description TEXT
 );
 
@@ -325,52 +325,77 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_rat_active
   ON restaurant_account_tokens(account_id, purpose)
   WHERE consumed_at IS NULL;
 
--- =============================
--- INSERT DEFAULT ADMIN ACCOUNT (password: admin123)
--- =============================
-
--- 1️⃣ Đảm bảo có role 'admin'
-INSERT INTO roles (code, description)
-VALUES ('admin', 'System administrator with full privileges')
-ON CONFLICT (code) DO NOTHING;
-
--- 2️⃣ Tạo user admin
-INSERT INTO users (email, first_name, last_name, phone, is_active, email_verified)
-VALUES ('admin@foodfast.vn', 'System', 'Admin', '0900000000', TRUE, TRUE)
-ON CONFLICT (email) DO NOTHING;
-
--- 3️⃣ Gán role admin cho user này
-INSERT INTO user_roles (user_id, role_id)
-SELECT u.id, r.id
-FROM users u
-JOIN roles r ON r.code = 'admin'
-WHERE u.email = 'admin@foodfast.vn'
-ON CONFLICT DO NOTHING;
-
--- 4️⃣ Tạo mật khẩu cho admin (bcrypt của "admin123")
--- bcrypt hash: $2b$10$uZDWt4AjQ8RkM95TtZ9Fz.4yvuq38DJKxwFy0P9BFW86vujr0FtTe
-INSERT INTO user_credentials (user_id, role_id, password_hash, is_temp)
-SELECT u.id, r.id, '$2b$10$uZDWt4AjQ8RkM95TtZ9Fz.4yvuq38DJKxwFy0P9BFW86vujr0FtTe', FALSE
-FROM users u
-JOIN roles r ON r.code = 'admin'
-WHERE u.email = 'admin@foodfast.vn'
-ON CONFLICT (user_id, role_id) DO NOTHING;
-
--- 5️⃣ Hồ sơ admin chi tiết
-INSERT INTO admin_profiles (user_id, full_name, position, permissions)
-SELECT u.id, 'System Administrator', 'Super Admin', '{"all": true}'::jsonb
-FROM users u
-WHERE u.email = 'admin@foodfast.vn'
-ON CONFLICT (user_id) DO NOTHING;
-
--- =====================================================================
--- SEED SAMPLE OWNER ACCOUNTS AND RESTAURANT CONSOLE ACCESS
--- =====================================================================
+-- =========================================================
+-- 0️⃣ ROLE DEFINITIONS
+-- =========================================================
 
 INSERT INTO roles (code, description)
 VALUES
+  ('admin', 'System administrator with full privileges'),
   ('owner', 'Restaurant owner with console access')
 ON CONFLICT (code) DO NOTHING;
+
+-- =========================================================
+-- 1️⃣ ADMIN SEED
+-- =========================================================
+DROP TABLE IF EXISTS tmp_admin_seed;
+CREATE TEMP TABLE tmp_admin_seed (
+  user_id UUID,
+  email TEXT,
+  first_name TEXT,
+  last_name TEXT,
+  phone TEXT,
+  full_name TEXT,
+  position TEXT,
+  password_hash TEXT
+);
+
+-- bcrypt của "admin123"
+INSERT INTO tmp_admin_seed VALUES
+  (
+    '11111111-1111-4111-8111-000000000001',
+    'admin@foodfast.vn',
+    'System',
+    'Admin',
+    '0900000000',
+    'System Administrator',
+    'Super Admin',
+    '$2b$10$uZDWt4AjQ8RkM95TtZ9Fz.4yvuq38DJKxwFy0P9BFW86vujr0FtTe'
+  );
+
+-- 1️⃣.1 Tạo user admin
+INSERT INTO users (id, email, first_name, last_name, phone, is_active, email_verified)
+SELECT user_id, email, first_name, last_name, phone, TRUE, TRUE
+FROM tmp_admin_seed
+ON CONFLICT (email) DO NOTHING;
+
+-- 1️⃣.2 Gán role admin
+WITH admin_role AS (SELECT id FROM roles WHERE code = 'admin' LIMIT 1)
+INSERT INTO user_roles (user_id, role_id)
+SELECT seed.user_id, admin_role.id
+FROM tmp_admin_seed seed
+CROSS JOIN admin_role
+ON CONFLICT DO NOTHING;
+
+-- 1️⃣.3 Gán mật khẩu
+WITH admin_role AS (SELECT id FROM roles WHERE code = 'admin' LIMIT 1)
+INSERT INTO user_credentials (user_id, role_id, password_hash, is_temp)
+SELECT seed.user_id, admin_role.id, seed.password_hash, FALSE
+FROM tmp_admin_seed seed
+CROSS JOIN admin_role
+ON CONFLICT (user_id, role_id) DO NOTHING;
+
+-- 1️⃣.4 Hồ sơ admin
+INSERT INTO admin_profiles (user_id, full_name, position, permissions)
+SELECT user_id, full_name, position, '{"all": true}'::jsonb
+FROM tmp_admin_seed
+ON CONFLICT (user_id) DO NOTHING;
+
+DROP TABLE tmp_admin_seed;
+
+-- =========================================================
+-- 2️⃣ OWNER SEED 
+-- =========================================================
 
 DROP TABLE IF EXISTS tmp_owner_seed;
 CREATE TEMP TABLE tmp_owner_seed (
@@ -389,6 +414,7 @@ CREATE TEMP TABLE tmp_owner_seed (
   display_name TEXT,
   account_phone TEXT
 );
+
 
 INSERT INTO tmp_owner_seed (
   user_id,
@@ -418,11 +444,13 @@ VALUES
   ('11111111-1111-4111-8111-000000000109'::uuid, '21111111-1111-4111-8111-000000000109'::uuid, '51111111-1111-4111-8111-000000000109'::uuid, 'texas.owner@foodfast.vn', 'Quang', 'Pham', '0909000909', 'Texas Chicken Vietnam', '0311234569', '250 Le Loi, District 1, Ho Chi Minh City', 'Quang Pham', 'owner@texaschicken.vn', 'Texas Chicken Owner', '02838486666'),
   ('11111111-1111-4111-8111-000000000110'::uuid, '21111111-1111-4111-8111-000000000110'::uuid, '51111111-1111-4111-8111-000000000110'::uuid, 'pizza4ps.owner@foodfast.vn', 'Yuki', 'Matsumoto', '0910000100', 'Pizza 4Ps Corporation', '0311234570', '8/15 Le Thanh Ton, District 1, Ho Chi Minh City', 'Yuki Matsumoto', 'owner@pizza4ps.vn', 'Pizza 4Ps Owner', '02836229988');
 
+-- 2️⃣.1 Tạo users (owner)
 INSERT INTO users (id, email, first_name, last_name, phone, is_active, email_verified)
 SELECT user_id, email, first_name, last_name, phone, TRUE, TRUE
 FROM tmp_owner_seed
 ON CONFLICT (email) DO NOTHING;
 
+-- 2️⃣.2 Owner profile (approved_by admin)
 WITH admin_user AS (
   SELECT id
   FROM users
@@ -452,6 +480,7 @@ FROM tmp_owner_seed seed
 CROSS JOIN admin_user
 ON CONFLICT (user_id) DO NOTHING;
 
+-- 2️⃣.3 Gán role owner
 WITH owner_role AS (
   SELECT id
   FROM roles
@@ -464,6 +493,7 @@ FROM tmp_owner_seed seed
 CROSS JOIN owner_role
 ON CONFLICT DO NOTHING;
 
+-- 2️⃣.4 Gán password owner (bcrypt của owner123)
 WITH owner_role AS (
   SELECT id
   FROM roles
@@ -476,16 +506,19 @@ FROM tmp_owner_seed seed
 CROSS JOIN owner_role
 ON CONFLICT (user_id, role_id) DO NOTHING;
 
+-- 2️⃣.5 Restaurant accounts
 INSERT INTO restaurant_accounts (id, restaurant_id, login_email, display_name, phone, user_id, is_active)
 SELECT account_id, restaurant_id, login_email, display_name, account_phone, user_id, TRUE
 FROM tmp_owner_seed
 ON CONFLICT (id) DO NOTHING;
 
+-- 2️⃣.6 Restaurant account credentials
 INSERT INTO restaurant_account_credentials (account_id, password_hash, is_temp)
 SELECT account_id, '$2b$10$fYqtZDmpJFbpSCE3OVaXMuOTBnbK.icYOjHM6gpDZsOibTEEq7mca', FALSE
 FROM tmp_owner_seed
 ON CONFLICT (account_id) DO NOTHING;
 
+-- 2️⃣.7 Restaurant account memberships
 INSERT INTO restaurant_account_memberships (
   account_id,
   restaurant_id,

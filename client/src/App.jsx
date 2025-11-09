@@ -103,6 +103,8 @@ import Promotions from './pages/owner/Promotions';
 import CustomerFeedback from './pages/owner/CustomerFeedback';
 import RevenueStatistics from './pages/owner/RevenueStatistics';
 import AccountManagement from './pages/owner/AccountManagement';
+import SettlementReports from './pages/owner/SettlementReports';
+import CashSettlement from './pages/owner/CashSettlement';
 import EnableOwner from './pages/owner/EnableOwner';
 
 // Admin pages
@@ -114,6 +116,8 @@ import AdminAuthorization from './pages/admin/AdminAuthorization';
 import AdminComplaints from './pages/admin/AdminComplaints';
 import AdminPromotions from './pages/admin/AdminPromotions';
 import AdminActivity from './pages/admin/AdminActivity';
+import PayoutManagement from './pages/admin/PayoutManagement';
+import CODSettlements from './pages/admin/CODSettlements';
 
 const App = () => {
   const { pathname } = useLocation();
@@ -160,6 +164,8 @@ const App = () => {
           <Route index element={<OwnerDashboard />} />
           <Route path="menu" element={<MenuManagement />} />
           <Route path="orders" element={<Orders />} />
+          <Route path="settlements" element={<SettlementReports />} />
+          <Route path="cash-settlement" element={<CashSettlement />} />
           <Route path="shippers" element={<ShipperManagement />} />
           <Route path="assignments" element={<AssignOrders />} />
           <Route path="tracking" element={<DeliveryTracking />} />
@@ -175,6 +181,8 @@ const App = () => {
           <Route index element={<AdminDashboard />} />
           <Route path="customers" element={<AdminCustomers />} />
           <Route path="restaurants" element={<AdminRestaurants />} />
+          <Route path="payouts" element={<PayoutManagement />} />
+          <Route path="cod-settlements" element={<CODSettlements />} />
           <Route path="authorization" element={<AdminAuthorization />} />
           <Route path="complaints" element={<AdminComplaints />} />
           <Route path="promotions" element={<AdminPromotions />} />
@@ -186,5 +194,3 @@ const App = () => {
   );
 };
 export default App;
-
-

@@ -117,6 +117,21 @@ const determinePaymentFlow = (methodRaw) => {
   return PAYMENT_FLOWS[method] || 'cash';
 };
 
+const normalisePaymentFlowFlag = (flowRaw) => {
+  if (!flowRaw || typeof flowRaw !== 'string') return null;
+  const flow = flowRaw.trim().toLowerCase();
+  if (!flow.length) return null;
+  if (
+    ['online', 'card', 'wallet', 'stripe', 'momo', 'zalopay', 'visa', 'mastercard'].includes(flow)
+  ) {
+    return 'online';
+  }
+  if (['cash', 'cod', 'cash_on_delivery', 'cash-on-delivery'].includes(flow)) {
+    return 'cash';
+  }
+  return flow;
+};
+
 const normaliseOrderStatus = (statusRaw) => {
   if (!statusRaw || typeof statusRaw !== 'string') return null;
   const status = statusRaw.trim().toLowerCase();
@@ -1722,34 +1737,50 @@ async function handlePaymentEvent(event = {}) {
     }
 
     if (eventType === 'PaymentSucceeded') {
-      const nextStatus = order.status === 'pending' ? 'confirmed' : order.status;
-      await client.query(
-        `
-          UPDATE orders
-          SET payment_status = 'paid',
-              status = $1,
-              updated_at = now()
-          WHERE id = $2
-        `,
-        [nextStatus, orderId],
+      const paymentFlow = normalisePaymentFlowFlag(
+        payload.flow ||
+          payload.payment_flow ||
+          payload.paymentFlow ||
+          payload.flow_type ||
+          payload.payment_type ||
+          null,
       );
+      const shouldMarkPaid = !paymentFlow || paymentFlow === 'online';
 
-      await logOrderEvent(client, {
-        orderId,
-        eventType: 'PaymentSucceeded',
-        payload,
-      });
+      if (shouldMarkPaid) {
+        await client.query(
+          `
+            UPDATE orders
+            SET payment_status = 'paid',
+                updated_at = now()
+            WHERE id = $1
+          `,
+          [orderId],
+        );
 
-      await enqueueOutbox(client, {
-        aggregateType: 'Order',
-        aggregateId: orderId,
-        eventType: 'order.payment_succeeded',
-        payload: {
-          order_id: orderId,
-          payment_id: payload.payment_id || null,
-          amount: payload.amount,
-        },
-      });
+        await logOrderEvent(client, {
+          orderId,
+          eventType: 'PaymentSucceeded',
+          payload,
+        });
+
+        await enqueueOutbox(client, {
+          aggregateType: 'Order',
+          aggregateId: orderId,
+          eventType: 'order.payment_succeeded',
+          payload: {
+            order_id: orderId,
+            payment_id: payload.payment_id || null,
+            amount: payload.amount,
+          },
+        });
+      } else {
+        await logOrderEvent(client, {
+          orderId,
+          eventType: 'PaymentSucceeded',
+          payload: { ...payload, ignored: true, reason: 'non_online_flow' },
+        });
+      }
     } else if (eventType === 'PaymentFailed') {
       await client.query(
         `

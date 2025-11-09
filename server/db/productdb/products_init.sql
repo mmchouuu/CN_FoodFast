@@ -381,20 +381,6 @@ CREATE TABLE IF NOT EXISTS product_option_groups (
 );
 CREATE INDEX IF NOT EXISTS idx_pog_product ON product_option_groups(product_id, is_active);
 
--- CREATE TABLE IF NOT EXISTS branch_product_option_items (
---   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
---   branch_id UUID NOT NULL,
---   product_id UUID NOT NULL,
---   option_item_id UUID NOT NULL,
---   is_available BOOLEAN NOT NULL DEFAULT TRUE,
---   price_delta_override NUMERIC(12,2),
---   is_visible BOOLEAN NOT NULL DEFAULT TRUE,
---   created_at TIMESTAMPTZ DEFAULT now(),
---   updated_at TIMESTAMPTZ DEFAULT now(),
---   UNIQUE (branch_id, product_id, option_item_id)
--- );
--- CREATE INDEX IF NOT EXISTS idx_bpoi_branch_product ON branch_product_option_items(branch_id, product_id, is_available, is_visible);
-
 CREATE TABLE IF NOT EXISTS branch_product_option_items (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   branch_product_id UUID NOT NULL REFERENCES branch_products(id) ON DELETE CASCADE,
@@ -652,6 +638,29 @@ CREATE TABLE IF NOT EXISTS outbox (
 );
 CREATE INDEX IF NOT EXISTS idx_outbox_agg       ON outbox(aggregate_type, aggregate_id);
 CREATE INDEX IF NOT EXISTS idx_outbox_processed ON outbox(processed);
+
+-- =====================================================================
+-- 15) SHIPPERS
+-- =====================================================================
+
+CREATE TABLE IF NOT EXISTS shippers (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  branch_id UUID NOT NULL REFERENCES restaurant_branches(id),
+  full_name VARCHAR(150) NOT NULL,
+  phone VARCHAR(30) NOT NULL,
+  vehicle_type VARCHAR(30),
+  license_plate VARCHAR(30),
+  avatar_url TEXT,
+  status VARCHAR(30) DEFAULT 'offline' 
+    CHECK (status IN ('online','offline','in_delivery')),
+  is_active BOOLEAN DEFAULT TRUE,
+  current_lat NUMERIC(9,6),
+  current_lng NUMERIC(9,6),
+  last_online_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
 
 
 -- =====================================================================
