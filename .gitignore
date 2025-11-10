@@ -1,5 +1,5 @@
 node_modules/ 
-"server/apps/payment-service/.env" 
+server/apps/payment-service/.env
 
 client/localhost.pem
 client/localhost-key.pem
