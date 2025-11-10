@@ -10,6 +10,7 @@ import catalogService from '../services/catalog';
 import ordersService from '../services/orders';
 import paymentsService from '../services/payments';
 import { restaurantPlaceholderImage, dishPlaceholderImage } from '../utils/imageHelpers';
+import { formatPaymentMethodLabel, formatPaymentStatusLabel } from '../utils/paymentDisplay';
 
 // --- Auth Systems ---
 import authService from '../services/auth';
@@ -58,95 +59,10 @@ const FALLBACK_RESTAURANTS = restaurantList;
 const DEFAULT_PAYMENT_METHOD = paymentOptionList[0]?.id || 'cod';
 const ORDER_HISTORY_STATUSES = new Set(['delivered', 'completed', 'cancelled']);
 const ORDER_REVIEWABLE_STATUSES = new Set(['delivered', 'completed']);
-const CARD_STORAGE_KEY = 'customer_payment_cards';
 
 const toNumberOr = (value, fallback = 0) => {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : fallback;
-};
-
-const ensureArray = (value) => (Array.isArray(value) ? value : value ? [value] : []);
-
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-const buildDeterministicUuid = (seed) => {
-    const normalized = (seed || '').toString();
-    if (!normalized.length) {
-        return null;
-    }
-    const bytes = new Uint8Array(16);
-    for (let i = 0; i < normalized.length; i += 1) {
-        const code = normalized.charCodeAt(i);
-        const index = i % bytes.length;
-        bytes[index] = (bytes[index] + code + i) & 0xff;
-    }
-    bytes[6] = (bytes[6] & 0x0f) | 0x50;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
-    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-};
-
-const ensureCanonicalId = (...candidates) => {
-    let seed = '';
-    for (const candidate of candidates) {
-        if (candidate === undefined || candidate === null) continue;
-        const value = typeof candidate === 'string' ? candidate.trim() : String(candidate).trim();
-        if (!value) continue;
-        if (UUID_PATTERN.test(value)) {
-            return value.toLowerCase();
-        }
-        seed = seed ? `${seed}|${value.toLowerCase()}` : value.toLowerCase();
-    }
-    return seed ? buildDeterministicUuid(seed) : null;
-};
-
-const isUuid = (value) =>
-    typeof value === 'string' && UUID_PATTERN.test(value.trim());
-
-const generateCardId = () => {
-    try {
-        if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-            return crypto.randomUUID();
-        }
-    } catch (error) {
-        // ignore generation errors, fallback below
-    }
-    return `card_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-};
-
-const readStoredCardsMap = () => {
-    if (typeof window === 'undefined') {
-        return {};
-    }
-    try {
-        const raw = localStorage.getItem(CARD_STORAGE_KEY);
-        if (!raw) return {};
-        const parsed = JSON.parse(raw);
-        return parsed && typeof parsed === 'object' ? parsed : {};
-    } catch (error) {
-        console.warn('Failed to parse stored cards', error);
-        return {};
-    }
-};
-
-const loadCardsForUser = (userId) => {
-    if (!userId) return [];
-    const map = readStoredCardsMap();
-    const list = map?.[userId];
-    return Array.isArray(list) ? list : [];
-};
-
-const persistCardsForUser = (userId, cards) => {
-    if (!userId || typeof window === 'undefined') {
-        return;
-    }
-    try {
-        const map = readStoredCardsMap();
-        map[userId] = cards;
-        localStorage.setItem(CARD_STORAGE_KEY, JSON.stringify(map));
-    } catch (error) {
-        console.warn('Failed to persist stored cards', error);
-    }
 };
 
 const normalizePaymentMethodForSubmit = (value) => {
@@ -168,6 +84,8 @@ const normalizePaymentMethodForSubmit = (value) => {
     }
     return normalized;
 };
+
+const ensureArray = (value) => (Array.isArray(value) ? value : value ? [value] : []);
 
 const detectCardBrand = (digitString = '') => {
     if (!digitString) return 'card';
@@ -195,6 +113,7 @@ const adaptStripeCardFromApi = (record) => {
         providerData,
     };
 };
+
 const adaptOptionValueFromApi = (item) => {
     if (!item) return null;
     const priceDelta =
@@ -330,7 +249,7 @@ const adaptRestaurantFromApi = (restaurant) => {
                         }
                     }
                     adapted.branchId = branch.id;
-                    adapted.restaurantId = branch.id;
+                    adapted.restaurantId = restaurant.id;
                     adapted.brandRestaurantId = restaurant.id;
                     adapted.brandName = restaurant.name || null;
                     adapted.branchName = branch.name || restaurant.name || null;
@@ -431,6 +350,39 @@ const adaptProductFromApi = (product) => {
         }
         : null;
 
+    const rawBranchAssignments =
+        Array.isArray(product.branch_assignments)
+            ? product.branch_assignments
+            : Array.isArray(product.branchAssignments)
+                ? product.branchAssignments
+                : [];
+    const branchAssignments = rawBranchAssignments
+        .map((assignment) => {
+            if (!assignment) return null;
+            return {
+                ...assignment,
+                id:
+                    assignment.id ||
+                    assignment.branch_product_id ||
+                    assignment.branchProductId ||
+                    null,
+                branch_id:
+                    assignment.branch_id ||
+                    assignment.branchId ||
+                    assignment.branch ||
+                    null,
+                branch_category_id:
+                    assignment.branch_category_id ||
+                    assignment.branchCategoryId ||
+                    null,
+                category_id:
+                    assignment.category_id ||
+                    assignment.categoryId ||
+                    null,
+            };
+        })
+        .filter(Boolean);
+
     const optionGroups = Array.isArray(product.options)
         ? product.options.map(adaptOptionGroupFromApi).filter(Boolean)
         : [];
@@ -500,6 +452,11 @@ const adaptProductFromApi = (product) => {
         available: product.available !== false,
         createdAt,
         updatedAt,
+        branchAssignments,
+        branch_assignments: branchAssignments,
+        branchProductId: product.branch_product_id || product.branchProductId || null,
+        branchCategoryId: product.branch_category_id || product.branchCategoryId || null,
+        categoryId: product.category_id || product.categoryId || null,
     };
 };
 
@@ -513,7 +470,7 @@ function buildBranchCatalog(brands = []) {
             let productsForBranch = Array.isArray(branch.products)
                 ? branch.products.map((product) => ({
                     ...product,
-                    restaurantId: branch.id,
+                    restaurantId: brand.id,
                     branchId: branch.id,
                     brandRestaurantId: brand.id,
                     brandName: brand.name,
@@ -524,7 +481,7 @@ function buildBranchCatalog(brands = []) {
             if (!productsForBranch.length && Array.isArray(brand.products) && brand.products.length) {
                 productsForBranch = brand.products.map((product) => ({
                     ...product,
-                    restaurantId: branch.id,
+                    restaurantId: brand.id,
                     branchId: branch.id,
                     brandRestaurantId: brand.id,
                     brandName: brand.name,
@@ -568,7 +525,8 @@ function buildBranchCatalog(brands = []) {
                 ...branch,
                 id: branch.id,
                 branchId: branch.id,
-                restaurantId: branch.id,
+                restaurantId: brand.id,
+                brandRestaurantId: brand.id,
                 name: branch.name || brand.name || 'Restaurant',
                 displayName: branch.name ? `${brand.name} • ${branch.name}` : brand.name,
                 description: branch.description || brand.description || '',
@@ -628,38 +586,17 @@ const adaptAddressFromApi = (address) => {
 };
 
 const buildDefaultTimeline = (status, placedAt) => {
-    const ORDER_STATUS_SEQUENCE = [
-        'pending',
-        'confirmed',
-        'preparing',
-        'ready',
-        'delivering',
-        'delivered',
-        'completed'
-    ];
-
-    const LABEL_MAP = {
-        pending: 'Pending',
-        confirmed: 'Order confirmed',
-        preparing: 'Preparing',
-        ready: 'Ready for pickup',
-        delivering: 'Out for delivery',
-        delivered: 'Delivered',
-        completed: 'Completed',
-    };
-
+    const ORDER_STATUS_SEQUENCE = ['pending', 'confirmed', 'preparing', 'ready', 'delivering', 'completed'];
     const normalizedStatus = typeof status === 'string' ? status.toLowerCase() : '';
     const statusIndex = ORDER_STATUS_SEQUENCE.indexOf(normalizedStatus);
-
     const placedTime = placedAt
         ? new Date(placedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         : null;
 
     return ORDER_STATUS_SEQUENCE.map((key, index) => {
-        const label = LABEL_MAP[key] || key.charAt(0).toUpperCase() + key.slice(1);
+        const label = key.charAt(0).toUpperCase() + key.slice(1);
         const isKnownStatus = statusIndex !== -1;
         const completed = isKnownStatus ? index <= statusIndex : index === 0;
-
         let timestamp = null;
         if (completed) {
             if (index === 0) {
@@ -670,9 +607,8 @@ const buildDefaultTimeline = (status, placedAt) => {
                 timestamp = 'Completed';
             }
         }
-
         return {
-            id: `stage-${key}`,
+            id: `status-${key}`,
             label,
             status: key,
             completed,
@@ -784,7 +720,54 @@ const adaptOrderFromApi = (order) => {
             : typeof order.payment_method === 'string'
                 ? order.payment_method
                 : 'cod';
-    const paymentMethod = paymentMethodRaw.toUpperCase();
+    const paymentDetailsRaw = order.payment_details || null;
+    const paymentFlowSource =
+        paymentDetailsRaw?.flow ||
+        paymentMeta.flow ||
+        order.payment_flow ||
+        order.flow ||
+        null;
+    const paymentFlow =
+        typeof paymentFlowSource === 'string' && paymentFlowSource.trim()
+            ? paymentFlowSource.trim().toLowerCase()
+            : 'cash';
+    const paymentDetails =
+        paymentDetailsRaw && !paymentDetailsRaw.flow && paymentFlow
+            ? { ...paymentDetailsRaw, flow: paymentFlow }
+            : paymentDetailsRaw;
+    const paymentMethodFallback =
+        paymentFlow === 'online' && (!paymentDetails || paymentMethodRaw === 'cod')
+            ? paymentMeta.method || 'online'
+            : paymentMethodRaw;
+    const paymentMethodLabel = formatPaymentMethodLabel(
+        paymentDetails,
+        paymentMethodFallback,
+    );
+    const paymentMethod = (paymentMethodFallback || 'cod').toUpperCase();
+    const paymentStatusSourceRaw =
+        paymentDetails?.status || paymentMeta.status || order.payment_status || '';
+    const paymentStatusSource =
+        typeof paymentStatusSourceRaw === 'string'
+            ? paymentStatusSourceRaw.toLowerCase()
+            : '';
+    const resolvedPaymentStatus =
+        paymentStatusSource === 'succeeded'
+            ? 'paid'
+            : paymentStatusSource || (order.payment_status || '').toLowerCase() || 'pending';
+    const paymentStatusLabel = formatPaymentStatusLabel(
+        paymentDetails || { status: resolvedPaymentStatus },
+        paymentStatusSourceRaw || resolvedPaymentStatus || 'pending',
+    );
+    const paymentMethodId =
+        paymentDetails?.payment_method_id ||
+        paymentMeta.payment_method_id ||
+        order.payment_method_id ||
+        null;
+    const paymentReference =
+        paymentDetails?.payment_id ||
+        paymentDetails?.transaction_id ||
+        paymentMeta.reference ||
+        null;
     const restaurantName =
         restaurantSnapshotMeta?.name ||
         metadata.restaurant_name ||
@@ -809,9 +792,17 @@ const adaptOrderFromApi = (order) => {
         restaurantId: order.restaurant_id,
         branchId: order.branch_id,
         status: order.status,
-        paymentStatus: order.payment_status,
+        paymentStatus: resolvedPaymentStatus,
+        paymentStatusLabel,
         paymentMethod,
+        paymentMethodLabel,
         paymentMethodKey: paymentMethodRaw,
+        paymentMethodId,
+        paymentReference: paymentReference || null,
+        paymentFlow,
+        paymentDetails: paymentDetails
+            ? { ...paymentDetails, displayLabel: paymentMethodLabel }
+            : null,
         totalAmount,
         subtotal: itemsSubtotal,
         shippingFee,
@@ -867,7 +858,6 @@ const adaptOrderFromApi = (order) => {
     };
 };
 
-
 const sortOrdersByPlacedAt = (orders) =>
     [...orders].sort((a, b) => {
         const dateA = a?.placedAt ? new Date(a.placedAt).getTime() : 0;
@@ -889,6 +879,21 @@ const splitOrdersByStatus = (orders) => {
     };
 };
 
+const shouldEnrichPaymentDetails = (order) => {
+    if (!order) return false;
+    const flow = (order.paymentFlow || '').toLowerCase();
+    if (flow !== 'online') {
+        return false;
+    }
+    if (
+        order.paymentDetails &&
+        (order.paymentDetails.method_details || order.paymentDetails.displayLabel)
+    ) {
+        return false;
+    }
+    return !order.paymentDetails;
+};
+
 
 export const AppContextProvider = ({ children }) => {
     const navigate = useNavigate();
@@ -907,6 +912,7 @@ export const AppContextProvider = ({ children }) => {
 
     const [momoWallets, setMomoWallets] = useState([]);
     const [cardAccounts, setCardAccounts] = useState([]);
+    const [selectedCardId, setSelectedCardId] = useState(null);
     const [customerProfileOpen, setCustomerProfileOpen] = useState(false);
 
     const openCustomerProfilePanel = useCallback(() => setCustomerProfileOpen(true), []);
@@ -931,8 +937,27 @@ export const AppContextProvider = ({ children }) => {
     const [searchQuery, setSearchQuery] = useState("");
     const [cartItems, setCartItems] = useState({});
     const [cartItemDetails, setCartItemDetails] = useState({});
-    const currency = import.meta.env.VITE_CURRENCY || "VND ";
+    const currency = 'VND';
     const delivery_charges = 15000;
+
+    const resolveRestaurantIdByBranch = useCallback(
+        (branchId) => {
+            if (!branchId) return null;
+            const normalized = typeof branchId === 'string' ? branchId.trim() : branchId;
+            if (!normalized) return null;
+            const branchEntry = restaurants.find(
+                (entry) => entry?.branchId === normalized || entry?.id === normalized,
+            );
+            if (!branchEntry) return null;
+            return (
+                branchEntry.brand?.id ||
+                branchEntry.brandRestaurantId ||
+                branchEntry.restaurantId ||
+                null
+            );
+        },
+        [restaurants],
+    );
 
     const refreshCatalog = useCallback(async ({ signal } = {}) => {
         if (signal?.aborted) {
@@ -1047,6 +1072,35 @@ export const AppContextProvider = ({ children }) => {
         return () => controller.abort();
     }, [refreshCatalog]);
 
+    const enrichOrdersWithPaymentDetails = useCallback(async (ordersList) => {
+        const orders = Array.isArray(ordersList) ? ordersList : [];
+        const pending = orders.filter(shouldEnrichPaymentDetails);
+        if (!pending.length) {
+            return orders;
+        }
+
+        const replacements = new Map();
+        await Promise.all(
+            pending.map(async (order) => {
+                try {
+                    const data = await ordersService.get(order.id);
+                    const adapted = adaptOrderFromApi(data);
+                    if (adapted?.id) {
+                        replacements.set(adapted.id, adapted);
+                    }
+                } catch (error) {
+                    console.warn('[orders] failed to enrich payment details for order', order.id, error);
+                }
+            }),
+        );
+
+        if (!replacements.size) {
+            return orders;
+        }
+
+        return orders.map((order) => replacements.get(order.id) || order);
+    }, []);
+
     // --- Local auth (via API Gateway) ---
     const [authToken, setAuthToken] = useState(() => localStorage.getItem('auth_token'));
     const [authProfile, setAuthProfile] = useState(() => {
@@ -1062,13 +1116,6 @@ export const AppContextProvider = ({ children }) => {
         try { return JSON.parse(localStorage.getItem('restaurant_profile') || 'null'); } catch { return null; }
     });
 
-    useEffect(() => {
-        if (!authProfileId) {
-            setCardAccounts([]);
-            return;
-        }
-        setCardAccounts(loadCardsForUser(authProfileId));
-    }, [authProfileId]);
 
     const refreshOrders = useCallback(async () => {
         if (!authToken || !authProfileId) {
@@ -1089,7 +1136,8 @@ export const AppContextProvider = ({ children }) => {
                         ? response.data
                         : [];
             const adapted = rawList.map(adaptOrderFromApi).filter(Boolean);
-            const { active, past } = splitOrdersByStatus(adapted);
+            const paymentAware = await enrichOrdersWithPaymentDetails(adapted);
+            const { active, past } = splitOrdersByStatus(paymentAware);
             setActiveOrders(active);
             setPastOrders(past);
             return { success: true, active, past };
@@ -1101,7 +1149,7 @@ export const AppContextProvider = ({ children }) => {
         } finally {
             setOrdersLoading(false);
         }
-    }, [authToken, authProfileId]);
+    }, [authToken, authProfileId, enrichOrdersWithPaymentDetails]);
 
     const refreshAddresses = useCallback(async () => {
         if (!authToken && !authProfileId) {
@@ -1202,6 +1250,7 @@ export const AppContextProvider = ({ children }) => {
         async () => {
             if (!authToken && !authProfileId) {
                 setCardAccounts([]);
+                setSelectedCardId(null);
                 return [];
             }
             try {
@@ -1213,16 +1262,26 @@ export const AppContextProvider = ({ children }) => {
                         : [];
                 const adapted = rawList.map(adaptStripeCardFromApi).filter(Boolean);
                 setCardAccounts(adapted);
+                setSelectedCardId((prev) => {
+                    if (!adapted.length) return null;
+                    const existing = adapted.find((card) => card.id === prev);
+                    if (existing) return prev;
+                    const preferred =
+                        adapted.find((card) => card.isDefault) || adapted[0] || null;
+                    return preferred ? preferred.id : null;
+                });
                 return adapted;
             } catch (error) {
                 const status = error?.response?.status;
                 if (status === 401 || status === 403) {
                     setCardAccounts([]);
+                    setSelectedCardId(null);
                     return [];
                 }
                 console.error('Failed to load cards', error);
                 toast.error('Unable to load saved cards. Please try again later.');
                 setCardAccounts([]);
+                setSelectedCardId(null);
                 return [];
             }
         },
@@ -1254,9 +1313,14 @@ export const AppContextProvider = ({ children }) => {
                 make_default: Boolean(isDefault),
             });
             const updated = await refreshCardAccounts();
-            return updated.find(
-                (card) => card?.providerData?.payment_method_id === paymentMethodId,
-            ) || null;
+            const linked =
+                updated.find(
+                    (card) => card?.providerData?.payment_method_id === paymentMethodId,
+                ) || null;
+            if (linked) {
+                setSelectedCardId(linked.id);
+            }
+            return linked;
         },
         [authProfileId, refreshCardAccounts],
     );
@@ -1268,6 +1332,7 @@ export const AppContextProvider = ({ children }) => {
     useEffect(() => {
         if (!authToken && !authProfileId) {
             setCardAccounts([]);
+            setSelectedCardId(null);
             return;
         }
         refreshCardAccounts();
@@ -1301,8 +1366,19 @@ export const AppContextProvider = ({ children }) => {
         }
         if (method === 'card' && cardAccounts.length === 0) {
             setMethod(DEFAULT_PAYMENT_METHOD);
+            setSelectedCardId(null);
+            return;
         }
-    }, [method, momoWallets.length, cardAccounts.length, setMethod]);
+        if (
+            method === 'card' &&
+            cardAccounts.length > 0 &&
+            !selectedCardId
+        ) {
+            const preferred =
+                cardAccounts.find((card) => card.isDefault) || cardAccounts[0] || null;
+            setSelectedCardId(preferred ? preferred.id : null);
+        }
+    }, [method, momoWallets.length, cardAccounts, setMethod, selectedCardId]);
 
     // --- Unified user object ---
 
@@ -1572,11 +1648,24 @@ export const AppContextProvider = ({ children }) => {
 
         const orderItems = [];
         const restaurantStats = new Map();
-        const brandStats = new Map();
-        let requiresClientPricingFallback = false;
+        const branchStats = new Map();
         const paymentMethodCanonical = normalizePaymentMethodForSubmit(
             paymentMethodOverride || method || 'cod',
         );
+        const resolvePreferredCard = () => {
+            if (paymentMethodCanonical !== 'card') return null;
+            if (!Array.isArray(cardAccounts) || !cardAccounts.length) return null;
+            if (selectedCardId) {
+                const selected = cardAccounts.find((card) => card.id === selectedCardId);
+                if (selected) return selected;
+            }
+            return cardAccounts.find((card) => card?.isDefault) || cardAccounts[0] || null;
+        };
+        const preferredCardAccount = resolvePreferredCard();
+        const paymentMethodId =
+            paymentMethodCanonical === 'card'
+                ? preferredCardAccount?.id || null
+                : null;
 
         for (const itemId in cartItems) {
             const product = products.find((item) => item._id === itemId);
@@ -1600,34 +1689,22 @@ export const AppContextProvider = ({ children }) => {
                     (baseUnitPrice - (detail?.taxAmount ?? 0));
                 const taxPerUnit = detail?.taxAmount ?? 0;
                 const unitPrice = Math.max(baseUnitPrice, 0);
-                const safeSubtotalPerUnit = Math.max(subtotalPerUnit, 0);
-                const safeTaxPerUnit = Math.max(taxPerUnit, 0);
-                const totalPerUnit = Math.max(unitPrice, safeSubtotalPerUnit + safeTaxPerUnit);
-                const totalPrice = totalPerUnit * quantity;
-
-                const productId = ensureCanonicalId(
-                    detail?.product_snapshot?.product_id,
-                    detail?.product_snapshot?.id,
-                    product._id,
-                    product.id,
-                    itemId,
-                );
-
-                const restaurantSourceId =
+                const totalPrice = unitPrice * quantity;
+                const restaurantId =
                     product.restaurantId ||
+                    product.brandRestaurantId ||
                     product.restaurant_id ||
                     detail?.product_snapshot?.restaurant_id ||
                     detail?.product_snapshot?.restaurantId ||
                     null;
 
-                if (!restaurantSourceId) {
+                if (!restaurantId) {
                     throw new Error('One or more dishes are missing restaurant information. Please try again.');
                 }
 
                 const restaurantRecord =
-                    restaurants.find((entry) => entry.id === restaurantSourceId) ||
-                    FALLBACK_RESTAURANTS.find((entry) => entry.id === restaurantSourceId) ||
-                    restaurants.find((entry) => entry.id === product.restaurantId) ||
+                    restaurants.find((entry) => entry.id === restaurantId) ||
+                    FALLBACK_RESTAURANTS.find((entry) => entry.id === restaurantId) ||
                     null;
                 const resolvedRestaurantImage =
                     restaurantRecord?.heroImage ||
@@ -1635,143 +1712,125 @@ export const AppContextProvider = ({ children }) => {
                     (Array.isArray(restaurantRecord?.images) ? restaurantRecord.images[0] : null) ||
                     restaurantPlaceholderImage;
 
-                const branchSourceId =
-                    detail?.branchId ||
-                    product.branchId ||
-                    product.inventory?.branchId ||
-                    restaurantRecord?.branchId ||
-                    restaurantRecord?.id ||
-                    restaurantSourceId;
-                const brandSourceId =
-                    product.brandRestaurantId ||
-                    product.brandId ||
-                    product.restaurantBrandId ||
-                    product.restaurant_brand_id ||
-                    restaurantRecord?.restaurant_id ||
-                    restaurantRecord?.brand?.id ||
-                    null;
-
-                if (
-                    !isUuid(product?._id) ||
-                    !isUuid(restaurantSourceId) ||
-                    (branchSourceId && !isUuid(branchSourceId)) ||
-                    (brandSourceId && !isUuid(brandSourceId))
-                ) {
-                    requiresClientPricingFallback = true;
-                }
-
-                const canonicalRestaurantId = ensureCanonicalId(
-                    restaurantSourceId,
-                    brandSourceId,
-                    product._id,
-                    product.id,
-                );
-                const canonicalBranchId = ensureCanonicalId(
-                    branchSourceId,
-                    canonicalRestaurantId,
-                    productId,
-                );
-                const canonicalBrandId = ensureCanonicalId(
-                    brandSourceId,
-                    canonicalRestaurantId,
-                    branchSourceId,
-                );
-                const statsKey = canonicalBranchId || canonicalRestaurantId;
-
-                const branchName =
-                    product.branchName ||
-                    restaurantRecord?.name ||
-                    restaurantRecord?.brand?.name ||
-                    'Restaurant';
-                const brandName =
-                    product.brandName ||
-                    restaurantRecord?.brand?.name ||
-                    restaurantRecord?.brand?.displayName ||
-                    restaurantRecord?.brand?.legalName ||
-                    branchName;
-                const brandHeroImage =
-                    restaurantRecord?.brand?.heroImage ||
-                    restaurantRecord?.brand?.coverImage ||
-                    (Array.isArray(restaurantRecord?.brand?.images)
-                        ? restaurantRecord.brand.images[0]
-                        : restaurantRecord?.brand?.images || null) ||
-                    (Array.isArray(restaurantRecord?.brand?.logo)
-                        ? restaurantRecord.brand.logo[0]
-                        : restaurantRecord?.brand?.logo || null) ||
-                    resolvedRestaurantImage;
-
-                const snapshotBase = restaurantRecord
-                    ? {
-                        id: statsKey,
-                        branchId: statsKey,
-                        branch_id: statsKey,
-                        restaurant_id: canonicalBrandId || canonicalRestaurantId,
-                        name: restaurantRecord.name,
-                        heroImage: restaurantRecord.heroImage || restaurantRecord.coverImage || resolvedRestaurantImage,
-                        image: resolvedRestaurantImage,
-                    }
-                    : {
-                        id: statsKey,
-                        branchId: statsKey,
-                        branch_id: statsKey,
-                        restaurant_id: canonicalBrandId || canonicalRestaurantId,
-                        name: 'Restaurant',
-                        heroImage: restaurantPlaceholderImage,
-                        image: restaurantPlaceholderImage,
-                    };
-
-                const existingStats = restaurantStats.get(statsKey) || {
+                const existingStats = restaurantStats.get(restaurantId) || {
                     subtotal: 0,
                     itemCount: 0,
-                    snapshot: snapshotBase,
-                };
-                existingStats.snapshot = {
-                    ...snapshotBase,
-                    ...(existingStats.snapshot || {}),
-                    id: statsKey,
-                    branchId: statsKey,
-                    branch_id: statsKey,
-                    restaurant_id: canonicalBrandId || canonicalRestaurantId,
+                    snapshot: restaurantRecord
+                        ? {
+                            id: restaurantRecord.id,
+                            name: restaurantRecord.name,
+                            heroImage: restaurantRecord.heroImage || restaurantRecord.coverImage || resolvedRestaurantImage,
+                            image: resolvedRestaurantImage,
+                        }
+                        : {
+                            id: restaurantId,
+                            name: 'Restaurant',
+                            heroImage: restaurantPlaceholderImage,
+                            image: restaurantPlaceholderImage,
+                        },
                 };
 
                 existingStats.subtotal += totalPrice;
                 existingStats.itemCount += quantity;
-                restaurantStats.set(statsKey, existingStats);
+                restaurantStats.set(restaurantId, existingStats);
 
-                if (canonicalBrandId) {
-                    const existingBrand = brandStats.get(canonicalBrandId) || {
+                const branchId =
+                    detail?.branchId ??
+                    detail?.branch_id ??
+                    product.branchId ??
+                    product.branch_id ??
+                    product.inventory?.branchId ??
+                    product.inventory?.branch_id ??
+                    null;
+
+                if (branchId) {
+                    let branchRecord = null;
+                    if (restaurantRecord && Array.isArray(restaurantRecord.branches)) {
+                        branchRecord =
+                            restaurantRecord.branches.find((entry) => entry.id === branchId) || null;
+                    }
+
+                    const branchSnapshot = branchRecord
+                        ? {
+                            id: branchRecord.id,
+                            restaurant_id: restaurantId,
+                            restaurantId,
+                            name:
+                                branchRecord.displayName ||
+                                branchRecord.name ||
+                                detail?.branchName ||
+                                branchRecord?.label ||
+                                'Branch',
+                            displayName: branchRecord.displayName || branchRecord.name || null,
+                            address:
+                                branchRecord.address ||
+                                branchRecord.formattedAddress ||
+                                detail?.branchAddress ||
+                                '',
+                            image:
+                                branchRecord.heroImage ||
+                                (Array.isArray(branchRecord.images) ? branchRecord.images[0] : null) ||
+                                detail?.branchImage ||
+                                resolvedRestaurantImage,
+                        }
+                        : {
+                            id: branchId,
+                            restaurant_id: restaurantId,
+                            restaurantId,
+                            name:
+                                detail?.branchName ||
+                                detail?.brandRestaurantName ||
+                                existingStats.snapshot?.name ||
+                                'Branch',
+                            displayName: detail?.branchName || null,
+                            address: detail?.branchAddress || '',
+                            image: detail?.branchImage || resolvedRestaurantImage,
+                        };
+
+                    const branchStatsEntry = branchStats.get(branchId) || {
                         subtotal: 0,
                         itemCount: 0,
-                        snapshot: {
-                            id: canonicalBrandId,
-                            name: brandName,
-                            heroImage: brandHeroImage,
-                            image: brandHeroImage || resolvedRestaurantImage,
-                        },
+                        restaurantId,
+                        snapshot: branchSnapshot,
                     };
-                    existingBrand.snapshot = {
-                        id: canonicalBrandId,
-                        name: brandName,
-                        heroImage: brandHeroImage,
-                        image: brandHeroImage || resolvedRestaurantImage,
-                    };
-                    existingBrand.subtotal += totalPrice;
-                    existingBrand.itemCount += quantity;
-                    brandStats.set(canonicalBrandId, existingBrand);
+                    branchStatsEntry.subtotal += totalPrice;
+                    branchStatsEntry.itemCount += quantity;
+                    branchStats.set(branchId, branchStatsEntry);
                 }
 
-                const variantSourceId =
-                    detail?.variant_id ||
-                    detail?.variantId ||
-                    (displaySize !== 'Standard' ? displaySize : null);
-                const canonicalVariantId = variantSourceId
-                    ? ensureCanonicalId(variantSourceId, `${productId}:${variantSourceId}`)
-                    : null;
-                const branchForOrder = statsKey;
+                const branchAssignments =
+                    product.branchAssignments ||
+                    product.branch_assignments ||
+                    [];
+                const matchedAssignment =
+                    branchAssignments.find((assignment) => {
+                        if (!assignment) return false;
+                        const assignmentBranchId =
+                            assignment.branch_id ||
+                            assignment.branchId ||
+                            assignment.branch;
+                        return branchId && assignmentBranchId === branchId;
+                    }) || null;
+                const branchProductIdCandidate =
+                    detail?.branchProductId ||
+                    product.branchProductId ||
+                    matchedAssignment?.id ||
+                    matchedAssignment?.branch_product_id ||
+                    matchedAssignment?.branchProductId ||
+                    null;
+                const branchCategoryIdCandidate =
+                    detail?.branchCategoryId ||
+                    product.branchCategoryId ||
+                    matchedAssignment?.branch_category_id ||
+                    matchedAssignment?.branchCategoryId ||
+                    matchedAssignment?.category_id ||
+                    product.categoryId ||
+                    product.category_id ||
+                    null;
 
                 orderItems.push({
-                    product_id: productId,
-                    variant_id: canonicalVariantId,
+                    product_id: product._id,
+                    variant_id: displaySize !== 'Standard' ? displaySize : null,
                     quantity,
                     unit_price: unitPrice,
                     total_price: totalPrice,
@@ -1780,15 +1839,18 @@ export const AppContextProvider = ({ children }) => {
                     tax_rate: detail?.taxRate ?? product.taxRate ?? 0,
                     options: detail?.options || [],
                     option_selections: detail?.options || [],
-                    branch_id: branchForOrder,
+                    branch_product_id: branchProductIdCandidate,
+                    branch_category_id: branchCategoryIdCandidate,
                     product_snapshot: {
                         title: product.title,
                         size: displaySize,
                         image: product.images?.[0],
-                        restaurant_id: canonicalBrandId || canonicalRestaurantId,
-                        restaurant_name: brandName,
-                        branch_id: branchForOrder,
-                        branch_name: branchName,
+                        restaurant_id: restaurantId,
+                        branch_id: branchId || null,
+                        restaurant_name: existingStats.snapshot?.name || restaurantRecord?.name || null,
+                        branch_name: detail?.branchName || null,
+                        branch_product_id: branchProductIdCandidate,
+                        branch_category_id: branchCategoryIdCandidate,
                     },
                 });
             }
@@ -1802,14 +1864,23 @@ export const AppContextProvider = ({ children }) => {
         if (!restaurantIds.length) {
             throw new Error('Unable to determine restaurant information for this order.');
         }
-        const brandIds = Array.from(brandStats.keys());
+        if (restaurantIds.length > 1) {
+            throw new Error('Hiện tại mỗi đơn chỉ hỗ trợ một nhà hàng. Vui lòng tách đơn hàng theo nhà hàng.');
+        }
+        const primaryRestaurantId = restaurantIds[0];
+        const branchIds = Array.from(branchStats.keys());
 
         const subtotal = orderItems.reduce((sum, item) => sum + item.total_price, 0);
         const shippingFee = subtotal === 0 ? 0 : delivery_charges;
         const discount = getDiscountAmount(subtotal);
         const totalAmount = Math.max(0, subtotal + shippingFee - discount);
-        const currencyCode = (currency || 'VND').trim() || 'VND';
-        const paymentMethod = (paymentMethodOverride || method || 'cod').toLowerCase();
+        const currencyCode = (() => {
+            const symbol = (currency || '').trim();
+            if (/^[A-Za-z]{3}$/.test(symbol)) {
+                return symbol.toUpperCase();
+            }
+            return 'VND';
+        })();
         const deliveryAddressSource = addressOverride || selectedAddress || null;
         if (!deliveryAddressSource || !deliveryAddressSource.id) {
             throw new Error('Bạn cần chọn hoặc tạo địa chỉ giao hàng trước khi đặt đơn.');
@@ -1821,15 +1892,8 @@ export const AppContextProvider = ({ children }) => {
             }
             return value ?? null;
         };
-        const deliveryAddressId =
-            ensureCanonicalId(
-                deliveryAddressSource.id,
-                deliveryAddressSource.address_id,
-                deliveryAddressSource.addressId,
-                `${user?.id || 'guest'}:${deliveryAddressSource.street || deliveryAddressSource.label || 'address'}`
-            ) || buildDeterministicUuid(`${Date.now()}:${Math.random()}`);
         const deliveryAddressSnapshot = {
-            id: deliveryAddressId,
+            id: deliveryAddressSource.id,
             label: normalizeAddressField(deliveryAddressSource.label) || 'Home',
             recipient: normalizeAddressField(deliveryAddressSource.recipient),
             phone: normalizeAddressField(deliveryAddressSource.phone),
@@ -1842,57 +1906,62 @@ export const AppContextProvider = ({ children }) => {
         if (!deliveryAddressSnapshot.street) {
             throw new Error('Địa chỉ giao hàng chưa đầy đủ. Vui lòng cập nhật lại.');
         }
+        const deliveryAddressId = deliveryAddressSnapshot.id;
+
         const restaurantSnapshots = {};
-        const branchNames = {};
-        const pricingBreakdown = {};
+        const restaurantNames = {};
+        const restaurantPricingBreakdown = {};
         restaurantIds.forEach((restaurantId) => {
             const stats = restaurantStats.get(restaurantId);
             if (!stats) return;
             restaurantSnapshots[restaurantId] = stats.snapshot;
-            pricingBreakdown[restaurantId] = {
+            restaurantNames[restaurantId] = stats.snapshot?.name || null;
+            restaurantPricingBreakdown[restaurantId] = {
                 subtotal: stats.subtotal,
                 item_count: stats.itemCount,
             };
         });
 
-        const brandSnapshots = {};
-        brandIds.forEach((brandId) => {
-            const stats = brandStats.get(brandId);
+        const branchSnapshots = {};
+        const branchNames = {};
+        const branchPricingBreakdown = {};
+        branchIds.forEach((branchId) => {
+            const stats = branchStats.get(branchId);
             if (!stats) return;
-            brandSnapshots[brandId] = stats.snapshot;
+            branchSnapshots[branchId] = stats.snapshot;
+            branchNames[branchId] = stats.snapshot?.displayName || stats.snapshot?.name || null;
+            branchPricingBreakdown[branchId] = {
+                subtotal: stats.subtotal,
+                item_count: stats.itemCount,
+            };
         });
 
         const metadata = {
             source: 'web-app',
             discount_code: appliedDiscountCode?.code || null,
-            restaurant_ids: brandIds.length ? brandIds : restaurantIds,
-            restaurant_snapshots: brandIds.length ? brandSnapshots : restaurantSnapshots,
-            branch_ids: restaurantIds,
-            branch_snapshots: restaurantSnapshots,
-            pricing_breakdown: pricingBreakdown,
+            restaurant_ids: restaurantIds,
+            restaurant_snapshots: restaurantSnapshots,
+            restaurant_names: restaurantNames,
+            pricing_breakdown: restaurantPricingBreakdown,
             delivery_address_id: deliveryAddressId,
             delivery_address: deliveryAddressSnapshot,
         };
-        if (requiresClientPricingFallback) {
-            metadata.force_client_pricing = true;
-            metadata.pricing_source = 'client';
-        } else if (!metadata.pricing_source) {
-            metadata.pricing_source = 'service';
-        }
         if (restaurantIds.length === 1) {
-            metadata.branch_id = restaurantIds[0];
-            metadata.branch_snapshot = restaurantSnapshots[restaurantIds[0]];
-            metadata.branch_name = metadata.branch_snapshot?.name || null;
+            metadata.restaurant_snapshot = restaurantSnapshots[restaurantIds[0]];
         }
-        if (brandIds.length === 1 && brandSnapshots[brandIds[0]]) {
-            metadata.restaurant_snapshot = brandSnapshots[brandIds[0]];
-            metadata.restaurant_name = brandSnapshots[brandIds[0]]?.name || null;
-        } else if (!metadata.restaurant_snapshot && restaurantIds.length === 1) {
-            metadata.restaurant_snapshot = metadata.branch_snapshot || restaurantSnapshots[restaurantIds[0]];
-            metadata.restaurant_name =
-                metadata.restaurant_snapshot?.name ||
-                metadata.branch_name ||
-                null;
+        if (branchIds.length) {
+            metadata.branch_ids = branchIds;
+            metadata.branch_snapshots = branchSnapshots;
+            metadata.branch_pricing_breakdown = branchPricingBreakdown;
+            metadata.branch_names = branchNames;
+            if (branchIds.length === 1) {
+                metadata.branch_id = branchIds[0];
+                metadata.branch_snapshot = branchSnapshots[branchIds[0]];
+            }
+        }
+        metadata.payment_method = paymentMethodCanonical;
+        if (paymentMethodId) {
+            metadata.payment_method_id = paymentMethodId;
         }
         if (notes) {
             metadata.notes = notes;
@@ -1916,7 +1985,9 @@ export const AppContextProvider = ({ children }) => {
             discount,
             total_amount: totalAmount,
             currency: currencyCode,
-            payment_method: paymentMethod,
+            payment_method: paymentMethodCanonical,
+            payment_method_id: paymentMethodId,
+            fulfillment_type: 'delivery',
             delivery_address: deliveryAddressSnapshot,
             delivery_address_id: deliveryAddressId,
             selectedAddress: deliveryAddressSnapshot,
@@ -1924,11 +1995,6 @@ export const AppContextProvider = ({ children }) => {
             selectedAddressId: deliveryAddressId,
             selected_address_id: deliveryAddressId,
             metadata,
-            force_client_pricing: requiresClientPricingFallback,
-            forceClientPricing: requiresClientPricingFallback,
-            forcePricingFallback: requiresClientPricingFallback,
-            pricing_mode: requiresClientPricingFallback ? 'client' : 'service',
-            pricingMode: requiresClientPricingFallback ? 'client' : 'service',
             delivery: {
                 delivery_address: deliveryAddressSnapshot,
                 contact_name: deliveryContactName,
@@ -1940,13 +2006,12 @@ export const AppContextProvider = ({ children }) => {
             payload.user_id = user.id;
             payload.userId = user.id;
         }
-        if (brandIds.length === 1) {
-            payload.restaurant_id = brandIds[0];
-        } else if (restaurantIds.length === 1) {
-            payload.restaurant_id = restaurantIds[0];
+        payload.restaurant_id = primaryRestaurantId;
+        if (branchIds.length === 1) {
+            payload.branch_id = branchIds[0];
         }
-        if (restaurantIds.length === 1) {
-            payload.branch_id = restaurantIds[0];
+        if (paymentMethodId) {
+            payload.paymentMethodId = paymentMethodId;
         }
 
         try {
@@ -1964,14 +2029,33 @@ export const AppContextProvider = ({ children }) => {
                 const tasks = createdList.map(async (orderRecord, index) => {
                     try {
                         const paymentAmount = Number(orderRecord.total_amount) || adaptedList[index]?.totalAmount || 0;
+                        const paymentRestaurantId =
+                            orderRecord.restaurant_id ||
+                            orderRecord.restaurantId ||
+                            (paymentBranchId ? resolveRestaurantIdByBranch(paymentBranchId) : null) ||
+                            primaryRestaurantId ||
+                            orderRecord.metadata?.restaurant_id ||
+                            null;
+                        const paymentBranchId =
+                            orderRecord.branch_id ||
+                            orderRecord.branchId ||
+                            (branchIds.length === 1 ? branchIds[0] : null) ||
+                            orderRecord.metadata?.branch_id ||
+                            null;
+
                         const paymentPayload = {
                             order_id: orderRecord.id,
                             user_id: user.id,
                             amount: paymentAmount,
                             currency: currencyCode,
-                            payment_method: paymentMethod,
+                            payment_method: paymentMethodCanonical,
                             idempotency_key: `order-${orderRecord.id}`,
+                            restaurant_id: paymentRestaurantId,
+                            branch_id: paymentBranchId,
                         };
+                        if (paymentMethodId) {
+                            paymentPayload.payment_method_id = paymentMethodId;
+                        }
                         const paymentRecord = await paymentsService.createPayment(paymentPayload);
                         if (paymentRecord?.status && adaptedList[index]) {
                             adaptedList[index].paymentStatus = paymentRecord.status;
@@ -2026,10 +2110,14 @@ export const AppContextProvider = ({ children }) => {
         currency,
         method,
         selectedAddress,
+        authProfile,
         appliedDiscountCode,
         restaurants,
         clearCart,
         refreshOrders,
+        cardAccounts,
+        selectedCardId,
+        resolveRestaurantIdByBranch,
     ]);
 
     // Persist owner flag
@@ -2144,7 +2232,9 @@ export const AppContextProvider = ({ children }) => {
                     await refreshAddresses();
                     toast.success('Saved your pending address.');
                 }
-            } catch { }
+            } catch {
+                // ignore persistence failures
+            }
             return { type: 'customer', response: res, user: sanitizedUser || res?.user || null };
         };
 
@@ -2261,10 +2351,15 @@ export const AppContextProvider = ({ children }) => {
         setSelectedAddressId(null);
         setMomoWallets([]);
         setCardAccounts([]);
+        setSelectedCardId(null);
         setCustomerProfileOpen(false);
+        setIsOwner(false);
+        setRestaurantProfile(null);
         localStorage.removeItem('auth_token');
         localStorage.removeItem('auth_profile');
         localStorage.removeItem('pending_user_id');
+        localStorage.removeItem('restaurant_token');
+        localStorage.removeItem('restaurant_profile');
         toast('Logged out');
     };
 
@@ -2519,6 +2614,8 @@ export const AppContextProvider = ({ children }) => {
         refreshMomoWallets,
         linkMomoWallet,
         cardAccounts,
+        selectedCardId,
+        setSelectedCardId,
         refreshCardAccounts,
         createStripeSetupIntent,
         linkCard: linkPaymentCard,
@@ -2549,3 +2646,6 @@ export const AppContextProvider = ({ children }) => {
 };
 
 export const useAppContext = () => useContext(AppContext);
+
+
+

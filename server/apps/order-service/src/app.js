@@ -22,6 +22,7 @@ app.get('/health', (_req, res) => {
 
 app.use('/api/orders', ordersRouter);
 
+
 // Support both legacy `/api/...` and simplified `/...` prefixes
 const mountScopedRoute = (path, middleware, handler) => {
   app.use(path, auth, middleware, handler);

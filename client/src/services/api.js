@@ -11,29 +11,17 @@ export const api = axios.create({
 
 // Attach Authorization header if token exists
 api.interceptors.request.use((config) => {
-  const customerToken = localStorage.getItem('auth_token');
-  const ownerToken = localStorage.getItem('restaurant_token');
+  config.headers = config.headers || {};
 
-  const requestUrl = typeof config?.url === 'string' ? config.url.toLowerCase() : '';
-  const forceOwnerToken =
-    requestUrl.startsWith('/owner/') ||
-    requestUrl.startsWith('/api/owner/') ||
-    requestUrl.startsWith('/restaurant/') ||
-    requestUrl.startsWith('/api/restaurants');
-
-  let token = null;
-  if (forceOwnerToken && ownerToken) {
-    token = ownerToken;
-  } else if (customerToken && !forceOwnerToken) {
-    token = customerToken;
-  } else {
-    token = ownerToken || customerToken;
+  if (!config.headers.Authorization) {
+    const customerToken = localStorage.getItem('auth_token');
+    const ownerToken = localStorage.getItem('restaurant_token');
+    const token = customerToken || ownerToken;
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
   }
 
-  if (token) {
-    config.headers = config.headers || {};
-    config.headers.Authorization = `Bearer ${token}`;
-  }
   return config;
 });
 
@@ -57,4 +45,3 @@ api.interceptors.response.use(
 );
 
 export default api;
-

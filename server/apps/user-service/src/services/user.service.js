@@ -5,9 +5,7 @@ const bcrypt = require('../utils/bcrypt');
 const jwt = require('../utils/jwt');
 const amqp = require('amqplib');
 
-// ===============================
-// OTP
-// ===============================
+// ===// OTP
 function generateOTP() {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
@@ -44,9 +42,7 @@ async function sendEmailToQueue(payload) {
   }
 }
 
-// ===============================
-// Register
-// ===============================
+// ===// Register
 async function register(payload) {
   const existing = await userModel.findByEmail(payload.email);
   if (existing) throw new Error('Email already used');
@@ -79,9 +75,7 @@ async function register(payload) {
   return { message: 'User created.' };
 }
 
-// ===============================
-// Verify OTP
-// ===============================
+// ===// Verify OTP
 async function verifyOTP(email, otp) {
   const user = await userModel.findByEmail(email);
   if (!user) throw new Error('User not found');
@@ -91,9 +85,7 @@ async function verifyOTP(email, otp) {
   return { message: 'Email verified. You can login now.' };
 }
 
-// ===============================
-// Login
-// ===============================
+// ===// Login
 async function login({ email, password }) {
   const user = await userModel.findByEmail(email);
   if (!user) throw new Error('Invalid credentials');
@@ -108,9 +100,7 @@ async function login({ email, password }) {
   return { message: 'Login successful', user, token };
 }
 
-// ===============================
-// Admin Approve Restaurant
-// ===============================
+// ===// Admin Approve Restaurant
 async function approveRestaurant(email) {
   const user = await userModel.findByEmail(email);
   if (!user) throw new Error('Restaurant not found');

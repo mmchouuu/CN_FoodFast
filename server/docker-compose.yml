@@ -13,13 +13,16 @@ services:
       - order-service
       - payment-service
       - rabbitmq
+    volumes:                      
+      - ./apps/api-gateway/certs:/app/certs:ro
     networks:
       - backend_net
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
+      test: ["CMD-SHELL", "curl -fk https://localhost:8080/health || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 5
+
 
   # User Service
   user-service:

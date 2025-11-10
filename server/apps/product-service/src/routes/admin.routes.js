@@ -9,3 +9,4 @@ router.post('/calendars', adminController.createCalendar);
 router.post('/promotions/global', adminController.createGlobalPromotion);
 
 module.exports = router;
+

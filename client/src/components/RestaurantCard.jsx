@@ -7,6 +7,7 @@ import {
 } from "../utils/imageHelpers";
 
 const RestaurantCard = ({ restaurant, variant = "default" }) => {
+
   if (!restaurant) return null;
 
   const coverImage = pickFirstImageUrl(

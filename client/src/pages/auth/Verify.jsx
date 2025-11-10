@@ -8,6 +8,7 @@ const Verify = () => {
   const { verifyOtp } = useAppContext();
   const navigate = useNavigate();
   const location = useLocation();
+
   const defaultEmail = location?.state?.email || "";
   const defaultUserId = location?.state?.userId || (() => {
     try {
@@ -148,3 +149,4 @@ const Verify = () => {
 };
 
 export default Verify;
+

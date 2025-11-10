@@ -6,6 +6,7 @@
   <path fill="#FBBC04" d="M0 168l64-54.9L144 224 0 320V168z"/>
   <path fill="#C5221F" d="M512 168v152l-144 96V224l144-56z"/>
   <path fill="#F1F3F4" d="M144 224v248H48c-26.5 0-48-21.5-48-48V320l144-96z"/>
+<<<<<<< HEAD
 </svg>
 =======
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
@@ -15,5 +16,8 @@
   <path fill="#FBBC04" d="M0 168l64-54.9L144 224 0 320V168z"/>
   <path fill="#C5221F" d="M512 168v152l-144 96V224l144-56z"/>
   <path fill="#F1F3F4" d="M144 224v248H48c-26.5 0-48-21.5-48-48V320l144-96z"/>
+</svg>
+>>>>>>> origin/mchau
+=======
 </svg>
 >>>>>>> origin/mchau

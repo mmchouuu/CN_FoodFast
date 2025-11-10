@@ -1,3 +1,4 @@
+
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import toast from "react-hot-toast";
 import { dishPlaceholderImage } from "../../utils/imageHelpers";
@@ -3395,6 +3396,3 @@ const MenuManagement = () => {
 };
 
 export default MenuManagement;
-
-
-

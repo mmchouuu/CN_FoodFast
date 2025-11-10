@@ -80,7 +80,11 @@ exports.getPaymentById = async (req, res) => {
 exports.createPayment = async (req, res) => {
   const body = req.body || {};
   try {
-    const userId = resolveUserId(req, body);
+    const userId =
+      body.user_id ||
+      body.userId ||
+      resolveUserId(req, body);
+
     if (!userId) {
       return res.status(401).json({ error: 'user id is required' });
     }
@@ -108,6 +112,12 @@ exports.createPayment = async (req, res) => {
         ? 'cash'
         : 'online';
 
+    const paymentMethodId =
+      body.payment_method_id ||
+      body.paymentMethodId ||
+      (body.payment && (body.payment.payment_method_id || body.payment.paymentMethodId)) ||
+      null;
+
     const payment = await paymentsService.handlePaymentPending({
       order_id: orderId,
       user_id: userId,
@@ -117,6 +127,8 @@ exports.createPayment = async (req, res) => {
       currency: body.currency || 'VND',
       flow,
       method: body.payment_method || body.paymentMethod || null,
+      payment_method_id: paymentMethodId,
+
       idempotency_key: body.idempotency_key || body.idempotencyKey || null,
       metadata: body.metadata || {},
     });

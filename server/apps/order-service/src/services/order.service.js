@@ -36,6 +36,15 @@ const sanitizeStatus = (value, allowed, fallback) => {
   return match || fallback;
 };
 
+const normalizeCurrency = (value) => {
+  if (!value || typeof value !== 'string') return 'VND';
+  const trimmed = value.trim();
+  if (/^[a-zA-Z]{3}$/.test(trimmed)) {
+    return trimmed.toUpperCase();
+  }
+  return 'VND';
+};
+
 let hasMetadataColumnCache;
 let hasPaymentMethodColumnCache;
 
@@ -387,6 +396,12 @@ const normalizeOrderItem = (raw, index) => {
         : true,
     product_id: raw.product_id || raw.productId || raw.id || null,
     branch_product_id: raw.branch_product_id || raw.branchProductId || null,
+    branch_category_id:
+      raw.branch_category_id ||
+      raw.branchCategoryId ||
+      snapshot?.branch_category_id ||
+      snapshot?.branchCategoryId ||
+      null,
     title,
     image: raw.image || raw.product_image || raw.productImage || snapshot?.image || null,
     category_id: raw.category_id || raw.categoryId || null,
@@ -529,6 +544,7 @@ const parseItemRow = (row) => ({
   is_priced: row.is_priced,
   product_id: row.product_id,
   branch_product_id: row.branch_product_id,
+  branch_category_id: row.branch_category_id,
   title: row.title,
   image: row.image,
   category_id: row.category_id,
@@ -552,7 +568,7 @@ const attachOrderRelations = async (orderRows) => {
   const [itemsRes, deliveriesRes] = await Promise.all([
     pool.query(
       `SELECT id, order_id, parent_item_id, item_kind, is_priced, product_id, branch_product_id,
-              title, image, category_id, unit_price, quantity, addons_total, line_subtotal,
+              branch_category_id, title, image, category_id, unit_price, quantity, addons_total, line_subtotal,
               line_discount, line_tax, line_total, product_snapshot
        FROM order_items
        WHERE order_id = ANY($1::uuid[])`,
@@ -715,7 +731,12 @@ const createOrder = async (payload, userContext = null) => {
       throw new OrderValidationError('restaurant_id is required');
     }
 
-    const branchId = deriveBranchId(payload, items);
+    const branchId =
+      payload.branch_id ||
+      payload.branchId ||
+      (payload.metadata && (payload.metadata.branch_id || payload.metadata.branchId)) ||
+      null;
+
 
     const deliveryInput =
       payload.delivery ||
@@ -791,10 +812,7 @@ const createOrder = async (payload, userContext = null) => {
       (payload.payment && (payload.payment.info || payload.payment.details || payload.payment.metadata)) ||
       null;
 
-    const currency =
-      typeof payload.currency === 'string' && payload.currency.trim()
-        ? payload.currency.trim().toUpperCase()
-        : 'VND';
+    const currency = normalizeCurrency(payload.currency);
 
     const orderMetadata = buildOrderMetadata({
       payload,
@@ -900,6 +918,7 @@ const createOrder = async (payload, userContext = null) => {
           is_priced,
           product_id,
           branch_product_id,
+          branch_category_id,
           title,
           image,
           category_id,
@@ -913,7 +932,8 @@ const createOrder = async (payload, userContext = null) => {
           product_snapshot
         )
         VALUES (
-          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17
+          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18
+
         )`,
         [
           orderRow.id,
@@ -922,6 +942,7 @@ const createOrder = async (payload, userContext = null) => {
           item.is_priced,
           item.product_id,
           item.branch_product_id,
+          item.branch_category_id,
           item.title,
           item.image,
           item.category_id,

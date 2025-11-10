@@ -26,6 +26,7 @@ const Signup = () => {
     setLoading(true);
     setError("");
     try {
+
       const result = await signupWithCredentials({
         firstName: firstName.trim(),
         lastName: lastName.trim(),

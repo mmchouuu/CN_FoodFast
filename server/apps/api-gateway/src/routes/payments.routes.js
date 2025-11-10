@@ -109,11 +109,24 @@
 // module.exports = router;
 
 const express = require('express');
-const { createProxyMiddleware } = require('http-proxy-middleware');
+const http = require('http');
+const https = require('https');
 const jwt = require('jsonwebtoken');
 
 const router = express.Router();
 const PAYMENT_SERVICE = process.env.PAYMENT_SERVICE_URL || 'http://payment-service:3004';
+const paymentServiceUrl = new URL(PAYMENT_SERVICE);
+const isPaymentServiceHttps = paymentServiceUrl.protocol === 'https:';
+
+// Detect if PAYMENT_SERVICE already targets /api/payments to avoid double-prefix routes
+let targetAlreadyIncludesPaymentsPath = false;
+try {
+  const normalizedPath = paymentServiceUrl.pathname.replace(/\/$/, '');
+  targetAlreadyIncludesPaymentsPath =
+    normalizedPath === '/api/payments' || normalizedPath.endsWith('/api/payments');
+} catch (err) {
+  targetAlreadyIncludesPaymentsPath = /\/api\/payments\/?$/.test(PAYMENT_SERVICE);
+}
 
 // ===========================
 // 🔹 AUTH MIDDLEWARE
@@ -164,43 +177,73 @@ router.use('/', authMiddleware, (req, res, next) => {
 // ===========================
 // 🔹 PROXY TO PAYMENT-SERVICE
 // ===========================
-router.use(
-  '/',
-  createProxyMiddleware({
-    target: PAYMENT_SERVICE,
-    changeOrigin: true,
+const forwardToPaymentService = (req, res) => {
+  const userId = req.user?.userId || req.user?.id || req.user?.sub;
+  const headers = { ...req.headers };
+  headers.host = paymentServiceUrl.host;
+  if (userId) {
+    headers['x-user-id'] = userId;
+  }
 
-    // 🧩 Always forward the full /api/payments prefix expected by payment-service
-    pathRewrite: (path) => {
-      if (!path || path === '/') {
-        return '/api/payments';
+  const rawBody =
+    Buffer.isBuffer(req.rawBody) && req.rawBody.length > 0
+      ? req.rawBody
+      : req.body && Object.keys(req.body).length > 0
+        ? Buffer.from(JSON.stringify(req.body))
+        : null;
+
+  if (rawBody) {
+    headers['content-length'] = rawBody.length;
+    if (!headers['content-type']) {
+      headers['content-type'] = 'application/json';
+    }
+  } else {
+    delete headers['content-length'];
+  }
+
+  const originalPath = req.originalUrl || req.url || '/';
+  const suffix = originalPath.replace(/^\/api\/payments/, '') || '/';
+  let targetPath = originalPath;
+  if (targetAlreadyIncludesPaymentsPath) {
+    const basePath = paymentServiceUrl.pathname.replace(/\/$/, '');
+    targetPath = `${basePath}${suffix.startsWith('/') ? suffix : `/${suffix}`}` || '/';
+  }
+
+  const requestOptions = {
+    protocol: paymentServiceUrl.protocol,
+    hostname: paymentServiceUrl.hostname,
+    port: paymentServiceUrl.port || (isPaymentServiceHttps ? 443 : 80),
+    method: req.method,
+    path: targetPath,
+    headers,
+  };
+
+  const transport = isPaymentServiceHttps ? https : http;
+  const proxyReq = transport.request(requestOptions, (proxyRes) => {
+    res.status(proxyRes.statusCode || 500);
+    Object.entries(proxyRes.headers || {}).forEach(([key, value]) => {
+      if (typeof value !== 'undefined') {
+        res.setHeader(key, value);
       }
-      return `/api/payments${path.startsWith('/') ? path : `/${path}`}`;
-    },
+    });
+    proxyRes.pipe(res);
+  });
 
-    // 🧩 Forward body safely (do NOT call proxyReq.end)
-    onProxyReq(proxyReq, req) {
-      const userId = req.user?.userId || req.user?.id || req.user?.sub;
-      if (userId) proxyReq.setHeader('x-user-id', userId);
+  proxyReq.on('error', (err) => {
+    console.error('[Gateway → PaymentService ERROR]', err.message);
+    if (!res.headersSent) {
+      res.status(502).json({ error: 'bad gateway', detail: err.message });
+    } else {
+      res.end();
+    }
+  });
 
-      // Only forward body if it exists
-      if (req.body && Object.keys(req.body).length > 0) {
-        const bodyData = JSON.stringify(req.body);
-        proxyReq.setHeader('Content-Type', 'application/json');
-        proxyReq.setHeader('Content-Length', Buffer.byteLength(bodyData));
-        proxyReq.write(bodyData);
-      }
-    },
+  if (rawBody) {
+    proxyReq.write(rawBody);
+  }
+  proxyReq.end();
+};
 
-    // Better error visibility
-    onError: (err, req, res) => {
-      console.error('[Gateway → PaymentService ERROR]', err.message);
-      if (!res.headersSent) {
-        res.status(502).json({ error: 'bad gateway', detail: err.message });
-      }
-    },
-  })
-);
+router.use('/', forwardToPaymentService);
 
 module.exports = router;
-

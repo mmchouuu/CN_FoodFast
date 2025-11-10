@@ -197,6 +197,33 @@ async function listPayments({
   };
 }
 
+async function findLatestPaymentsByOrderIds(orderIds = []) {
+  if (!Array.isArray(orderIds) || !orderIds.length) {
+    return [];
+  }
+
+  const res = await pool.query(
+    `
+      SELECT DISTINCT ON (p.order_id)
+        p.*,
+        pm.type   AS method_type,
+        pm.provider AS method_provider,
+        pm.brand  AS method_brand,
+        pm.last4  AS method_last4,
+        pm.exp_month AS method_exp_month,
+        pm.exp_year  AS method_exp_year,
+        pm.provider_data AS method_provider_data
+      FROM payments p
+      LEFT JOIN payment_methods pm ON pm.id = p.payment_method_id
+      WHERE p.order_id = ANY($1::uuid[])
+      ORDER BY p.order_id, p.created_at DESC
+    `,
+    [orderIds],
+  );
+
+  return res.rows;
+}
+
 async function listRefunds({
   status,
   restaurantId,
@@ -262,6 +289,7 @@ async function listRefunds({
   };
 }
 
+
 module.exports = {
   pool,
   createPayment,
@@ -273,5 +301,6 @@ module.exports = {
   insertPaymentLog,
   listPayments,
   listRefunds,
+  findLatestPaymentsByOrderIds,
 };
 

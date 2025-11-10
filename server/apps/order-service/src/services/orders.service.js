@@ -2,7 +2,8 @@
 
 const { pool } = require('../db');
 const productClient = require('../clients/product.client');
-const { publishOrderEvent, ensureQueueReady } = require('../utils/rabbitmq');
+const paymentClient = require('../clients/payment.client');
+const { publishOrderEvent } = require('../utils/rabbitmq');
 
 const ALLOW_CLIENT_PRICING_FALLBACK = process.env.ALLOW_CLIENT_PRICING_FALLBACK === 'true';
 const DEFAULT_CURRENCY = 'VND';
@@ -111,10 +112,21 @@ const toNumber = (value, fallback = 0) => {
   return Number.isFinite(numeric) ? numeric : fallback;
 };
 
+const dispatchOrderEvent = (eventType, payload, contextLabel = null) => {
+  publishOrderEvent(eventType, payload).catch((error) => {
+    const scope = contextLabel ? ` (${contextLabel})` : '';
+    console.error(`[order-service] Failed to publish ${eventType} event${scope}:`, error);
+  });
+};
+
 const toCurrency = (currency) => {
   if (!currency || typeof currency !== 'string') return DEFAULT_CURRENCY;
   const trimmed = currency.trim();
-  return trimmed.length ? trimmed.toUpperCase() : DEFAULT_CURRENCY;
+  if (!trimmed.length) return DEFAULT_CURRENCY;
+  if (/^[a-zA-Z]{3}$/.test(trimmed)) {
+    return trimmed.toUpperCase();
+  }
+  return DEFAULT_CURRENCY;
 };
 
 const ensureArray = (value) => {
@@ -137,6 +149,21 @@ const determinePaymentFlow = (methodRaw) => {
   if (!methodRaw) return 'cash';
   const method = String(methodRaw).trim().toLowerCase();
   return PAYMENT_FLOWS[method] || 'cash';
+};
+
+const normalisePaymentFlowFlag = (flowRaw) => {
+  if (!flowRaw || typeof flowRaw !== 'string') return null;
+  const flow = flowRaw.trim().toLowerCase();
+  if (!flow.length) return null;
+  if (
+    ['online', 'card', 'wallet', 'stripe', 'momo', 'zalopay', 'visa', 'mastercard'].includes(flow)
+  ) {
+    return 'online';
+  }
+  if (['cash', 'cod', 'cash_on_delivery', 'cash-on-delivery'].includes(flow)) {
+    return 'cash';
+  }
+  return flow;
 };
 
 const normaliseOrderStatus = (statusRaw) => {
@@ -179,44 +206,6 @@ const extractRestaurantScope = (user = {}) => {
   );
 };
 
-async function resolveOwnerRestaurantScope(user = {}) {
-  const directScope = extractRestaurantScope(user);
-  if (directScope.length) {
-    return directScope;
-  }
-
-  const ownerId = resolveUserId(user);
-  if (!ownerId) {
-    return [];
-  }
-
-  try {
-    const restaurants = await productClient.listRestaurantsByOwner(ownerId);
-    const items = Array.isArray(restaurants) ? restaurants : [];
-    const ids = unique(
-      items
-        .map((item) => item && (item.id || item.restaurant_id || item.restaurantId || null))
-        .filter(Boolean)
-        .map((value) => value.toString().trim())
-        .filter((value) => value.length),
-    );
-
-    if (ids.length) {
-      const merged = unique([...(user.restaurant_ids || []), ...ids]);
-      user.restaurant_ids = merged;
-      user.restaurantIds = merged;
-    }
-
-    return ids;
-  } catch (error) {
-    console.error(
-      '[order-service] failed to resolve owner restaurant scope:',
-      error?.message || error,
-    );
-    return [];
-  }
-}
-
 const extractBranchScope = (user = {}) => {
   const list = ensureArray(user.branch_ids)
     .concat(ensureArray(user.branchIds))
@@ -232,6 +221,88 @@ const extractBranchScope = (user = {}) => {
       .filter((value) => value && value.length),
   );
 };
+
+async function fetchOwnerRestaurantsFromProduct(user = {}) {
+  if (user.__ownerRestaurantsCache) {
+    return user.__ownerRestaurantsCache;
+  }
+
+  const ownerId = resolveUserId(user);
+  if (!ownerId) {
+    user.__ownerRestaurantsCache = [];
+    return [];
+  }
+
+  try {
+    const restaurants = await productClient.listRestaurantsByOwner(ownerId);
+    const items = Array.isArray(restaurants?.items)
+      ? restaurants.items
+      : Array.isArray(restaurants)
+        ? restaurants
+        : [];
+    user.__ownerRestaurantsCache = items;
+    return items;
+  } catch (error) {
+    console.error(
+      '[order-service] failed to load owner restaurants:',
+      error?.message || error,
+    );
+    user.__ownerRestaurantsCache = [];
+    return [];
+  }
+}
+
+async function resolveOwnerRestaurantScope(user = {}) {
+  const directScope = extractRestaurantScope(user);
+  if (directScope.length) {
+    return directScope;
+  }
+
+  const restaurants = await fetchOwnerRestaurantsFromProduct(user);
+  const ids = unique(
+    restaurants
+      .map((item) => item && (item.id || item.restaurant_id || item.restaurantId || null))
+      .filter(Boolean)
+      .map((value) => value.toString().trim())
+      .filter((value) => value.length),
+  );
+
+  if (ids.length) {
+    const merged = unique([...(user.restaurant_ids || []), ...ids]);
+    user.restaurant_ids = merged;
+    user.restaurantIds = merged;
+  }
+
+  return ids;
+}
+
+async function resolveOwnerBranchScope(user = {}) {
+  const directScope = extractBranchScope(user);
+  if (directScope.length) {
+    return directScope;
+  }
+
+  const restaurants = await fetchOwnerRestaurantsFromProduct(user);
+  const branchIds = unique(
+    restaurants
+      .flatMap((restaurant) =>
+        (Array.isArray(restaurant?.branches) ? restaurant.branches : []).map(
+          (branch) => branch && (branch.id || branch.branch_id || branch.branchId || null),
+        ),
+      )
+      .filter(Boolean)
+      .map((value) => value.toString().trim())
+      .filter((value) => value.length),
+  );
+
+  if (branchIds.length) {
+    const merged = unique([...(user.branch_ids || []), ...branchIds]);
+    user.branch_ids = merged;
+    user.branchIds = merged;
+  }
+
+  return branchIds;
+}
 
 const normaliseFulfillmentType = (value) => {
   if (!value || typeof value !== 'string') return 'delivery';
@@ -287,6 +358,7 @@ function computePricingTotals(items, overrides = {}) {
     currency: toCurrency(overrides.currency || DEFAULT_CURRENCY),
   };
 }
+
 
 const normaliseOptionEntry = (entry) => {
   if (!entry) return null;
@@ -362,21 +434,36 @@ const normaliseQuoteItem = (item, index) => {
   const taxes = ensureArray(item.taxes || item.tax_breakdown || item.taxBreakdown)
     .map(normaliseTaxEntry)
     .filter(Boolean);
+  const snapshot =
+    item.product_snapshot ||
+    item.snapshot ||
+    item.product ||
+    item.catalog_snapshot ||
+    item.catalog ||
+    {};
+  const branchProductId =
+    item.branch_product_id ||
+    item.branchProductId ||
+    snapshot.branch_product_id ||
+    snapshot.branchProductId ||
+    null;
+  const branchCategoryId =
+    item.branch_category_id ||
+    item.branchCategoryId ||
+    snapshot.branch_category_id ||
+    snapshot.branchCategoryId ||
+    null;
 
   return {
     product_id: productId,
     variant_id: variantId,
+    branch_product_id: branchProductId,
+    branch_category_id: branchCategoryId,
     quantity,
     unit_price: Number(unitPrice.toFixed(2)),
     total_price: Number(totalPrice.toFixed(2)),
     discount_total: Number(discount.toFixed(2)),
-    product_snapshot:
-      item.product_snapshot ||
-      item.snapshot ||
-      item.product ||
-      item.catalog_snapshot ||
-      item.catalog ||
-      {},
+    product_snapshot: snapshot,
     options,
     taxes,
     name: item.name || item.product_name || null,
@@ -625,6 +712,9 @@ const enrichMetadata = ({ payload, pricing, payment, user }) => {
   paymentMeta.status = payment.status;
   paymentMeta.amount = pricing.totals.total_amount;
   paymentMeta.currency = pricing.totals.currency;
+  if (payment.payment_method_id !== undefined) {
+    paymentMeta.payment_method_id = payment.payment_method_id;
+  }
 
   const pricingMeta =
     base.pricing && typeof base.pricing === 'object' ? { ...base.pricing } : {};
@@ -754,9 +844,11 @@ async function insertOrderGraph({
           product_snapshot,
           quantity,
           unit_price,
-          total_price
+          total_price,
+          branch_product_id,
+          branch_category_id
         )
-        VALUES ($1,$2,$3,$4,$5,$6,$7)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
         RETURNING *
       `,
       [
@@ -767,6 +859,8 @@ async function insertOrderGraph({
         item.quantity,
         item.unit_price,
         item.total_price,
+        item.branch_product_id || null,
+        item.branch_category_id || null,
       ],
     );
     const inserted = itemResult.rows[0];
@@ -1146,6 +1240,15 @@ async function fetchOrdersByIds(orderIds, { client, includeEvents = false, inclu
   }
 
   const hydratedOrders = [];
+  let paymentSummaries = [];
+  try {
+    paymentSummaries = await paymentClient.lookupPayments(orderIds);
+  } catch (error) {
+    paymentSummaries = [];
+  }
+  const paymentsByOrder = new Map(
+    paymentSummaries.map((summary) => [summary.order_id, summary]),
+  );
   for (const orderId of orderIds) {
     const orderRow = ordersById.get(orderId);
     if (!orderRow) continue;
@@ -1176,6 +1279,12 @@ async function fetchOrdersByIds(orderIds, { client, includeEvents = false, inclu
 
     if (includeRevisions) {
       order.revisions = revisionsByOrder.get(orderId) || [];
+    }
+
+    if (paymentsByOrder.has(orderId)) {
+      order.payment_details = paymentsByOrder.get(orderId);
+    } else {
+      order.payment_details = null;
     }
 
     hydratedOrders.push(order);
@@ -1251,9 +1360,38 @@ async function createCustomerOrder({ user, payload = {}, context = {} }) {
   if (!userId) {
     throw new ValidationError('unable to resolve current user');
   }
-  if (!payload.restaurant_id) {
+  let branchId = normaliseUuid(payload.branch_id || payload.branchId || null);
+  let restaurantId = normaliseUuid(payload.restaurant_id || payload.restaurantId || null);
+
+  if (branchId) {
+    try {
+      const branchInfo = await productClient.fetchBranchById(branchId);
+      if (!branchInfo) {
+        throw new ValidationError('branch not found');
+      }
+      const resolvedRestaurantId = normaliseUuid(branchInfo.restaurant_id || branchInfo.restaurantId);
+      if (!resolvedRestaurantId) {
+        throw new ValidationError('Unable to resolve restaurant for branch');
+      }
+      if (!restaurantId || restaurantId === branchId) {
+        restaurantId = resolvedRestaurantId;
+      }
+      branchId = branchInfo.id || branchId;
+    } catch (error) {
+      if (error instanceof ValidationError) {
+        throw error;
+      }
+      throw new ValidationError('Unable to resolve branch information', {
+        reason: error.message,
+      });
+    }
+  }
+
+  if (!restaurantId) {
     throw new ValidationError('restaurant_id is required');
   }
+  payload.restaurant_id = restaurantId;
+  payload.branch_id = branchId || payload.branch_id || null;
   if (!Array.isArray(payload.items) || !payload.items.length) {
     throw new ValidationError('order items are required');
   }
@@ -1263,12 +1401,20 @@ async function createCustomerOrder({ user, payload = {}, context = {} }) {
   const paymentMethod = String(paymentMethodRaw).trim().toLowerCase() || 'cod';
   const paymentFlow = determinePaymentFlow(paymentMethod);
 
+  const paymentMethodIdRaw =
+    payload.payment_method_id ||
+    payload.paymentMethodId ||
+    (payload.payment &&
+      (payload.payment.payment_method_id || payload.payment.paymentMethodId)) ||
+    null;
+  const paymentMethodId =
+    paymentFlow === 'cash' ? null : normaliseUuid(paymentMethodIdRaw);
+
   const pricing = await computePricingSnapshot({ userId, payload, context });
 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-
     const order = await insertOrderGraph({
       client,
       userId,
@@ -1278,6 +1424,7 @@ async function createCustomerOrder({ user, payload = {}, context = {} }) {
         method: paymentMethod,
         flow: paymentFlow,
         status: paymentFlow === 'online' ? 'pending' : 'unpaid',
+        payment_method_id: paymentMethodId,
       },
     });
 
@@ -1294,6 +1441,7 @@ async function createCustomerOrder({ user, payload = {}, context = {} }) {
       payload: {
         payment_method: paymentMethod,
         payment_flow: paymentFlow,
+        payment_method_id: paymentMethodId,
         totals: pricing.totals,
       },
     });
@@ -1315,6 +1463,7 @@ async function createCustomerOrder({ user, payload = {}, context = {} }) {
         restaurant_id: order.restaurant_id,
         total: pricing.totals.total_amount,
         payment_method: paymentMethod,
+        payment_method_id: paymentMethodId,
         flow: paymentFlow,
       },
     });
@@ -1323,17 +1472,24 @@ async function createCustomerOrder({ user, payload = {}, context = {} }) {
 
     const finalOrder = await fetchOrderById(order.id);
 
-    try {
-      await ensureQueueReady();
-      await publishOrderEvent('order.created', {
+    dispatchOrderEvent(
+      'order.created',
+      {
         order_id: order.id,
         user_id: order.user_id,
         restaurant_id: order.restaurant_id,
         amount: pricing.totals.total_amount,
         currency: pricing.totals.currency,
-      });
+        payment_method: paymentMethod,
+        payment_method_id: paymentMethodId,
+        flow: paymentFlow,
+      },
+      'order.created',
+    );
 
-      await publishOrderEvent('PaymentPending', {
+    dispatchOrderEvent(
+      'PaymentPending',
+      {
         order_id: order.id,
         user_id: order.user_id,
         restaurant_id: order.restaurant_id,
@@ -1341,11 +1497,11 @@ async function createCustomerOrder({ user, payload = {}, context = {} }) {
         currency: pricing.totals.currency,
         flow: paymentFlow,
         method: paymentMethod,
+        payment_method_id: paymentMethodId,
         branch_id: order.branch_id,
-      });
-    } catch (eventError) {
-      console.error('[order-service] Failed to publish order events:', eventError);
-    }
+      },
+      'PaymentPending',
+    );
 
     return finalOrder;
   } catch (error) {
@@ -1621,34 +1777,50 @@ async function handlePaymentEvent(event = {}) {
     }
 
     if (eventType === 'PaymentSucceeded') {
-      const nextStatus = order.status === 'pending' ? 'confirmed' : order.status;
-      await client.query(
-        `
-          UPDATE orders
-          SET payment_status = 'paid',
-              status = $1,
-              updated_at = now()
-          WHERE id = $2
-        `,
-        [nextStatus, orderId],
+      const paymentFlow = normalisePaymentFlowFlag(
+        payload.flow ||
+          payload.payment_flow ||
+          payload.paymentFlow ||
+          payload.flow_type ||
+          payload.payment_type ||
+          null,
       );
+      const shouldMarkPaid = !paymentFlow || paymentFlow === 'online';
 
-      await logOrderEvent(client, {
-        orderId,
-        eventType: 'PaymentSucceeded',
-        payload,
-      });
+      if (shouldMarkPaid) {
+        await client.query(
+          `
+            UPDATE orders
+            SET payment_status = 'paid',
+                updated_at = now()
+            WHERE id = $1
+          `,
+          [orderId],
+        );
 
-      await enqueueOutbox(client, {
-        aggregateType: 'Order',
-        aggregateId: orderId,
-        eventType: 'order.payment_succeeded',
-        payload: {
-          order_id: orderId,
-          payment_id: payload.payment_id || null,
-          amount: payload.amount,
-        },
-      });
+        await logOrderEvent(client, {
+          orderId,
+          eventType: 'PaymentSucceeded',
+          payload,
+        });
+
+        await enqueueOutbox(client, {
+          aggregateType: 'Order',
+          aggregateId: orderId,
+          eventType: 'order.payment_succeeded',
+          payload: {
+            order_id: orderId,
+            payment_id: payload.payment_id || null,
+            amount: payload.amount,
+          },
+        });
+      } else {
+        await logOrderEvent(client, {
+          orderId,
+          eventType: 'PaymentSucceeded',
+          payload: { ...payload, ignored: true, reason: 'non_online_flow' },
+        });
+      }
     } else if (eventType === 'PaymentFailed') {
       await client.query(
         `
@@ -1872,16 +2044,15 @@ async function cancelCustomerOrder({ user, orderId, payload = {} }) {
 
     const updated = await fetchOrderById(orderId);
 
-    try {
-      await ensureQueueReady();
-      await publishOrderEvent('order.status_updated', {
+    dispatchOrderEvent(
+      'order.status_updated',
+      {
         order_id: orderId,
         status: 'cancelled',
         actor: userId,
-      });
-    } catch (eventError) {
-      console.error('[order-service] Failed to publish cancellation event:', eventError);
-    }
+      },
+      'customer-cancel',
+    );
 
     return updated;
   } catch (error) {
@@ -1893,20 +2064,13 @@ async function cancelCustomerOrder({ user, orderId, payload = {} }) {
 }
 
 async function listOwnerOrders({ user, query = {} }) {
-  const limit = Math.min(Math.max(Number(query.limit) || 20, 1), 100);
-  const offset = Math.max(Number(query.offset) || 0, 0);
-
   const restaurantScope = await resolveOwnerRestaurantScope(user);
   if (!restaurantScope.length) {
-    return {
-      data: [],
-      pagination: {
-        limit,
-        offset,
-        total: 0,
-      },
-    };
+    throw new ForbiddenError('owner does not manage any restaurants');
   }
+
+  const limit = Math.min(Math.max(Number(query.limit) || 20, 1), 100);
+  const offset = Math.max(Number(query.offset) || 0, 0);
 
   const client = await pool.connect();
   try {
@@ -1927,12 +2091,14 @@ async function listOwnerOrders({ user, query = {} }) {
       }
     }
 
-    if (query.branch_id) {
-      const branchId = normaliseUuid(query.branch_id);
-      if (branchId) {
-        params.push(branchId);
-        whereClause += ` AND branch_id = $${params.length}`;
+    const branchId = normaliseUuid(query.branch_id);
+    if (branchId && branchId !== 'all') {
+      const branchScope = await resolveOwnerBranchScope(user);
+      if (branchScope.length && !branchScope.includes(branchId)) {
+        throw new ForbiddenError('owner does not manage this branch');
       }
+      params.push(branchId);
+      whereClause += ` AND branch_id = $${params.length}`;
     }
 
     if (query.start_date) {
@@ -2076,17 +2242,16 @@ async function updateOwnerOrderStatus({ user, orderId, payload = {} }) {
 
     const updated = await fetchOrderById(orderId);
 
-    try {
-      await ensureQueueReady();
-      await publishOrderEvent('order.status_updated', {
+    dispatchOrderEvent(
+      'order.status_updated',
+      {
         order_id: orderId,
         previous: order.status,
         next: nextStatus,
         actor: resolveUserId(user),
-      });
-    } catch (eventError) {
-      console.error('[order-service] Failed to publish status update event:', eventError);
-    }
+      },
+      'owner-status-update',
+    );
 
     return updated;
   } catch (error) {

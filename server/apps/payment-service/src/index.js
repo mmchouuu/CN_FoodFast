@@ -10,6 +10,7 @@ const auth = require('./middlewares/auth');
 const requireRoles = require('./middlewares/authorize');
 const customerPaymentRoutes = require('./routes/payments.customer.routes');
 const adminPaymentRoutes = require('./routes/payments.admin.routes');
+const internalPaymentRoutes = require('./routes/payments.internal.routes');
 const { startOrderConsumer } = require('./consumers/order.consumer');
 
 const app = express();
@@ -53,6 +54,7 @@ const ensureUserContext = (req, res, next) => {
   return res.status(401).json({ error: 'missing user context' });
 };
 
+app.use('/internal/payments', internalPaymentRoutes);
 app.use('/api/payments/webhook', webhookRoutes);
 app.use('/api/payments', ensureUserContext, paymentRoutes);
 
@@ -81,5 +83,3 @@ app.listen(port, () => console.log(`payment-service listening ${port}`));
 startOrderConsumer().catch((error) => {
   console.error('[payment-service] Failed to start order consumer:', error);
 });
-
-

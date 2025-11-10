@@ -1,5 +1,7 @@
 const express = require('express');
 const { createProxyMiddleware } = require('http-proxy-middleware');
+const forwardProxyBody = require('../utils/forwardProxyBody');
+
 const router = express.Router();
 
 const PRODUCT_SERVICE = process.env.PRODUCT_SERVICE_URL || 'http://product-service:3002';
@@ -13,6 +15,7 @@ router.use(
       const suffix = !path || path === '/' ? '' : path;
       return `/api/products${suffix}`;
     },
+    onProxyReq: forwardProxyBody,
     onError: (err, req, res) =>
       res.status(502).json({ error: 'bad gateway', detail: err.message }),
   })

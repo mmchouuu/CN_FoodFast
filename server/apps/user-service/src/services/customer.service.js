@@ -50,7 +50,6 @@ async function ensureCustomerRole(client) {
 
 
 // Customer register -> gửi OTP để verify email
-
 async function registerCustomer(payload) {
   const { email, password, firstName, lastName, phone } = payload || {};
   if (!email || !password) {
@@ -69,9 +68,7 @@ async function registerCustomer(payload) {
       const roles = await userRepository.getUserRoleCodes(existing.id, client);
       if (roles.includes('customer') && existing.email_verified) {
         throw createError('Email already registered', 409);
-      }
-
-      user = await userRepository.updateUser(
+      } user = await userRepository.updateUser(
         existing.id,
         {
           firstName: firstName ?? existing.first_name,
@@ -106,8 +103,8 @@ async function registerCustomer(payload) {
         passwordHash,
         isTemp: false,
       },
-
       client,
+
     );
     await userRepository.createCustomerProfile(user.id, client);
 

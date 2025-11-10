@@ -217,6 +217,3 @@ const StatusPill = ({ status }) => (
 );
 
 export default Dashboard;
-
-
-

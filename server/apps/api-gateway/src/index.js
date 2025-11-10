@@ -1,4 +1,5 @@
-// // api-gateway/src/index.js
+﻿// // api-gateway/src/index.js
+
 // require('dotenv').config();
 // const fs = require('fs');
 // const path = require('path');
@@ -9,6 +10,7 @@
 // const requestId = require('./middlewares/requestId');
 // const errorHandler = require('./middlewares/errorHandler');
 // const health = require('./health');
+
 // const customersRoutes = require('./routes/customers.routes');
 // const restaurantsRoutes = require('./routes/restaurants.routes');
 // const adminRoutes = require('./routes/admin.routes');
@@ -18,6 +20,7 @@
 // const ownerOrderRoutes = require('./routes/orders.owner.routes');
 // const adminOrderRoutes = require('./routes/orders.admin.routes');
 // const app = express();
+
 // // ======================================================
 // // 🔹 Capture raw body BEFORE body-parser consumes it
 // // ======================================================
@@ -31,6 +34,7 @@
 //   });
 //   next();
 // });
+
 // // ======================================================
 // // 🔹 Parse body (JSON / urlencoded) with verify hook too
 // // ======================================================
@@ -51,6 +55,7 @@
 //     },
 //   })
 // );
+
 // // ======================================================
 // // 🔹 CORS + RequestID + Routes
 // // ======================================================
@@ -68,6 +73,7 @@
 //   next();
 // });
 // app.use(requestId);
+
 // app.use('/api/customers', customersRoutes);
 // app.use('/api/customer', customersRoutes);
 // app.use('/api/restaurants', restaurantsRoutes);
@@ -79,6 +85,8 @@
 // app.use('/admin/orders', adminOrderRoutes);
 // app.get('/health', health);
 // app.use(errorHandler);
+
+
 // // ======================================================
 // // 🔹 HTTPS startup
 // // ======================================================
@@ -99,6 +107,7 @@
 //     return null;
 //   }
 // };
+
 // const httpsOptions = buildHttpsOptions();
 // if (httpsOptions) {
 //   https.createServer(httpsOptions, app).listen(config.port, () => {
@@ -109,6 +118,7 @@
 //     console.log(`API Gateway listening on port ${config.port}`);
 //   });
 // }
+
 require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
@@ -119,15 +129,6 @@ const config = require('./config');
 const requestId = require('./middlewares/requestId');
 const errorHandler = require('./middlewares/errorHandler');
 const health = require('./health');
-const stripeContentSecurityPolicy = [
-  "default-src 'self'",
-  "script-src 'self' 'unsafe-inline' https://js.stripe.com https://workable-basilisk-31.clerk.accounts.dev https://*.clerk.dev https://*.clerk.com",
-  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-  "font-src 'self' data: https://fonts.gstatic.com",
-  "frame-src 'self' https://js.stripe.com https://hooks.stripe.com https://workable-basilisk-31.clerk.accounts.dev https://*.clerk.dev https://*.clerk.com",
-  "connect-src 'self' https://localhost:8080 https://api.stripe.com https://m.stripe.network https://m.stripe.com https://q.stripe.com https://api.clerk.dev https://workable-basilisk-31.clerk.accounts.dev https://*.clerk.dev https://*.clerk.com",
-  "img-src 'self' data: https://q.stripe.com https://m.stripe.network https://m.stripe.com https://b.stripecdn.com https://images.clerk.dev https://img.clerk.com",
-].join('; ');
 const customersRoutes = require('./routes/customers.routes');
 const restaurantsRoutes = require('./routes/restaurants.routes');
 const adminRoutes = require('./routes/admin.routes');
@@ -137,46 +138,35 @@ const customerOrderRoutes = require('./routes/orders.customer.routes');
 const ownerOrderRoutes = require('./routes/orders.owner.routes');
 const adminOrderRoutes = require('./routes/orders.admin.routes');
 const app = express();
+
 // ======================================================
-// 🔹 Capture raw body BEFORE body-parser consumes it
+// 🔹 Body parsing (preserve raw body for signature verification)
 // ======================================================
-app.use((req, res, next) => {
-  const chunks = [];
-  req.on('data', chunk => chunks.push(chunk));
-  req.on('end', () => {
-    if (chunks.length > 0) {
-      req.rawBody = Buffer.concat(chunks);
-    }
-  });
-  next();
-});
-// ======================================================
-// 🔹 Parse JSON / urlencoded with verify hook
-// ======================================================
+const captureRawBody = (req, res, buf) => {
+  if (buf && buf.length) {
+    req.rawBody = Buffer.from(buf);
+  }
+};
+
 app.use(
   bodyParser.json({
     limit: '50mb',
-    verify: (req, res, buf) => {
-      if (buf && buf.length && !req.rawBody) req.rawBody = Buffer.from(buf);
-    },
-  })
+    verify: captureRawBody,
+  }),
 );
 app.use(
   bodyParser.urlencoded({
     limit: '50mb',
     extended: true,
-    verify: (req, res, buf) => {
-      if (buf && buf.length && !req.rawBody) req.rawBody = Buffer.from(buf);
-    },
-  })
+    verify: captureRawBody,
+  }),
 );
+
+
 // ======================================================
 // 🔹 CORS + Request ID
 // ======================================================
-app.use((req, res, next) => {
-  res.setHeader('Content-Security-Policy', stripeContentSecurityPolicy);
-  next();
-});
+
 app.use((req, res, next) => {
   const origin = req.headers.origin || '*';
   res.header('Access-Control-Allow-Origin', origin);
@@ -184,14 +174,13 @@ app.use((req, res, next) => {
   res.header('Access-Control-Allow-Credentials', 'true');
   res.header(
     'Access-Control-Allow-Headers',
-    'Origin, X-Requested-With, Content-Type, Accept, Authorization, x-request-id',
+    'Origin, X-Requested-With, Content-Type, Accept, Authorization, x-request-id'
   );
   res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-  if (req.method === 'OPTIONS') {
-    return res.sendStatus(204);
-  }
-  return next();
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
 });
+
 app.use(requestId);
 app.use('/api/customers', customersRoutes);
 app.use('/api/customer', customersRoutes);
@@ -204,6 +193,7 @@ app.use('/owner/orders', ownerOrderRoutes);
 app.use('/admin/orders', adminOrderRoutes);
 app.get('/health', health);
 app.use(errorHandler);
+
 // ======================================================
 // 🔹 HTTPS Startup
 // ======================================================
@@ -224,6 +214,7 @@ const buildHttpsOptions = () => {
     return null;
   }
 };
+
 const httpsOptions = buildHttpsOptions();
 if (httpsOptions) {
   https.createServer(httpsOptions, app).listen(config.port, () => {

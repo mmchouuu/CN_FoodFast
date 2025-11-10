@@ -114,11 +114,24 @@ async function updateBranchSchedules(req, res, next) {
   }
 }
 
+
 async function inviteMember(req, res, next) {
   try {
     const { restaurantId } = req.params;
     const result = await restaurantService.inviteRestaurantMember(restaurantId, req.body || {});
     res.status(201).json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function getBranchById(req, res, next) {
+  try {
+    const branch = await restaurantService.getBranchByUuid(req.params.branchId);
+    if (!branch) {
+      return res.status(404).json({ message: 'Branch not found' });
+    }
+    return res.json(branch);
   } catch (error) {
     next(error);
   }
@@ -136,4 +149,5 @@ module.exports = {
   deleteBranch,
   updateBranchSchedules,
   inviteMember,
+  getBranchById,
 };

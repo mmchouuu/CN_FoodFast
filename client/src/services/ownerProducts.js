@@ -330,6 +330,4 @@ const ownerProductService = {
     return data;
   },
 };
-
 export default ownerProductService;
-

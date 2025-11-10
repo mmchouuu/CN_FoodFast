@@ -155,4 +155,3 @@ const StatusBadge = ({ status }) => (
 );
 
 export default AccountManagement;
-

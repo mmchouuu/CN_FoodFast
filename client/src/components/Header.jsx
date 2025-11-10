@@ -50,6 +50,7 @@ const Header = () => {
     [notifications]
   );
 
+
   useEffect(() => {
     setMenuOpen(false);
     closeCustomerProfilePanel();

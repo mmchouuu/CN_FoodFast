@@ -89,19 +89,31 @@ async function quoteOrderPricing(payload, { authorization } = {}) {
   throw error;
 }
 
-async function listRestaurantsByOwner(ownerId, { authorization } = {}) {
+async function fetchBranchById(branchId) {
+  if (!branchId) {
+    throw new Error('branchId is required');
+  }
+  const { status, data } = await sendJsonRequest(`/api/restaurants/branches/by-id/${branchId}`, {
+    method: 'GET',
+  });
+  if (status === 404) return null;
+  if (status >= 200 && status < 300) {
+    return data;
+  }
+  const error = new Error(
+    (data && (data.error || data.message)) || 'failed to load branch from product-service',
+  );
+  error.status = status;
+  throw error;
+}
+
+async function listRestaurantsByOwner(ownerId) {
   if (!ownerId) {
     return [];
   }
 
-  const headers = {};
-  if (authorization) {
-    headers.Authorization = authorization;
-  }
-
   const { status, data } = await sendJsonRequest(`/api/restaurants/owner/${ownerId}/list`, {
     method: 'GET',
-    headers,
   });
 
   if (status >= 200 && status < 300) {
@@ -115,7 +127,8 @@ async function listRestaurantsByOwner(ownerId, { authorization } = {}) {
   }
 
   const error = new Error(
-    (data && (data.error || data.message)) || 'failed to load restaurants for owner from product-service',
+    (data && (data.error || data.message)) ||
+      'failed to load restaurants by owner from product-service',
   );
   error.status = status;
   error.data = data;
@@ -124,6 +137,7 @@ async function listRestaurantsByOwner(ownerId, { authorization } = {}) {
 
 module.exports = {
   quoteOrderPricing,
+  fetchBranchById,
   listRestaurantsByOwner,
 };
 

@@ -5,11 +5,14 @@ import {
   restaurantPlaceholderImage,
   dishPlaceholderImage,
 } from "../utils/imageHelpers";
+import { buildRestaurantLink } from "../utils/orderHelpers";
+import resolvePaymentSummary from "../utils/paymentSummary";
 
 const StatusDot = ({ completed }) => (
   <span
-    className={`inline-block h-3 w-3 rounded-full ${completed ? "bg-green-500" : "bg-gray-300"
-      }`}
+    className={`inline-block h-3 w-3 rounded-full ${
+      completed ? "bg-green-500" : "bg-gray-300"
+    }`}
   />
 );
 
@@ -32,9 +35,9 @@ const buildTrackingSteps = (status, placedAt) => {
   );
   const placedTime = placedAt
     ? new Date(placedAt).toLocaleTimeString([], {
-      hour: "2-digit",
-      minute: "2-digit",
-    })
+        hour: "2-digit",
+        minute: "2-digit",
+      })
     : null;
 
   return ORDER_STATUS_STEPS.map((step, index) => {
@@ -222,7 +225,10 @@ const OrderDetails = () => {
     [order.status, order.placedAt],
   );
   const totals = useMemo(() => resolveTotals(order), [order]);
-
+  const paymentSummary = useMemo(
+    () => resolvePaymentSummary(order),
+    [order],
+  );
 
   return (
     <div className="max-padd-container space-y-8 py-24">
@@ -247,7 +253,7 @@ const OrderDetails = () => {
             <p className="mt-1 text-sm text-gray-500">
               Restaurant:{" "}
               <Link
-                to={`/restaurants/${order.restaurantId}`}
+                to={buildRestaurantLink(order)}
                 className="font-semibold text-orange-500 hover:underline"
               >
                 {restaurantDisplay.name}
@@ -260,7 +266,7 @@ const OrderDetails = () => {
             Status: {order.status}
           </span>
           <span className="inline-flex items-center rounded-full bg-gray-100 px-4 py-2 text-sm font-semibold text-gray-700">
-            Payment: {order.paymentStatus || "pending"}
+            Payment: {paymentSummary.status}
           </span>
           <Link
             to="/orders/history"
@@ -278,29 +284,21 @@ const OrderDetails = () => {
               Order timeline
             </h2>
             <div className="mt-6 space-y-4">
-              {timeline.length ? (
-                timeline.map((step) => (
-                  <div key={step.id || step.label} className="flex items-start gap-4">
-                    <StatusDot completed={Boolean(step.completed)} />
-                    <div>
-                      <p
-                        className={`text-sm font-semibold ${step.completed ? "text-gray-900" : "text-gray-500"
-                          }`}
-                      >
-                        {step.label}
-                      </p>
-                      <p className="text-xs text-gray-400">
-                        {step.timestamp || "Pending"}
-                      </p>
-                    </div>
+              {timeline.map((step) => (
+                <div key={step.id} className="flex items-start gap-4">
+                  <StatusDot completed={Boolean(step.completed)} />
+                  <div>
+                    <p
+                      className={`text-sm font-semibold ${
+                        step.completed ? "text-gray-900" : "text-gray-500"
+                      }`}
+                    >
+                      {step.label}
+                    </p>
+                    <p className="text-xs text-gray-400">{step.timestamp}</p>
                   </div>
-                ))
-              ) : (
-                <p className="text-sm text-gray-500">
-                  Timeline updates will appear here as the restaurant progresses
-                  your order.
-                </p>
-              )}
+                </div>
+              ))}
             </div>
           </div>
 
@@ -347,15 +345,16 @@ const OrderDetails = () => {
                 );
               })}
             </ul>
+
             <div className="mt-4 border-t border-gray-200 pt-4 text-sm text-gray-600">
               <div className="flex justify-between">
                 <span>Subtotal</span>
                 <span className="font-semibold">
                   {currency}
-                  {order.subtotal.toLocaleString()}
+                  {totals.subtotal.toLocaleString()}
 
-                </span >
-              </div >
+                </span>
+              </div>
               <div className="flex justify-between text-gray-500">
                 <span>Shipping</span>
                 <span>
@@ -368,76 +367,74 @@ const OrderDetails = () => {
                 <span>
                   {currency}
                   {totals.vat.toLocaleString()}
-                </span >
-              </div >
+
+                </span>
+              </div>
               <div className="flex justify-between text-green-600">
                 <span>Discount</span>
                 <span>
                   -{currency}
-
-                  {order.discount.toLocaleString()}
-
-                </span >
-              </div >
+                  {totals.discount.toLocaleString()}
+                </span>
+              </div>
               <div className="mt-3 flex justify-between text-lg font-bold text-gray-900">
                 <span>Total</span>
                 <span>
                   {currency}
-                  {order.totalAmount.toLocaleString()}
-                  origin/mchau
-                </span >
-              </div >
-            </div >
-          </div >
-        </div >
+                  {totals.total.toLocaleString()}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
 
-  <aside className="space-y-6">
-    <div className="rounded-3xl bg-white p-6 shadow-sm">
-      <h3 className="text-sm font-semibold uppercase text-gray-400">
-        Payment
-      </h3>
-      <p className="mt-2 text-base font-semibold text-gray-900">
-        Method: {order.paymentMethod}
-      </p>
-      <p className="text-sm text-gray-500">
-        Status: {order.paymentStatus || "pending"}
-      </p>
-      <p className="mt-2 text-xs text-gray-400">
-        Reference: {order.metadata?.payment?.reference || "N/A"}
-      </p>
-    </div>
+        <aside className="space-y-6">
+          <div className="rounded-3xl bg-white p-6 shadow-sm">
+            <h3 className="text-sm font-semibold uppercase text-gray-400">
+              Payment
+            </h3>
+            <p className="mt-2 text-base font-semibold text-gray-900">
+              Method: {paymentSummary.method}
+            </p>
+            <p className="text-sm text-gray-500">
+              Status: {paymentSummary.status}
+            </p>
+            <p className="mt-2 text-xs text-gray-400">
+              Reference: {paymentSummary.reference}
+            </p>
+          </div>
 
-    <div className="rounded-3xl bg-white p-6 shadow-sm">
-      <h3 className="text-sm font-semibold uppercase text-gray-400">
-        Delivery address
-      </h3>
-      <p className="mt-2 text-sm text-gray-600">
-        {deliveryAddressLine
-          ? deliveryAddressLine
-          : "Address not provided."}
-      </p>
-      {deliveryAddress.instructions ? (
-        <p className="mt-2 text-xs text-gray-400">
-          Note: {deliveryAddress.instructions}
-        </p>
-      ) : null}
-    </div>
+          <div className="rounded-3xl bg-white p-6 shadow-sm">
+            <h3 className="text-sm font-semibold uppercase text-gray-400">
+              Delivery address
+            </h3>
+            <p className="mt-2 text-sm text-gray-600">
+              {deliveryAddressLine
+                ? deliveryAddressLine
+                : "Address not provided."}
+            </p>
+            {deliveryAddress.instructions ? (
+              <p className="mt-2 text-xs text-gray-400">
+                Note: {deliveryAddress.instructions}
+              </p>
+            ) : null}
+          </div>
 
-    <div className="rounded-3xl bg-white p-6 shadow-sm">
-      <h3 className="text-sm font-semibold uppercase text-gray-400">
-        Need help?
-      </h3>
-      <p className="mt-2 text-sm text-gray-600">
-        If something doesn&apos;t look right, get in touch with support
-        and share your order reference.
-      </p>
-      <button className="mt-4 w-full rounded-full border border-gray-200 px-5 py-3 text-sm font-semibold text-gray-600 transition hover:border-orange-300 hover:text-orange-500">
-        Contact support
-      </button>
+          <div className="rounded-3xl bg-white p-6 shadow-sm">
+            <h3 className="text-sm font-semibold uppercase text-gray-400">
+              Need help?
+            </h3>
+            <p className="mt-2 text-sm text-gray-600">
+              If something doesn&apos;t look right, get in touch with support
+              and share your order reference.
+            </p>
+            <button className="mt-4 w-full rounded-full border border-gray-200 px-5 py-3 text-sm font-semibold text-gray-600 transition hover:border-orange-300 hover:text-orange-500">
+              Contact support
+            </button>
+          </div>
+        </aside>
+      </section>
     </div>
-  </aside>
-      </section >
-    </div >
   );
 };
 

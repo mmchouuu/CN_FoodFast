@@ -9,6 +9,7 @@ router.post('/', restaurantController.createRestaurant);
 router.get('/catalog', catalogController.listCatalog);
 router.get('/owner/:ownerId', restaurantController.getByOwner);
 router.get('/owner/:ownerId/list', restaurantController.listByOwner);
+router.get('/branches/by-id/:branchId', restaurantController.getBranchById);
 router.get('/:restaurantId/catalog', catalogController.getCatalog);
 router.get('/:restaurantId', restaurantController.getRestaurant);
 router.put('/:restaurantId', restaurantController.updateRestaurant);

@@ -3,7 +3,38 @@ import toast from "react-hot-toast";
 import { useNavigate } from "react-router-dom";
 import { useAppContext } from "../context/AppContext";
 
+const normalizePaymentMethodForSubmit = (value) => {
+  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (!normalized) return "cod";
+  if (normalized === "wallet" || normalized === "cod" || normalized === "cash" || normalized === "cash_on_delivery") {
+    return "cod";
+  }
+  if (normalized === "bank") {
+    return "bank_transfer";
+  }
+  if (normalized === "bank_transfer") {
+    return "bank_transfer";
+  }
+  if (normalized === "credit" || normalized === "debit") {
+    return "card";
+  }
+  return normalized;
+};
+
+const getActivePaymentOptionId = (value) => {
+  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (!normalized) return "";
+  if (normalized === "cod" || normalized === "cash" || normalized === "cash_on_delivery") {
+    return "wallet";
+  }
+  if (normalized === "bank_transfer") {
+    return "bank";
+  }
+  return normalized;
+};
+
 const Checkout = () => {
+
   const {
     getCartAmount,
     delivery_charges,
@@ -11,7 +42,9 @@ const Checkout = () => {
     applyDiscountCode,
     appliedDiscountCode,
     momoWallets,
-    cardAccounts: contextCardAccounts,
+    cardAccounts,
+    selectedCardId,
+    setSelectedCardId,
     method,
     setMethod,
     addresses,
@@ -23,8 +56,6 @@ const Checkout = () => {
     addNewAddress,
     openCustomerProfilePanel,
   } = useAppContext();
-  const walletAccounts = Array.isArray(momoWallets) ? momoWallets : [];
-  const cardAccounts = Array.isArray(contextCardAccounts) ? contextCardAccounts : [];
 
   const [discountCode, setDiscountCode] = useState(
     appliedDiscountCode?.code || ""
@@ -50,6 +81,10 @@ const Checkout = () => {
     { id: "custom", label: "Other" },
   ];
   const navigate = useNavigate();
+  const activePaymentMethodId = useMemo(
+    () => getActivePaymentOptionId(method),
+    [method],
+  );
 
   const subtotal = getCartAmount();
   const discount = getDiscountAmount(subtotal);
@@ -67,8 +102,8 @@ const Checkout = () => {
       },
       {
         id: "wallet",
-        label: "FoodFast wallet",
-        description: "Use your wallet balance linked to bank accounts.",
+        label: "MoMo wallet",
+        description: "Pay via your linked MoMo wallet for instant confirmation.",
       },
       {
         id: "card",
@@ -79,17 +114,40 @@ const Checkout = () => {
     [],
   );
 
+  const getCardLabel = (card) => {
+    const brand = (card.brand || "CARD").toUpperCase();
+    const last4 = card.last4 || card.providerData?.last4 || "0000";
+    return `${brand} •••• ${last4}`;
+  };
+
+  const getCardExpiry = (card) => {
+    const expMonth = card.expMonth ?? card.exp_month;
+    const expYear = card.expYear ?? card.exp_year;
+    if (!expMonth || !expYear) return null;
+    const paddedMonth = String(expMonth).padStart(2, "0");
+    const shortYear = String(expYear).slice(-2);
+    return `${paddedMonth}/${shortYear}`;
+  };
+
   useEffect(() => {
+    // const normalized = typeof method === "string" ? method.trim().toLowerCase() : "";
+    // if (normalized === "bank" || normalized === "bank_transfer") {
+    //   if (momoWallets.length === 0) {
+    //     setMethod("wallet");
+    //     return;
+    //   }
+    // }
+    // if (normalized === "card" && cardAccounts.length === 0) {
+    //   setMethod("wallet");
     const fallbackMethod = paymentMethods[0]?.id || "cod";
-    if (method === "wallet" && walletAccounts.length === 0) {
+    if (method === "wallet" && momoWallets.length === 0) {
       setMethod(fallbackMethod);
       return;
     }
     if (method === "card" && cardAccounts.length === 0) {
       setMethod(fallbackMethod);
     }
-
-  }, [method, walletAccounts.length, cardAccounts.length, setMethod, paymentMethods]);
+  }, [method, momoWallets.length, cardAccounts.length, setMethod, paymentMethods]);
 
   const handleApplyDiscount = () => {
     applyDiscountCode(discountCode);
@@ -105,7 +163,13 @@ const Checkout = () => {
       return;
     }
     setIsPlacingOrder(true);
+    const paymentMethodForSubmit = normalizePaymentMethodForSubmit(method);
     try {
+
+      // await placeOrder({ paymentMethod: paymentMethodForSubmit, address: selectedAddress });
+      // toast.success("Order confirmed! We're preparing your meal.");
+      // navigate("/orders/current");
+
       await placeOrder({ paymentMethod: method, address: selectedAddress });
       toast.success("Order successful");
       navigate("/my-orders");
@@ -398,10 +462,12 @@ const Checkout = () => {
           </p>
           <div className="mt-6 grid gap-4 md:grid-cols-3">
             {paymentMethods.map((option) => {
+              // const isSelected = activePaymentMethodId === option.id;
+              // const isBank = option.id === "bank";
               const isSelected = method === option.id;
               const isWallet = option.id === "wallet";
               const isCard = option.id === "card";
-              const walletUnavailable = isWallet && walletAccounts.length === 0;
+              const walletUnavailable = isWallet && momoWallets.length === 0;
               const cardUnavailable = isCard && cardAccounts.length === 0;
               const isDisabled = walletUnavailable || cardUnavailable;
 
@@ -410,9 +476,9 @@ const Checkout = () => {
                   ? "1 saved card ready to use."
                   : `${cardAccounts.length} saved cards ready to use.`;
               const walletBankLabel =
-                walletAccounts.length === 1
-                  ? "1 linked account ready to use."
-                  : `${walletAccounts.length} linked accounts ready to use.`;
+                momoWallets.length === 1
+                  ? "1 linked wallet ready to use."
+                  : `${momoWallets.length} linked wallets ready to use.`;
               return (
                 <button
                   key={option.id}
@@ -448,7 +514,7 @@ const Checkout = () => {
                             openCustomerProfilePanel();
                           }}
                         >
-                          Link a bank account in your profile panel.
+                          Link a MoMo wallet in your profile panel.
                         </span>
                       ) : (
                         <span className="text-emerald-600">
@@ -481,6 +547,65 @@ const Checkout = () => {
             })}
           </div>
         </div>
+
+        {method === "card" && cardAccounts.length > 0 ? (
+          <div className="mt-4 rounded-3xl border border-orange-200 bg-orange-50/30 p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-semibold text-gray-900">
+                  Select a saved card
+                </p>
+                <p className="text-xs text-gray-500">
+                  Choose which card you want to charge for this order.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="text-xs font-semibold text-orange-500 hover:text-orange-600"
+                onClick={openCustomerProfilePanel}
+              >
+                Manage cards
+              </button>
+            </div>
+            <div className="mt-4 space-y-3">
+              {cardAccounts.map((card) => {
+                const cardId = card.id;
+                const isSelectedCard = selectedCardId
+                  ? selectedCardId === cardId
+                  : Boolean(card.isDefault);
+                const expiry = getCardExpiry(card);
+                return (
+                  <label
+                    key={cardId}
+                    className={`flex cursor-pointer items-center justify-between rounded-2xl border bg-white px-4 py-3 transition ${
+                      isSelectedCard
+                        ? "border-orange-500 ring-2 ring-orange-100"
+                        : "border-gray-200 hover:border-orange-300"
+                    }`}
+                  >
+                    <div>
+                      <p className="text-sm font-semibold text-gray-900">
+                        {getCardLabel(card)}
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        {expiry ? `Expires ${expiry}` : "Expiration unavailable"}
+                        {card.isDefault ? " • Default card" : ""}
+                      </p>
+                    </div>
+                    <input
+                      type="radio"
+                      name="selected-card"
+                      className="h-4 w-4 text-orange-500 focus:ring-orange-400"
+                      checked={isSelectedCard}
+                      onChange={() => setSelectedCardId(cardId)}
+                    />
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
+
 
         <div className="rounded-3xl bg-white p-8 shadow-sm">
           <h2 className="text-xl font-semibold text-gray-900">

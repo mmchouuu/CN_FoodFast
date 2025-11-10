@@ -12,6 +12,8 @@ const Sidebar = () => {
     { path: '/owner/profile', label: 'Restaurant Info', icon: assets.house },
     { path: '/owner/menu', label: 'Dish Management', icon: assets.list },
     { path: '/owner/orders', label: 'Order Management', icon: assets.graph },
+    { path: '/owner/settlements', label: 'Settlement Reports', icon: assets.secure },
+    { path: '/owner/cash-settlement', label: 'Cash Settlement', icon: assets.returnRequest },
     { path: '/owner/shippers', label: 'Shipper Management', icon: assets.delivery },
     { path: '/owner/assignments', label: 'Assign Orders', icon: assets.forward },
     { path: '/owner/tracking', label: 'Delivery Tracking', icon: assets.map },

@@ -1085,6 +1085,7 @@ export const dummyProducts = [
     date: 1716634345467,
     popular: true,
     inStock:true,
+
   },
 ];
 
