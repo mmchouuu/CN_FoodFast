@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAppContext } from "../context/AppContext";
 import {
@@ -24,6 +24,9 @@ const ORDER_STATUS_STEPS = [
   { key: "delivering", label: "Delivering" },
   { key: "completed", label: "Completed" },
 ];
+
+const CANCELLABLE_STATUSES = new Set(["pending", "confirmed"]);
+const CONFIRMABLE_STATUSES = new Set(["ready", "delivering"]);
 
 const normaliseStatus = (value) =>
   typeof value === "string" ? value.trim().toLowerCase() : "";
@@ -103,8 +106,17 @@ const resolveTotals = (order) => {
 };
 
 const CurrentOrder = () => {
-  const { activeOrders, getRestaurantById, getDishById, currency } =
+  const {
+    activeOrders,
+    getRestaurantById,
+    getDishById,
+    currency,
+    cancelOrder,
+    confirmOrderDelivered,
+  } =
     useAppContext();
+  const [isCancelling, setIsCancelling] = useState(false);
+  const [isConfirming, setIsConfirming] = useState(false);
   const order = activeOrders[0];
 
   if (!order) {
@@ -157,6 +169,35 @@ const CurrentOrder = () => {
   ]
     .filter(Boolean)
     .join(", ");
+  const normalisedStatus = normaliseStatus(order.status);
+  const canCancel =
+    CANCELLABLE_STATUSES.has(normalisedStatus) &&
+    (order.paymentStatus || "").toLowerCase() !== "paid";
+  const canConfirm = CONFIRMABLE_STATUSES.has(normalisedStatus);
+
+  const handleCancelOrder = async () => {
+    if (!canCancel || !order) return;
+    setIsCancelling(true);
+    try {
+      await cancelOrder(order.id);
+    } catch (error) {
+      console.error("Failed to cancel order", error);
+    } finally {
+      setIsCancelling(false);
+    }
+  };
+
+  const handleConfirmOrder = async () => {
+    if (!canConfirm || !order) return;
+    setIsConfirming(true);
+    try {
+      await confirmOrderDelivered(order.id);
+    } catch (error) {
+      console.error("Failed to confirm order", error);
+    } finally {
+      setIsConfirming(false);
+    }
+  };
 
   return (
     <div className="max-padd-container grid gap-6 py-24 lg:grid-cols-[2fr,1.2fr]">
@@ -195,6 +236,38 @@ const CurrentOrder = () => {
               </Link>
             </div>
           </div>
+          {(canConfirm || canCancel) && (
+            <div className="mt-6 flex flex-wrap gap-3">
+              {canConfirm && (
+                <button
+                  type="button"
+                  onClick={handleConfirmOrder}
+                  disabled={isConfirming}
+                  className={`rounded-full px-5 py-2 text-sm font-semibold text-white transition ${
+                    isConfirming
+                      ? "bg-gray-400"
+                      : "bg-green-500 hover:bg-green-600"
+                  }`}
+                >
+                  {isConfirming ? "Confirming..." : "Confirm order"}
+                </button>
+              )}
+              {canCancel && (
+                <button
+                  type="button"
+                  onClick={handleCancelOrder}
+                  disabled={isCancelling}
+                  className={`rounded-full border px-5 py-2 text-sm font-semibold transition ${
+                    isCancelling
+                      ? "border-gray-200 text-gray-400"
+                      : "border-gray-200 text-gray-700 hover:border-orange-300 hover:text-orange-500"
+                  }`}
+                >
+                  {isCancelling ? "Cancelling..." : "Cancel order"}
+                </button>
+              )}
+            </div>
+          )}
         </header>
 
         <div className="rounded-3xl bg-white p-8 shadow-sm">

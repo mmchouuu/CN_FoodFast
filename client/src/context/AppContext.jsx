@@ -2446,6 +2446,94 @@ export const AppContextProvider = ({ children }) => {
         [authToken],
     );
 
+    const updateOrderCollections = useCallback(
+        (updatedOrder) => {
+            if (!updatedOrder?.id) {
+                return;
+            }
+            const status = (updatedOrder.status || '').toLowerCase();
+            const isHistory = ORDER_HISTORY_STATUSES.has(status);
+
+            setActiveOrders((prev) => {
+                const filtered = prev.filter((order) => order.id !== updatedOrder.id);
+                if (isHistory) {
+                    return filtered;
+                }
+                return sortOrdersByPlacedAt([...filtered, updatedOrder]);
+            });
+
+            setPastOrders((prev) => {
+                const filtered = prev.filter((order) => order.id !== updatedOrder.id);
+                if (!isHistory) {
+                    return filtered;
+                }
+                return sortOrdersByPlacedAt([...filtered, updatedOrder]);
+            });
+        },
+        [setActiveOrders, setPastOrders],
+    );
+
+    const cancelOrder = useCallback(
+        async (orderId, options = {}) => {
+            if (!authToken) {
+                throw new Error('Please sign in to cancel an order.');
+            }
+            if (!orderId) {
+                throw new Error('Order identifier is required.');
+            }
+            try {
+                const data = await ordersService.cancelOrder(orderId, options);
+                const adapted = adaptOrderFromApi(data);
+                if (adapted) {
+                    updateOrderCollections(adapted);
+                }
+                toast.success('Đơn hàng đã được huỷ.');
+                return adapted;
+            } catch (error) {
+                const message =
+                    error?.response?.data?.error ||
+                    error?.message ||
+                    'Không thể huỷ đơn hàng. Vui lòng thử lại.';
+                toast.error(message);
+                throw new Error(message);
+            }
+        },
+        [authToken, updateOrderCollections],
+    );
+
+    const confirmOrderDelivered = useCallback(
+        async (orderId, options = {}) => {
+            if (!orderId) {
+                throw new Error('Order identifier is required.');
+            }
+            // Cho phép fallback qua user_id nếu không có token nhưng đã biết profile id
+            if (!authToken && !authProfileId) {
+                throw new Error('Please sign in to confirm an order.');
+            }
+            try {
+                const data = await ordersService.confirmOrder(
+                    orderId,
+                    { confirmed: true, ...options },
+                    { userId: authProfileId || undefined },
+                );
+                const adapted = adaptOrderFromApi(data);
+                if (adapted) {
+                    updateOrderCollections(adapted);
+                }
+                toast.success('Cảm ơn bạn! Đơn hàng đã hoàn tất.');
+                return adapted;
+            } catch (error) {
+                const message =
+                    error?.response?.data?.error ||
+                    error?.message ||
+                    'Không thể xác nhận đơn hàng. Vui lòng thử lại.';
+                toast.error(message);
+                throw new Error(message);
+            }
+        },
+        [authToken, authProfileId, updateOrderCollections],
+    );
+
     const applyDiscountCode = (code) => {
         const trimmed = code.trim();
         if (!trimmed) {
@@ -2596,6 +2684,8 @@ export const AppContextProvider = ({ children }) => {
         refreshOrders,
         getOrderById,
         fetchOrderById,
+        cancelOrder,
+        confirmOrderDelivered,
         placeOrder,
         addresses,
         selectedAddress,

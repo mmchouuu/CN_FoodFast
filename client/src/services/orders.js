@@ -68,6 +68,36 @@ export async function createOrder(payload) {
   return Array.isArray(data) ? data : unwrapRecord(data);
 }
 
+export async function cancelOrder(orderId, payload = {}) {
+  if (!orderId) {
+    throw new Error('orderId is required');
+  }
+  const { data } = await api.post(`${customerBasePath}/${orderId}/cancel`, payload);
+  return unwrapRecord(data);
+}
+
+export async function confirmOrder(orderId, payload = {}, options = {}) {
+  if (!orderId) {
+    throw new Error('orderId is required');
+  }
+  const safePayload =
+    payload && typeof payload === 'object'
+      ? { ...payload }
+      : {};
+  if (!Object.keys(safePayload).length) {
+    safePayload.confirmed = true;
+  } else if (safePayload.confirmed === undefined) {
+    safePayload.confirmed = true;
+  }
+  const config = {};
+  const userId = options?.userId || options?.user_id;
+  if (userId) {
+    config.params = { user_id: userId };
+  }
+  const { data } = await api.post(`${customerBasePath}/${orderId}/complete`, safePayload, config);
+  return unwrapRecord(data);
+}
+
 export async function listOwnerOrders(params = {}) {
   const { data } = await api.get(ownerBasePath, { params });
   return data;
@@ -89,6 +119,8 @@ const ordersService = {
   listByUser: listOrdersByUser,
   get: getOrder,
   createOrder,
+  cancelOrder,
+  confirmOrder,
 
 
 };

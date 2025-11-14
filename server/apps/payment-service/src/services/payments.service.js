@@ -467,50 +467,33 @@ async function handlePaymentPending(event) {
         payment_method_id: stripeMethod?.id || null,
 
         idempotency_key: idempotencyKey,
-        status: flow === 'cash' ? 'succeeded' : 'pending',
+        status: 'pending',
         flow,
       },
       client,
     );
 
     if (flow === 'cash') {
-      const updated = await paymentModel.updatePayment(
-        payment.id,
-        {
-          status: 'succeeded',
-          paid_at: new Date(),
-          transaction_id: `cash_${payment.id}`,
-        },
-        client,
-      );
-
       await paymentModel.insertPaymentLog(
         {
-          paymentId: updated.id,
-          action: 'PaymentSucceeded',
+          paymentId: payment.id,
+          action: 'PaymentPending',
           data: { flow, method },
         },
         client,
       );
 
-      await syncPaymentSuccessArtifacts({
-        client,
-        payment: updated,
-        provider: method || flow,
-        amountOverride: amount,
-        currencyOverride: currencyCode,
-        orderSnapshot: cachedOrder,
+      await client.query('COMMIT');
+
+      await publishEvent('PaymentPending', {
+        order_id: orderId,
+        payment_id: payment.id,
+        status: 'pending',
+        currency: currencyCode,
+        flow,
       });
 
-      await client.query('COMMIT');
-      await publishEvent('PaymentSucceeded', {
-        order_id: orderId,
-        payment_id: updated.id,
-        amount,
-        flow,
-        currency: currencyCode,
-      });
-      return updated;
+      return payment;
     }
 
     try {
@@ -776,6 +759,40 @@ async function getPaymentsForOrders(orderIds = []) {
   });
 }
 
+async function confirmCashPayment({ orderId, userId }) {
+  if (!orderId) {
+    const error = new Error('order_id is required');
+    error.status = 400;
+    throw error;
+  }
+
+  const payments = await paymentModel.findLatestPaymentsByOrderIds([orderId]);
+  const payment = payments.find((row) => row.order_id === orderId);
+  if (!payment || payment.flow !== 'cash') {
+    const error = new Error('cash payment not found for order');
+    error.status = 404;
+    throw error;
+  }
+
+  if (userId && payment.user_id && payment.user_id !== userId) {
+    const error = new Error('cash payment does not belong to user');
+    error.status = 403;
+    throw error;
+  }
+
+  if (payment.status === 'succeeded') {
+    return payment;
+  }
+
+  return markPaymentSucceeded({
+    paymentId: payment.id,
+    transactionId: payment.transaction_id || `cash_${payment.id}`,
+    provider: 'cash',
+    amount: payment.amount,
+    currency: payment.currency,
+  });
+}
+
 module.exports = {
   handlePaymentPending,
   listPayments,
@@ -784,4 +801,5 @@ module.exports = {
   markPaymentSucceeded,
   markPaymentFailed,
   getPaymentsForOrders,
+  confirmCashPayment,
 };

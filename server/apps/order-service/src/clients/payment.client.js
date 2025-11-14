@@ -84,6 +84,34 @@ async function lookupPayments(orderIds = []) {
   }
 }
 
+async function confirmCashPayment({ orderId, userId }) {
+  if (!orderId) {
+    throw new Error('orderId is required to confirm cash payment');
+  }
+
+  const payload = {
+    order_id: orderId,
+    user_id: userId || null,
+  };
+
+  try {
+    const { status, data } = await sendJsonRequest('/internal/payments/confirm-cash', {
+      method: 'POST',
+      body: payload,
+    });
+
+    if (status >= 200 && status < 300) {
+      return data?.payment || data || null;
+    }
+
+    throw new Error((data && data.error) || `payment-service responded with ${status}`);
+  } catch (error) {
+    console.error('[order-service] Failed to confirm cash payment:', error.message || error);
+    throw error;
+  }
+}
+
 module.exports = {
   lookupPayments,
+  confirmCashPayment,
 };

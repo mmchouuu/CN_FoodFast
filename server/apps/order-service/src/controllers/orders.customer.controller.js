@@ -79,3 +79,17 @@ exports.cancelOrder = async (req, res) => {
     return mapError(res, error);
   }
 };
+
+exports.confirmOrder = async (req, res) => {
+  try {
+    const result = await ordersService.confirmCustomerOrderDelivery({
+      user: req.user,
+      orderId: req.params.id,
+      payload: req.body,
+    });
+    return res.json(result);
+  } catch (error) {
+    console.error('[order-service] confirmOrder failed:', error);
+    return mapError(res, error);
+  }
+};

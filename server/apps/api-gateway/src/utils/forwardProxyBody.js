@@ -19,20 +19,26 @@ function forwardProxyBody(proxyReq, req) {
     return;
   }
 
-  if (!hasBody(req.body)) {
-    return;
+  let bodyData = null;
+  if (hasBody(req.body)) {
+    if (Buffer.isBuffer(req.body)) {
+      bodyData = req.body;
+    } else if (typeof req.body === 'string') {
+      bodyData = Buffer.from(req.body);
+    } else {
+      bodyData = Buffer.from(JSON.stringify(req.body));
+      if (!proxyReq.getHeader('Content-Type')) {
+        proxyReq.setHeader('Content-Type', 'application/json');
+      }
+    }
+  } else if (req.rawBody && req.rawBody.length) {
+    bodyData = Buffer.isBuffer(req.rawBody) ? req.rawBody : Buffer.from(req.rawBody);
   }
 
-  let bodyData;
-  if (Buffer.isBuffer(req.body)) {
-    bodyData = req.body;
-  } else if (typeof req.body === 'string') {
-    bodyData = Buffer.from(req.body);
-  } else {
-    bodyData = Buffer.from(JSON.stringify(req.body));
-    if (!proxyReq.getHeader('Content-Type')) {
-      proxyReq.setHeader('Content-Type', 'application/json');
-    }
+  if (!bodyData) {
+    proxyReq.setHeader('Content-Length', '0');
+    proxyReq.end();
+    return;
   }
 
   proxyReq.setHeader('Content-Length', Buffer.byteLength(bodyData));
@@ -41,4 +47,3 @@ function forwardProxyBody(proxyReq, req) {
 }
 
 module.exports = forwardProxyBody;
-
