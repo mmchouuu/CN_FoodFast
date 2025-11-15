@@ -8,11 +8,7 @@ const forwardProxyBody = require('../utils/forwardProxyBody');
 
 const router = express.Router();
 
-const ORDER_SERVICE_URL = (
-  process.env.ORDER_SERVICE_URL ||
-  config.orderServiceUrl ||
-  'http://localhost:3003'
-).replace(/\/+$/, '');
+const ORDER_SERVICE_URL = process.env.ORDER_SERVICE_URL || 'http://order-service:3003';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'secret';
 

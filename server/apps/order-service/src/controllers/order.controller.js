@@ -1,4 +1,8 @@
+const jwt = require('jsonwebtoken');
+const config = require('../config');
 const OrderService = require('../services/order.service');
+
+const JWT_SECRET = config.JWT_SECRET || 'secret';
 
 const CANONICAL_DELIVERY_STATUSES = new Set([
   'preparing',
@@ -31,6 +35,62 @@ const DEFAULT_CANONICAL_DELIVERY_STATUS =
   normalizeDeliveryStatusValue('pending') || 'preparing';
 const DELIVERY_STATUS_ERROR_MESSAGE =
   'delivery_status must be one of: pending, assigned, delivering, dispatched, arriving, delivered, failed, cancelled';
+
+const decodeUserFromToken = (req) => {
+  const header = req.headers?.authorization || '';
+  const token = header.startsWith('Bearer ') ? header.slice(7) : null;
+  if (!token) {
+    return null;
+  }
+  try {
+    return jwt.verify(token, JWT_SECRET);
+  } catch (error) {
+    return null;
+  }
+};
+
+const resolveUserIdFromRequest = (req, payload = {}) => {
+  const direct =
+    payload.user_id ||
+    payload.userId ||
+    req.query?.user_id ||
+    req.query?.userId;
+  if (direct) {
+    const trimmed = String(direct).trim();
+    if (trimmed.length) {
+      return trimmed;
+    }
+  }
+
+  const headerCandidate =
+    req.headers?.['x-user-id'] ||
+    req.headers?.['x-customer-id'] ||
+    req.headers?.['x-owner-id'];
+  if (headerCandidate) {
+    const trimmed = String(headerCandidate).trim();
+    if (trimmed.length) {
+      return trimmed;
+    }
+  }
+
+  const userFromToken = decodeUserFromToken(req);
+  if (userFromToken) {
+    const inferred =
+      userFromToken.userId ||
+      userFromToken.user_id ||
+      userFromToken.id ||
+      userFromToken.sub ||
+      null;
+    if (inferred) {
+      const trimmed = String(inferred).trim();
+      if (trimmed.length) {
+        return trimmed;
+      }
+    }
+  }
+
+  return null;
+};
 
 function normalizeDeliveryStatusValue(value) {
   if (value === undefined || value === null) {
@@ -89,9 +149,16 @@ function resolveDeliveryStatusFromPayload(payload, selectedAddress, requireStatu
 
 const respondWithError = (res, error) => {
   const status =
-    Number.isInteger(error?.statusCode) && error.statusCode >= 400 && error.statusCode < 600
+    (Number.isInteger(error?.statusCode) && error.statusCode >= 400 && error.statusCode < 600
       ? error.statusCode
-      : 500;
+      : null) ||
+    (Number.isInteger(error?.status) && error.status >= 400 && error.status < 600
+      ? error.status
+      : null) ||
+    (Number.isInteger(error?.httpStatus) && error.httpStatus >= 400 && error.httpStatus < 600
+      ? error.httpStatus
+      : null) ||
+    500;
   const message =
     status >= 500
       ? 'Internal server error'
@@ -241,6 +308,31 @@ exports.getOrdersByUser = async (req, res) => {
   try {
     const orders = await OrderService.getOrdersByUserId(req.params.userId);
     res.json(orders);
+  } catch (error) {
+    respondWithError(res, error);
+  }
+};
+
+exports.confirmOrder = async (req, res) => {
+  const orderId = req.params.id || req.params.orderId;
+  if (!orderId) {
+    return res.status(400).json({ error: 'order id is required' });
+  }
+
+  const payload = req.body && typeof req.body === 'object' ? { ...req.body } : {};
+  const userId = resolveUserIdFromRequest(req, payload);
+
+  if (!userId) {
+    return res.status(400).json({ error: 'user_id is required to confirm order' });
+  }
+
+  if (!payload.user_id && !payload.userId) {
+    payload.user_id = userId;
+  }
+
+  try {
+    const order = await OrderService.confirmCustomerOrder(orderId, userId, payload);
+    res.json(order);
   } catch (error) {
     respondWithError(res, error);
   }

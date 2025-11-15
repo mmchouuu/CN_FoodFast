@@ -2446,6 +2446,86 @@ export const AppContextProvider = ({ children }) => {
         [authToken],
     );
 
+    const updateOrderCollections = useCallback(
+        (updatedOrder) => {
+            if (!updatedOrder?.id) {
+                return;
+            }
+            const status = (updatedOrder.status || '').toLowerCase();
+            const isHistory = ORDER_HISTORY_STATUSES.has(status);
+
+            setActiveOrders((prev) => {
+                const filtered = prev.filter((order) => order.id !== updatedOrder.id);
+                if (isHistory) {
+                    return filtered;
+                }
+                return sortOrdersByPlacedAt([...filtered, updatedOrder]);
+            });
+
+            setPastOrders((prev) => {
+                const filtered = prev.filter((order) => order.id !== updatedOrder.id);
+                if (!isHistory) {
+                    return filtered;
+                }
+                return sortOrdersByPlacedAt([...filtered, updatedOrder]);
+            });
+        },
+        [setActiveOrders, setPastOrders],
+    );
+
+    const cancelOrder = useCallback(
+        async (orderId, options = {}) => {
+            if (!authToken) {
+                throw new Error('Please sign in to cancel an order.');
+            }
+            if (!orderId) {
+                throw new Error('Order identifier is required.');
+            }
+            try {
+                const data = await ordersService.cancelOrder(orderId, options);
+                const adapted = adaptOrderFromApi(data);
+                if (adapted) {
+                    updateOrderCollections(adapted);
+                }
+                toast.success('Đơn hàng đã được huỷ.');
+                return adapted;
+            } catch (error) {
+                const message =
+                    error?.response?.data?.error ||
+                    error?.message ||
+                    'Không thể huỷ đơn hàng. Vui lòng thử lại.';
+                toast.error(message);
+                throw new Error(message);
+            }
+        },
+        [authToken, updateOrderCollections],
+    );
+
+    const confirmOrderDelivered = useCallback(
+        async (orderId) => {
+            if (!orderId) throw new Error("Order identifier is required");
+
+            try {
+                const data = await ordersService.confirmOrder(orderId);
+                const adapted = adaptOrderFromApi(data);
+
+                if (adapted) updateOrderCollections(adapted);
+
+                toast.success("Thank you! Your order is complete.");
+                return adapted;
+            } catch (error) {
+                const message =
+                    error?.response?.data?.error ||
+                    error.message ||
+                    "Unable to confirm order.";
+                toast.error(message);
+                throw new Error(message);
+            }
+        },
+        [updateOrderCollections]
+    );
+
+
     const applyDiscountCode = (code) => {
         const trimmed = code.trim();
         if (!trimmed) {
@@ -2596,6 +2676,8 @@ export const AppContextProvider = ({ children }) => {
         refreshOrders,
         getOrderById,
         fetchOrderById,
+        cancelOrder,
+        confirmOrderDelivered,
         placeOrder,
         addresses,
         selectedAddress,

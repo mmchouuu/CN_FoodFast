@@ -109,7 +109,7 @@ CREATE TABLE IF NOT EXISTS payments (
   amount NUMERIC(12,2) NOT NULL,
   currency VARCHAR(10) NOT NULL DEFAULT 'VND',
   status VARCHAR(30) NOT NULL DEFAULT 'pending'
-    CHECK (status IN ('pending','authorized','succeeded','failed','cancelled','refunded','partially_refunded')),
+    CHECK (status IN ('pending','succeeded','failed','cancelled','refunded','partially_refunded')),
   flow VARCHAR(20) NOT NULL DEFAULT 'online'
     CHECK (flow IN ('online','cash')),
   transaction_id VARCHAR(200),                -- từ PSP (Stripe/MoMo)
@@ -247,30 +247,32 @@ CREATE INDEX IF NOT EXISTS idx_bcd_txn ON branch_cash_deposits(transaction_id);
 -- =========================================================
 -- 10) SETTLEMENT / PAYOUT / INVOICE
 -- =========================================================
-CREATE TABLE IF NOT EXISTS restaurant_settlements (
+CREATE TABLE restaurant_settlements (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   restaurant_id UUID NOT NULL,
+  branch_id UUID NOT NULL,
+  flow_type VARCHAR(20) NOT NULL
+    CHECK (flow_type IN ('online', 'cash')),
   period_start DATE NOT NULL,
   period_end DATE NOT NULL,
   currency VARCHAR(10) NOT NULL DEFAULT 'VND',
-  online_gross NUMERIC(12,2) NOT NULL DEFAULT 0,
-  online_gateway_fees NUMERIC(12,2) NOT NULL DEFAULT 0,
-  online_platform_commission NUMERIC(12,2) NOT NULL DEFAULT 0,
-  online_tax_withheld NUMERIC(12,2) NOT NULL DEFAULT 0,
-  online_refunds NUMERIC(12,2) NOT NULL DEFAULT 0,
-  online_net_payable NUMERIC(12,2) NOT NULL DEFAULT 0,
-  cash_gross NUMERIC(12,2) NOT NULL DEFAULT 0,
-  cash_refunds NUMERIC(12,2) NOT NULL DEFAULT 0,
-  cash_platform_commission NUMERIC(12,2) NOT NULL DEFAULT 0,
-  cash_due_to_platform NUMERIC(12,2) NOT NULL DEFAULT 0,
+
+  -- Chỉ giữ nhóm cột tương ứng
+  gross NUMERIC(12,2) NOT NULL DEFAULT 0,
+  refunds NUMERIC(12,2) NOT NULL DEFAULT 0,
+  tax_withheld NUMERIC(12,2) NOT NULL DEFAULT 0,
   net_result NUMERIC(12,2) NOT NULL DEFAULT 0,
+
   status VARCHAR(20) NOT NULL DEFAULT 'open'
     CHECK (status IN ('open','ready','payout_scheduled','invoiced','closed')),
+  
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now(),
-  UNIQUE (restaurant_id, period_start, period_end)
+
+  UNIQUE (branch_id, period_start, period_end, flow_type)
 );
-CREATE INDEX IF NOT EXISTS idx_rs_restaurant ON restaurant_settlements(restaurant_id, period_start, period_end, status);
+
+CREATE INDEX IF NOT EXISTS idx_rs_restaurant ON restaurant_settlements(restaurant_id, branch_id, period_start, period_end, status);
 
 CREATE TABLE IF NOT EXISTS restaurant_settlement_items (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

@@ -1,4 +1,5 @@
 const { pool } = require('../db');
+const advancedOrdersService = require('./orders.service');
 
 class OrderValidationError extends Error {
   constructor(message) {
@@ -1080,6 +1081,52 @@ const getOrdersByUserId = async (userId) => {
   return attachOrderRelations(result.rows);
 };
 
+const confirmCustomerOrder = async (orderId, userId, payload = {}) => {
+  if (!orderId) {
+    throw new OrderValidationError('order id is required');
+  }
+  if (!userId) {
+    throw new OrderValidationError('user id is required');
+  }
+
+  const safePayload =
+    payload && typeof payload === 'object'
+      ? { ...payload }
+      : {};
+
+  try {
+    return await advancedOrdersService.confirmCustomerOrderDelivery({
+      user: {
+        id: userId,
+        userId,
+        user_id: userId,
+        sub: userId,
+        role: 'customer',
+      },
+      orderId,
+      payload: safePayload,
+    });
+  } catch (error) {
+    if (error?.name === 'NotFoundError' || error?.status === 404) {
+      const notFound = new OrderValidationError(error.message || 'Order not found');
+      notFound.statusCode = 404;
+      throw notFound;
+    }
+    if (error?.name === 'ForbiddenError' || error?.status === 403) {
+      const forbidden = new OrderValidationError(error.message || 'Forbidden');
+      forbidden.statusCode = 403;
+      throw forbidden;
+    }
+    if (error?.name === 'ValidationError' || error?.status === 400) {
+      const validationErr = new OrderValidationError(error.message || 'Request validation failed');
+      validationErr.statusCode = 400;
+      validationErr.details = error?.details;
+      throw validationErr;
+    }
+    throw error;
+  }
+};
+
 module.exports = {
   getAllOrders,
   getOrderById,
@@ -1087,5 +1134,6 @@ module.exports = {
   updateOrderStatus,
   deleteOrder,
   getOrdersByUserId,
+  confirmCustomerOrder,
   OrderValidationError,
 };

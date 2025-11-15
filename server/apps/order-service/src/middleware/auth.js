@@ -31,11 +31,19 @@ const buildUserFromHeaders = (req) => {
   }
 
   const userHeader =
-    req.headers['x-user-id'] || req.query?.userId || req.body?.userId;
+    req.headers['x-user-id'] ||
+    req.headers['x-customer-id'] ||
+    req.query?.userId ||
+    req.query?.customerId ||
+    req.body?.userId ||
+    req.body?.customerId;
   if (userHeader) {
     return {
       userId: String(userHeader).trim(),
-      role: req.headers['x-user-role'] || 'customer',
+      role:
+        req.headers['x-user-role'] ||
+        (req.headers['x-customer-id'] ? 'customer' : null) ||
+        'customer',
     };
   }
 

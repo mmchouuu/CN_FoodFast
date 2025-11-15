@@ -25,6 +25,9 @@ const ORDER_STATUS_STEPS = [
   { key: "completed", label: "Completed" },
 ];
 
+const CANCELLABLE_STATUSES = new Set(["pending", "confirmed"]);
+const CONFIRMABLE_STATUSES = new Set(["ready", "delivering"]);
+
 const normaliseStatus = (value) =>
   typeof value === "string" ? value.trim().toLowerCase() : "";
 
@@ -110,11 +113,17 @@ const OrderDetails = () => {
     fetchOrderById,
     ordersLoading,
     currency,
+    cancelOrder,
+    confirmOrderDelivered,
   } = useAppContext();
 
   const [order, setOrder] = useState(() => getOrderById(orderId));
   const [loading, setLoading] = useState(!order);
   const [error, setError] = useState(null);
+  const [actionLoading, setActionLoading] = useState({
+    cancel: false,
+    confirm: false,
+  });
 
   useEffect(() => {
     if (!orderId) {
@@ -229,6 +238,42 @@ const OrderDetails = () => {
     () => resolvePaymentSummary(order),
     [order],
   );
+  const normalisedStatus = normaliseStatus(order?.status);
+  const canCancel =
+    Boolean(order) &&
+    CANCELLABLE_STATUSES.has(normalisedStatus) &&
+    (order.paymentStatus || "").toLowerCase() !== "paid";
+  const canConfirm = Boolean(order) && CONFIRMABLE_STATUSES.has(normalisedStatus);
+
+  const handleCancelOrder = async () => {
+    if (!order || !canCancel) return;
+    setActionLoading((prev) => ({ ...prev, cancel: true }));
+    try {
+      const updated = await cancelOrder(order.id);
+      if (updated) {
+        setOrder(updated);
+      }
+    } catch (err) {
+      console.error("Failed to cancel order", err);
+    } finally {
+      setActionLoading((prev) => ({ ...prev, cancel: false }));
+    }
+  };
+
+  const handleConfirmOrder = async () => {
+    if (!order || !canConfirm) return;
+    setActionLoading((prev) => ({ ...prev, confirm: true }));
+    try {
+      const updated = await confirmOrderDelivered(order.id);
+      if (updated) {
+        setOrder(updated);
+      }
+    } catch (err) {
+      console.error("Failed to confirm order", err);
+    } finally {
+      setActionLoading((prev) => ({ ...prev, confirm: false }));
+    }
+  };
 
   return (
     <div className="max-padd-container space-y-8 py-24">
@@ -268,6 +313,34 @@ const OrderDetails = () => {
           <span className="inline-flex items-center rounded-full bg-gray-100 px-4 py-2 text-sm font-semibold text-gray-700">
             Payment: {paymentSummary.status}
           </span>
+          {canConfirm && (
+            <button
+              type="button"
+              onClick={handleConfirmOrder}
+              disabled={actionLoading.confirm}
+              className={`rounded-full px-4 py-2 text-sm font-semibold text-white transition ${
+                actionLoading.confirm
+                  ? "bg-gray-400"
+                  : "bg-green-500 hover:bg-green-600"
+              }`}
+            >
+              {actionLoading.confirm ? "Confirming..." : "Received order"}
+            </button>
+          )}
+          {canCancel && (
+            <button
+              type="button"
+              onClick={handleCancelOrder}
+              disabled={actionLoading.cancel}
+              className={`rounded-full border px-4 py-2 text-sm font-semibold transition ${
+                actionLoading.cancel
+                  ? "border-gray-200 text-gray-400"
+                  : "border-gray-200 text-gray-700 hover:border-orange-300 hover:text-orange-500"
+              }`}
+            >
+              {actionLoading.cancel ? "Cancelling..." : "Cancel order"}
+            </button>
+          )}
           <Link
             to="/orders/history"
             className="rounded-full border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-600 hover:border-orange-300 hover:text-orange-500"

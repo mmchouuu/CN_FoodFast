@@ -62,13 +62,27 @@ export async function listStripeCards({ userId } = {}) {
   return data;
 }
 
-export async function createStripeSetupIntent() {
-  const { data } = await api.post(`${basePath}/stripe/setup-intent`);
+export async function createStripeSetupIntent({ userId } = {}) {
+  const config = withAuthHeaders({});
+  let body = {};
+  if (userId) {
+    config.params = { ...(config.params || {}), user_id: userId };
+    config.headers = { ...(config.headers || {}), 'x-user-id': userId };
+    body = { user_id: userId };
+  }
+  const { data } = await api.post(`${basePath}/stripe/setup-intent`, body, config);
   return data;
 }
 
-export async function confirmStripePaymentMethod(payload) {
-  const { data } = await api.post(`${basePath}/stripe/confirm`, payload);
+export async function confirmStripePaymentMethod(payload = {}, { userId } = {}) {
+  const config = withAuthHeaders({});
+  const body = { ...payload };
+  if (userId) {
+    config.params = { ...(config.params || {}), user_id: userId };
+    config.headers = { ...(config.headers || {}), 'x-user-id': userId };
+    body.user_id = userId;
+  }
+  const { data } = await api.post(`${basePath}/stripe/confirm`, body, config);
   return data;
 }
 

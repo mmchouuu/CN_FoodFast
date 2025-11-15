@@ -117,13 +117,13 @@ const router = express.Router();
 const PAYMENT_SERVICE = process.env.PAYMENT_SERVICE_URL || 'http://payment-service:3004';
 const paymentServiceUrl = new URL(PAYMENT_SERVICE);
 const isPaymentServiceHttps = paymentServiceUrl.protocol === 'https:';
+const paymentServiceBasePath = paymentServiceUrl.pathname.replace(/\/$/, '');
 
 // Detect if PAYMENT_SERVICE already targets /api/payments to avoid double-prefix routes
 let targetAlreadyIncludesPaymentsPath = false;
 try {
-  const normalizedPath = paymentServiceUrl.pathname.replace(/\/$/, '');
   targetAlreadyIncludesPaymentsPath =
-    normalizedPath === '/api/payments' || normalizedPath.endsWith('/api/payments');
+    paymentServiceBasePath === '/api/payments' || paymentServiceBasePath.endsWith('/api/payments');
 } catch (err) {
   targetAlreadyIncludesPaymentsPath = /\/api\/payments\/?$/.test(PAYMENT_SERVICE);
 }
@@ -173,6 +173,59 @@ router.use('/', authMiddleware, (req, res, next) => {
   console.log('[GATEWAY] Body:', req.body);
   next();
 });
+
+const sendPaymentServiceJson = (path, { method = 'POST', body = null, headers = {} } = {}) =>
+  new Promise((resolve, reject) => {
+    const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+    const targetPath = normalizedPath.replace(/\/{2,}/g, '/');
+
+    const payload =
+      body == null
+        ? null
+        : Buffer.from(typeof body === 'string' ? body : JSON.stringify(body));
+
+    const requestOptions = {
+      protocol: paymentServiceUrl.protocol,
+      hostname: paymentServiceUrl.hostname,
+      port: paymentServiceUrl.port || (isPaymentServiceHttps ? 443 : 80),
+      method,
+      path: targetPath,
+      headers: {
+        'Content-Type': 'application/json',
+        ...headers,
+      },
+    };
+
+    if (payload) {
+      requestOptions.headers['Content-Length'] = payload.length;
+    }
+
+    const transport = isPaymentServiceHttps ? https : http;
+    const serviceReq = transport.request(requestOptions, (serviceRes) => {
+      let data = '';
+      serviceRes.setEncoding('utf8');
+      serviceRes.on('data', (chunk) => {
+        data += chunk;
+      });
+      serviceRes.on('end', () => {
+        let parsed = null;
+        if (data) {
+          try {
+            parsed = JSON.parse(data);
+          } catch {
+            parsed = data;
+          }
+        }
+        resolve({ status: serviceRes.statusCode || 500, data: parsed });
+      });
+    });
+
+    serviceReq.on('error', reject);
+    if (payload) {
+      serviceReq.write(payload);
+    }
+    serviceReq.end();
+  });
 
 // ===========================
 // 🔹 PROXY TO PAYMENT-SERVICE
@@ -243,6 +296,51 @@ const forwardToPaymentService = (req, res) => {
   }
   proxyReq.end();
 };
+
+router.post('/cod/confirm', async (req, res) => {
+  const orderId =
+    req.body?.order_id ||
+    req.body?.orderId ||
+    req.query?.order_id ||
+    req.query?.orderId;
+
+  if (!orderId) {
+    return res.status(400).json({ error: 'order_id is required' });
+  }
+
+  const userId =
+    req.user?.userId ||
+    req.user?.id ||
+    req.user?.sub ||
+    req.headers['x-user-id'] ||
+    req.body?.user_id ||
+    req.query?.user_id ||
+    null;
+
+  try {
+    const response = await sendPaymentServiceJson('/internal/payments/confirm-cash', {
+      method: 'POST',
+      body: {
+        order_id: orderId,
+        user_id: userId,
+      },
+    });
+
+    if (response.status >= 200 && response.status < 300) {
+      return res.status(response.status).json(response.data || { success: true });
+    }
+
+    return res
+      .status(response.status)
+      .json(response.data || { error: 'payment-service rejected request' });
+  } catch (error) {
+    console.error('[Gateway → PaymentService COD confirm ERROR]', error.message || error);
+    return res.status(502).json({
+      error: 'unable to confirm cash payment',
+      detail: error?.message || String(error),
+    });
+  }
+});
 
 router.use('/', forwardToPaymentService);
 

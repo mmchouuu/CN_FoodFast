@@ -1,0 +1,64 @@
+%% Unified order flow sequence (COD + Online) with webhook and realtime via socket
+sequenceDiagram
+  autonumber
+  participant C as Client (Web/App)
+  participant G as API Gateway
+  participant O as Order Service
+  participant P as Product Service
+  participant Pay as Payment Service
+  participant U as User Service
+  participant Ext as External Gateway (Stripe/MoMo)
+  participant MQ as RabbitMQ
+  participant S as Socket Gateway
+
+  Note over C: Place order (cart, address, paymentMethod)
+
+  C->>G: POST /customer/orders {cart,addressId|address,paymentMethod}\nAuthorization: Bearer ...
+  G->>O: Forward request (+x-user-id,role, Authorization)
+  O->>U: Verify auth / get user profile
+  U-->>O: user {id, role, scopes}
+  opt addressId provided
+    O->>U: Get address by id
+    U-->>O: Address details
+  end
+  O->>P: Quote pricing (items, restaurant, delivery)
+  P-->>O: Quote {items, totals, taxes, discounts}
+
+  alt paymentMethod == "cod"
+    O->>O: Create order(status=confirmed, payment_status=unpaid)
+    O->>MQ: Publish socket_events: OrderUpdated{orderId,status=confirmed}
+    MQ-->>S: Consume socket_events
+    S-->>C: websocket order:updated {status=confirmed}
+    G-->>C: 201 {orderId,status=confirmed,payment_status=unpaid}
+  else paymentMethod == "online"
+    O->>O: Create order(status=pending, payment_status=pending)
+    O->>MQ: Publish ORDER_EVENTS_QUEUE: PaymentPending{orderId,amount,currency,method,customerId}
+    MQ-->>Pay: Consume PaymentPending
+    Pay->>Ext: Create PaymentIntent/Session
+    Ext-->>Pay: PaymentIntent created
+    Pay-->>G: 201 {client_secret | checkout_url}
+    G-->>C: 201 {client_secret | checkout_url}
+
+    Note over Ext,Pay: User completes payment → webhook to payment-service
+
+    Ext-->>Pay: Webhook (success/failure) + signature
+    alt Payment succeeded
+      Pay->>Pay: Mark payment=paid
+      Pay->>MQ: Publish PAYMENT_EVENTS_QUEUE: PaymentSucceeded{orderId,txId,amount}
+      MQ-->>O: Consume PaymentSucceeded
+      O->>O: Update order(status=confirmed, payment_status=paid)
+      O->>MQ: Publish socket_events: OrderUpdated{orderId,status=confirmed}
+      MQ-->>S: Consume socket_events
+      S-->>C: websocket order:updated {status=confirmed}
+    else Payment failed
+      Pay->>Pay: Mark payment=failed
+      Pay->>MQ: Publish PAYMENT_EVENTS_QUEUE: PaymentFailed{orderId,reason}
+      MQ-->>O: Consume PaymentFailed
+      O->>O: Update order(payment_status=failed[, status=cancelled?])
+      O->>MQ: Publish socket_events: OrderUpdated{orderId,payment_status=failed}
+      MQ-->>S: Consume socket_events
+      S-->>C: websocket order:updated {payment_status=failed}
+    end
+  end
+
+  Note over MQ: Queues\n- ORDER_EVENTS_QUEUE: O → Pay\n- PAYMENT_EVENTS_QUEUE: Pay → O\n- socket_events: O/Pay/User → S → Client

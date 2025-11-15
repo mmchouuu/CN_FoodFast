@@ -1881,6 +1881,7 @@ module.exports = {
   listCustomerOrders,
   getCustomerOrder,
   cancelCustomerOrder,
+  confirmCustomerOrderDelivery,
   listOwnerOrders,
   getOwnerOrder,
   updateOwnerOrderStatus,
@@ -2053,6 +2054,126 @@ async function cancelCustomerOrder({ user, orderId, payload = {} }) {
       },
       'customer-cancel',
     );
+
+    return updated;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function confirmCustomerOrderDelivery({ user, orderId, payload = {} }) {
+  const userId = resolveUserId(user);
+  if (!userId) {
+    throw new ValidationError('unable to resolve current user');
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const orderRes = await client.query(
+      `
+        SELECT *
+        FROM orders
+        WHERE id = $1 AND user_id = $2
+        FOR UPDATE
+      `,
+      [orderId, userId],
+    );
+
+    const order = orderRes.rows[0];
+    if (!order) {
+      throw new NotFoundError('order not found');
+    }
+
+    if (order.status === 'cancelled') {
+      throw new ValidationError('cancelled orders cannot be confirmed');
+    }
+
+    if (order.status === 'completed') {
+      await client.query('ROLLBACK');
+      return fetchOrderById(orderId);
+    }
+
+    if (!['delivering', 'ready'].includes(order.status)) {
+      throw new ValidationError('order is not ready to be confirmed by customer');
+    }
+
+    await client.query(
+      `
+        UPDATE orders
+        SET status = 'completed', updated_at = now()
+        WHERE id = $1
+      `,
+      [orderId],
+    );
+
+    await client.query(
+      `
+        UPDATE deliveries
+        SET delivery_status = 'delivered',
+            delivered_at = COALESCE(delivered_at, now()),
+            updated_at = now()
+        WHERE order_id = $1
+      `,
+      [orderId],
+    );
+
+    await logOrderEvent(client, {
+      orderId,
+      eventType: 'OrderCompleted',
+      actorId: userId,
+      payload: {
+        previous: order.status,
+        next: 'completed',
+        note: payload.note || 'customer_confirmation',
+      },
+    });
+
+    await enqueueOutbox(client, {
+      aggregateType: 'Order',
+      aggregateId: orderId,
+      eventType: 'order.status_updated',
+      payload: {
+        order_id: orderId,
+        previous: order.status,
+        next: 'completed',
+        actor: userId,
+      },
+    });
+
+    await client.query('COMMIT');
+
+    const updated = await fetchOrderById(orderId);
+
+    dispatchOrderEvent(
+      'order.status_updated',
+      {
+        order_id: orderId,
+        previous: order.status,
+        next: 'completed',
+        actor: userId,
+      },
+      'customer-completed-order',
+    );
+
+    const paymentMethodRaw = typeof order.payment_method === 'string'
+      ? order.payment_method.trim().toLowerCase()
+      : '';
+    const isCashPayment = paymentMethodRaw === 'cod' || paymentMethodRaw === 'cash';
+
+    if (isCashPayment) {
+      paymentClient
+        .confirmCashPayment({ orderId, userId })
+        .catch((error) => {
+          console.error(
+            '[order-service] Failed to mark cash payment as succeeded:',
+            error?.message || error,
+          );
+        });
+    }
 
     return updated;
   } catch (error) {
