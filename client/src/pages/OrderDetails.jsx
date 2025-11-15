@@ -229,10 +229,12 @@ const OrderDetails = () => {
     .filter(Boolean)
     .join(", ");
 
-  const timeline = useMemo(
-    () => buildTrackingSteps(order.status, order.placedAt),
-    [order.status, order.placedAt],
-  );
+  const timeline = useMemo(() => {
+    if (Array.isArray(order.timeline) && order.timeline.length) {
+      return order.timeline;
+    }
+    return buildTrackingSteps(order.status, order.placedAt);
+  }, [order.timeline, order.status, order.placedAt]);
   const totals = useMemo(() => resolveTotals(order), [order]);
   const paymentSummary = useMemo(
     () => resolvePaymentSummary(order),
@@ -368,7 +370,7 @@ const OrderDetails = () => {
                     >
                       {step.label}
                     </p>
-                    <p className="text-xs text-gray-400">{step.timestamp}</p>
+                    <p className="text-xs text-gray-400">{step.timestamp || "Pending"}</p>
                   </div>
                 </div>
               ))}

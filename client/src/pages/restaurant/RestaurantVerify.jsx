@@ -30,7 +30,6 @@ const RestaurantVerify = () => {
 
   const defaultEmail = location?.state?.email || queryEmail;
   const defaultStatus = location?.state?.status || queryStatus || "pending";
-
   const [email, setEmail] = useState(defaultEmail);
   const [restaurantStatus, setRestaurantStatus] = useState(defaultStatus);
   const [step, setStep] = useState(
@@ -49,6 +48,7 @@ const RestaurantVerify = () => {
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [resendLoading, setResendLoading] = useState(false);
+
   const inputsRef = useRef([]);
 
   const otpValue = useMemo(() => otpDigits.join(""), [otpDigits]);
@@ -194,6 +194,7 @@ const RestaurantVerify = () => {
       setError("New password must contain at least 8 characters.");
       return;
     }
+
     if (newPassword !== confirmPassword) {
       setError("Passwords do not match.");
       return;

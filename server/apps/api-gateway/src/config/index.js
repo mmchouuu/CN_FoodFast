@@ -10,8 +10,8 @@ module.exports = {
   jwtPublicKey: process.env.JWT_PUBLIC_KEY || 'change_me',
   https: {
     enabled: process.env.GATEWAY_HTTPS_ENABLED === 'true',
-    keyPath: process.env.GATEWAY_SSL_KEY_PATH || '',
-    certPath: process.env.GATEWAY_SSL_CERT_PATH || '',
+    keyPath: process.env.GATEWAY_SSL_KEY_PATH || 'certs/gateway-key.pem',
+    certPath: process.env.GATEWAY_SSL_CERT_PATH || 'certs/gateway.pem',
     caPath: process.env.GATEWAY_SSL_CA_PATH || '',
   },
 };

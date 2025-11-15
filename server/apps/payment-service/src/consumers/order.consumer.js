@@ -1,5 +1,6 @@
 const { subscribeOrderEvents } = require('../utils/rabbitmq');
 const paymentsService = require('../services/payments.service');
+const settlementsService = require('../services/settlements.service');
 
 async function startOrderConsumer() {
   try {
@@ -9,6 +10,11 @@ async function startOrderConsumer() {
       switch (event) {
         case 'PaymentPending':
           await paymentsService.handlePaymentPending(payload);
+          break;
+        case 'order.status_updated':
+          if (payload?.next === 'completed' && payload?.order_id) {
+            await settlementsService.recordOrderCompletion(payload.order_id);
+          }
           break;
         default:
           break;

@@ -42,6 +42,40 @@ const PAYMENT_FLOWS = {
   bank_transfer: 'cash',
 };
 
+const hasClientPricingHint = (metadata) => {
+  if (!metadata || typeof metadata !== 'object') {
+    return false;
+  }
+  if (metadata.force_client_pricing || metadata.forceClientPricing) {
+    return true;
+  }
+  const mode = metadata.pricing_mode || metadata.pricingMode;
+  if (typeof mode === 'string' && mode.toLowerCase() === 'client') {
+    return true;
+  }
+  return false;
+};
+
+const shouldUseClientPricingSnapshot = (payload = {}, request = {}) => {
+  if (!payload || typeof payload !== 'object') {
+    return false;
+  }
+  if (payload.force_client_pricing || payload.forceClientPricing || payload.forcePricingFallback) {
+    return true;
+  }
+  const mode = payload.pricing_mode || payload.pricingMode;
+  if (typeof mode === 'string' && mode.toLowerCase() === 'client') {
+    return true;
+  }
+  if (hasClientPricingHint(payload.metadata)) {
+    return true;
+  }
+  if (hasClientPricingHint(request.metadata)) {
+    return true;
+  }
+  return false;
+};
+
 class ServiceError extends Error {
   constructor(message, status = 500, details = null) {
     super(message);
@@ -159,6 +193,41 @@ const normalisePaymentStatus = (statusRaw) => {
     );
   }
   return status;
+};
+
+const ORDER_TIMELINE_STATUSES = [
+  'pending',
+  'confirmed',
+  'preparing',
+  'ready',
+  'delivering',
+  'completed',
+  'cancelled',
+];
+
+const normaliseTimelineMetadata = (metadata) => {
+  if (!metadata || typeof metadata !== 'object') {
+    return {};
+  }
+  return { ...metadata };
+};
+
+const appendTimelineMetadata = (metadata, status, actorId = null, note = null, at = null) => {
+  const normalizedStatus = typeof status === 'string' ? status.toLowerCase() : null;
+  if (!normalizedStatus || !ORDER_TIMELINE_STATUSES.includes(normalizedStatus)) {
+    return normaliseTimelineMetadata(metadata);
+  }
+
+  const next = normaliseTimelineMetadata(metadata);
+  const timeline = Array.isArray(next.timeline) ? [...next.timeline] : [];
+  timeline.push({
+    status: normalizedStatus,
+    at: at || new Date().toISOString(),
+    actor_id: actorId || null,
+    note: note || null,
+  });
+  next.timeline = timeline;
+  return next;
 };
 
 const extractRestaurantScope = (user = {}) => {
@@ -634,6 +703,12 @@ async function computePricingSnapshot({ userId, payload, context }) {
     delivery: payload.delivery,
   };
 
+  const forceClientPricing = shouldUseClientPricingSnapshot(payload, request);
+  if (forceClientPricing) {
+    console.warn('[order-service] Skipping product-service quote and using client pricing snapshot');
+    return buildFallbackPricing(payload);
+  }
+
   try {
     const quote = await productClient.quoteOrderPricing(request, {
       authorization: context?.authorization,
@@ -655,7 +730,7 @@ async function computePricingSnapshot({ userId, payload, context }) {
       '[order-service] Failed to fetch pricing from product-service:',
       error?.message || error,
     );
-    if (!ALLOW_CLIENT_PRICING_FALLBACK) {
+    if (!ALLOW_CLIENT_PRICING_FALLBACK && !forceClientPricing) {
       throw new ValidationError('Unable to confirm pricing with product-service', {
         reason: error?.message,
       });
@@ -695,13 +770,18 @@ const enrichMetadata = ({ payload, pricing, payment, user }) => {
   pricingMeta.tip_amount = pricing.totals.tip_amount;
   pricingMeta.total_amount = pricing.totals.total_amount;
 
-  const timeline = Array.isArray(base.timeline) ? base.timeline.slice() : [];
-  if (!timeline.length) {
+  const timeline = Array.isArray(base.timeline)
+    ? base.timeline.filter(
+        (entry) => entry && ORDER_TIMELINE_STATUSES.includes(entry.status || entry.code),
+      )
+    : [];
+  const hasPending = timeline.some((entry) => entry.status === 'pending');
+  if (!hasPending) {
     timeline.push({
-      code: 'order.created',
-      label: 'Order created',
+      status: 'pending',
       at: placedAt,
-      actor: user ? resolveUserId(user) : null,
+      actor_id: user ? resolveUserId(user) : null,
+      note: 'order_created',
     });
   }
 
@@ -1932,7 +2012,11 @@ async function listCustomerOrders({ user, query = {} }) {
     );
 
     const orderIds = ordersRes.rows.map((row) => row.id);
-    const hydrated = await fetchOrdersByIds(orderIds, { client });
+    const hydrated = await fetchOrdersByIds(orderIds, {
+      client,
+      includeEvents: true,
+      includeRevisions: false,
+    });
 
     return {
       data: hydrated,
@@ -2001,13 +2085,22 @@ async function cancelCustomerOrder({ user, orderId, payload = {} }) {
       throw new ValidationError('order cannot be cancelled at this stage');
     }
 
+    const updatedMetadata = appendTimelineMetadata(
+      order.metadata,
+      'cancelled',
+      userId,
+      payload.reason || 'customer_request',
+    );
+
     await client.query(
       `
         UPDATE orders
-        SET status = 'cancelled', updated_at = now()
+        SET status = 'cancelled',
+            metadata = $2,
+            updated_at = now()
         WHERE id = $1
       `,
-      [orderId],
+      [orderId, updatedMetadata],
     );
 
     await logOrderEvent(client, {
@@ -2062,24 +2155,15 @@ async function confirmCustomerOrderDelivery({ user, orderId, payload = {} }) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    await client.query(`SET LOCAL lock_timeout = '5s'`);
-
-    const orderRes = await client
-      .query(
-        `
+    const orderRes = await client.query(
+      `
         SELECT *
         FROM orders
         WHERE id = $1 AND user_id = $2
-        FOR UPDATE NOWAIT
+        FOR UPDATE
       `,
-        [orderId, userId],
-      )
-      .catch((error) => {
-        if (error?.code === '55P03') {
-          throw new ConflictError('order is being updated, please retry shortly');
-        }
-        throw error;
-      });
+      [orderId, userId],
+    );
 
     const order = orderRes.rows[0];
     if (!order) {
@@ -2099,13 +2183,22 @@ async function confirmCustomerOrderDelivery({ user, orderId, payload = {} }) {
       throw new ValidationError('order is not ready to be confirmed by customer');
     }
 
+    const metadataWithTimeline = appendTimelineMetadata(
+      order.metadata,
+      'completed',
+      userId,
+      payload.note || 'customer_confirmation',
+    );
+
     await client.query(
       `
         UPDATE orders
-        SET status = 'completed', updated_at = now()
+        SET status = 'completed',
+            metadata = $2,
+            updated_at = now()
         WHERE id = $1
       `,
-      [orderId],
+      [orderId, metadataWithTimeline],
     );
 
     await client.query(
@@ -2335,13 +2428,23 @@ async function updateOwnerOrderStatus({ user, orderId, payload = {} }) {
       throw new NotFoundError('order not found');
     }
 
+    const actorId = resolveUserId(user);
+    const metadataWithTimeline = appendTimelineMetadata(
+      order.metadata,
+      nextStatus,
+      actorId,
+      payload.note || null,
+    );
+
     await client.query(
       `
         UPDATE orders
-        SET status = $1, updated_at = now()
+        SET status = $1,
+            metadata = $3,
+            updated_at = now()
         WHERE id = $2
       `,
-      [nextStatus, orderId],
+      [nextStatus, orderId, metadataWithTimeline],
     );
 
     await logOrderEvent(client, {

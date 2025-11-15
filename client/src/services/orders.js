@@ -80,22 +80,61 @@ export async function confirmOrder(orderId, payload = {}, options = {}) {
   if (!orderId) {
     throw new Error('orderId is required');
   }
+
   const safePayload =
     payload && typeof payload === 'object'
       ? { ...payload }
       : {};
-  if (!Object.keys(safePayload).length) {
-    safePayload.confirmed = true;
-  } else if (safePayload.confirmed === undefined) {
+
+
+  if (!Object.keys(safePayload).length || safePayload.confirmed === undefined) {
     safePayload.confirmed = true;
   }
+
   const config = {};
   const userId = options?.userId || options?.user_id;
   if (userId) {
     config.params = { user_id: userId };
   }
-  const { data } = await api.post(`${customerBasePath}/${orderId}/complete`, safePayload, config);
-  return unwrapRecord(data);
+
+  const forceCustomerRoute = options?.scope === 'customer';
+  const forcePublicRoute = options?.scope === 'public';
+
+  const invokeCustomerRoute = async () => {
+    const { data } = await api.post(
+      `${customerBasePath}/${orderId}/complete`,
+      safePayload,
+      config,
+    );
+    return unwrapRecord(data);
+  };
+
+  const invokePublicRoute = async () => {
+    const { data } = await api.post(
+      `${basePath}/${orderId}/complete`,
+      safePayload,
+      config,
+    );
+    return unwrapRecord(data);
+  };
+
+  if (forceCustomerRoute) {
+    return invokeCustomerRoute();
+  }
+
+  if (forcePublicRoute) {
+    return invokePublicRoute();
+  }
+
+  try {
+    return await invokePublicRoute();
+  } catch (error) {
+    if (error?.response?.status && error.response.status !== 404) {
+      throw error;
+    }
+  }
+
+  return invokeCustomerRoute();
 }
 
 export async function listOwnerOrders(params = {}) {

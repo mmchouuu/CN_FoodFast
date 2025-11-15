@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useAppContext } from "../context/AppContext";
 import {
@@ -10,9 +10,8 @@ import resolvePaymentSummary from "../utils/paymentSummary";
 
 const StatusDot = ({ completed }) => (
   <span
-    className={`inline-block h-3 w-3 rounded-full ${
-      completed ? "bg-green-500" : "bg-gray-300"
-    }`}
+    className={`inline-block h-3 w-3 rounded-full ${completed ? "bg-green-500" : "bg-gray-300"
+      }`}
   />
 );
 
@@ -38,9 +37,9 @@ const buildTrackingSteps = (status, placedAt) => {
   );
   const placedTime = placedAt
     ? new Date(placedAt).toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
-      })
+      hour: "2-digit",
+      minute: "2-digit",
+    })
     : null;
 
   return ORDER_STATUS_STEPS.map((step, index) => {
@@ -108,6 +107,8 @@ const resolveTotals = (order) => {
 const CurrentOrder = () => {
   const {
     activeOrders,
+    pastOrders,
+    getOrderById,
     getRestaurantById,
     getDishById,
     currency,
@@ -115,26 +116,50 @@ const CurrentOrder = () => {
     confirmOrderDelivered,
     refreshOrders,
   } = useAppContext();
+
   const location = useLocation();
   const requestedOrderId = location.state?.orderId || null;
+
+  const [trackedOrderId, setTrackedOrderId] = useState(requestedOrderId || null);
   const [isCancelling, setIsCancelling] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
-  const order = useMemo(() => {
-    if (requestedOrderId) {
-      return (
-        activeOrders.find((item) => item.id === requestedOrderId) ||
-        activeOrders[0] ||
-        null
-      );
-    }
-    return activeOrders[0];
-  }, [activeOrders, requestedOrderId]);
+  const pendingRefreshRef = useRef(false);
 
   useEffect(() => {
-    if (requestedOrderId && !order && typeof refreshOrders === "function") {
-      refreshOrders();
+    if (requestedOrderId) {
+      setTrackedOrderId(requestedOrderId);
     }
-  }, [requestedOrderId, order, refreshOrders]);
+  }, [requestedOrderId]);
+
+  const order = useMemo(() => {
+    if (trackedOrderId) {
+      const tracked = getOrderById(trackedOrderId);
+      if (tracked) {
+        return tracked;
+      }
+    }
+    if (activeOrders.length) {
+      return activeOrders[0];
+    }
+    if (pastOrders.length) {
+      return pastOrders[0];
+    }
+    return null;
+  }, [trackedOrderId, getOrderById, activeOrders, pastOrders]);
+
+  useEffect(() => {
+    if (!trackedOrderId || order) {
+      pendingRefreshRef.current = false;
+      return;
+    }
+    if (pendingRefreshRef.current || typeof refreshOrders !== "function") {
+      return;
+    }
+    pendingRefreshRef.current = true;
+    Promise.resolve(refreshOrders()).finally(() => {
+      pendingRefreshRef.current = false;
+    });
+  }, [trackedOrderId, order, refreshOrders]);
 
   useEffect(() => {
     if (requestedOrderId && order) {
@@ -146,7 +171,7 @@ const CurrentOrder = () => {
     }
   }, [requestedOrderId, order, location.pathname, location.search]);
 
-  if (requestedOrderId && !order) {
+  if (trackedOrderId && !order) {
     return (
       <div className="max-padd-container py-24 text-center">
         <h1 className="text-3xl font-bold text-gray-900">
@@ -191,10 +216,12 @@ const CurrentOrder = () => {
     restaurantSnapshot?.image ||
     restaurantPlaceholderImage;
   const deliveryAddress = order.deliveryAddress || {};
-  const trackingSteps = useMemo(
-    () => buildTrackingSteps(order.status, order.placedAt),
-    [order.status, order.placedAt],
-  );
+  const trackingSteps = useMemo(() => {
+    if (Array.isArray(order.timeline) && order.timeline.length) {
+      return order.timeline;
+    }
+    return buildTrackingSteps(order.status, order.placedAt);
+  }, [order.timeline, order.status, order.placedAt]);
   const totals = useMemo(() => resolveTotals(order), [order]);
   const paymentSummary = useMemo(
     () => resolvePaymentSummary(order),
@@ -282,11 +309,10 @@ const CurrentOrder = () => {
                   type="button"
                   onClick={handleConfirmOrder}
                   disabled={isConfirming}
-                  className={`rounded-full px-5 py-2 text-sm font-semibold text-white transition ${
-                    isConfirming
+                  className={`rounded-full px-5 py-2 text-sm font-semibold text-white transition ${isConfirming
                       ? "bg-gray-400"
                       : "bg-green-500 hover:bg-green-600"
-                  }`}
+                    }`}
                 >
                   {isConfirming ? "Confirming..." : "Confirm order"}
                 </button>
@@ -296,11 +322,10 @@ const CurrentOrder = () => {
                   type="button"
                   onClick={handleCancelOrder}
                   disabled={isCancelling}
-                  className={`rounded-full border px-5 py-2 text-sm font-semibold transition ${
-                    isCancelling
+                  className={`rounded-full border px-5 py-2 text-sm font-semibold transition ${isCancelling
                       ? "border-gray-200 text-gray-400"
                       : "border-gray-200 text-gray-700 hover:border-orange-300 hover:text-orange-500"
-                  }`}
+                    }`}
                 >
                   {isCancelling ? "Cancelling..." : "Cancel order"}
                 </button>
@@ -319,13 +344,12 @@ const CurrentOrder = () => {
                 <StatusDot completed={step.completed} />
                 <div>
                   <p
-                    className={`text-sm font-semibold ${
-                      step.completed ? "text-gray-900" : "text-gray-500"
-                    }`}
+                    className={`text-sm font-semibold ${step.completed ? "text-gray-900" : "text-gray-500"
+                      }`}
                   >
                     {step.label}
                   </p>
-                  <p className="text-xs text-gray-400">{step.timestamp}</p>
+                  <p className="text-xs text-gray-400">{step.timestamp || "Pending"}</p>
                 </div>
               </div>
             ))}
@@ -400,15 +424,15 @@ const CurrentOrder = () => {
 
               </span>
             </div>
-          {totals.discount > 0 ? (
-            <div className="flex justify-between text-green-600">
-              <span>Discount</span>
-              <span>
-                -{currency}
-                {totals.discount.toLocaleString()}
-              </span>
-            </div>
-          ) : null}
+            {totals.discount > 0 ? (
+              <div className="flex justify-between text-green-600">
+                <span>Discount</span>
+                <span>
+                  -{currency}
+                  {totals.discount.toLocaleString()}
+                </span>
+              </div>
+            ) : null}
           </div>
           <p className="text-sm text-gray-500">
             Payment method:{" "}

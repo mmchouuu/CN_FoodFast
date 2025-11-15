@@ -3,7 +3,6 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import CustomerProfilePanel from "./CustomerProfilePanel";
 import { assets } from "../assets/data";
 import { useAppContext } from "../context/AppContext";
-
 const navigationItems = [
   { label: "Home", href: "/" },
   { label: "Restaurants", href: "/restaurants" },
@@ -56,7 +55,6 @@ const Header = () => {
     setMenuOpen(false);
     closeCustomerProfilePanel();
   }, [location.pathname, closeCustomerProfilePanel]);
-
   const isActive = (href) =>
     href === "/"
       ? location.pathname === "/"

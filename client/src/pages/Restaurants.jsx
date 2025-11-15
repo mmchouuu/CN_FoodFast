@@ -133,5 +133,4 @@ const Restaurants = () => {
     </div>
   );
 };
-
 export default Restaurants;

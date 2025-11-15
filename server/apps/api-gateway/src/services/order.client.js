@@ -57,6 +57,18 @@ async function updateOrderStatus(orderId, status, { headers = {} } = {}) {
 }
 
 // ----------------------------------------------------------------------
+// Xác nhận đơn hàng hoàn tất
+// ----------------------------------------------------------------------
+async function confirmOrder(orderId, payload, { headers = {}, params = {} } = {}) {
+  const res = await client.post(
+    `/${orderId}/complete`,
+    payload,
+    buildConfig({ headers, params }),
+  );
+  return res.data;
+}
+
+// ----------------------------------------------------------------------
 // Xuất module
 // ----------------------------------------------------------------------
 module.exports = {
@@ -65,4 +77,5 @@ module.exports = {
   listOrdersByUser,
   createOrder,
   updateOrderStatus,
+  confirmOrder,
 };

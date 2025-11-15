@@ -7,7 +7,6 @@ import { useAppContext } from "../context/AppContext";
 import { Elements, CardElement, useStripe, useElements } from "@stripe/react-stripe-js";
 import { getStripe } from "../lib/stripe";
 
-
 const ADDRESS_LABELS = [
   { id: "home", label: "Home" },
   { id: "company", label: "Office" },

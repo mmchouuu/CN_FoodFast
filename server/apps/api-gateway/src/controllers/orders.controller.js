@@ -119,10 +119,50 @@ async function updateOrderStatus(req, res, next) {
   }
 }
 
+// ----------------------------------------------------------------------
+// Confirm order completion
+// ----------------------------------------------------------------------
+async function confirmOrder(req, res, next) {
+  try {
+    const { id } = req.params;
+    if (!id) {
+      return res.status(400).json({ error: 'order id is required' });
+    }
+
+    const payload = { ...(req.body || {}) };
+    const userId =
+      payload.user_id ||
+      payload.userId ||
+      req.user?.userId ||
+      req.user?.id ||
+      null;
+
+    if (!userId) {
+      return res.status(400).json({ error: 'user_id is required' });
+    }
+
+    if (!payload.user_id) {
+      payload.user_id = userId;
+    }
+    if (!payload.userId) {
+      payload.userId = userId;
+    }
+
+    const data = await orderClient.confirmOrder(id, payload, {
+      headers: buildHeaders(req),
+      params: req.query,
+    });
+    res.json(data);
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
   listOrders,
   listOrdersByUser,
   getOrderById,
   createOrder,
   updateOrderStatus,
+  confirmOrder,
 };

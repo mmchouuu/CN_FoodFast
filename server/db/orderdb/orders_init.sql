@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS orders (
     CHECK (fulfillment_type IN ('delivery','pickup','dinein')),
 
   status VARCHAR(30) NOT NULL DEFAULT 'pending'
-    CHECK (status IN ('pending','confirmed','preparing','ready','delivering','completed','cancelled')),
+    CHECK (status IN ('pending','confirmed','preparing','ready','delivering','completed','cancelled','refunded', 'refund_requested','refund_approved','refunding','refunded','refund_rejected')),
   payment_status VARCHAR(30) NOT NULL DEFAULT 'unpaid'
     CHECK (payment_status IN ('unpaid','authorized','paid','refunded','partially_refunded','failed')),
 
@@ -239,3 +239,63 @@ CREATE TABLE IF NOT EXISTS deliveries (
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
+
+
+-- ========================================================
+-- 10) REFUND
+-- ========================================================
+
+CREATE TABLE IF NOT EXISTS order_refund_requests (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+  order_id UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL,                -- ai yêu cầu (customer)
+  restaurant_id UUID,
+  branch_id UUID,
+
+  status VARCHAR(30) NOT NULL DEFAULT 'requested'
+   CHECK (status IN ('requested','approved','rejected','processing','succeeded','failed')),
+
+  refund_amount NUMERIC(12,2),          -- tổng tiền dự kiến refund
+  reason TEXT,                          -- lý do KH nhập
+  images JSONB,                         -- ["url1","url2"] (không cần bảng riêng)
+
+  admin_id UUID,                        -- ai duyệt/từ chối
+  admin_comment TEXT,
+
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS order_refund_items (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+  refund_request_id UUID NOT NULL REFERENCES order_refund_requests(id) ON DELETE CASCADE,
+
+  order_item_id UUID,
+  quantity INT,
+  amount NUMERIC(12,2) NOT NULL,         -- tiền refund cho dòng này
+
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS order_refund_events (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+  refund_request_id UUID NOT NULL REFERENCES order_refund_requests(id) ON DELETE CASCADE,
+
+  event_type VARCHAR(50) NOT NULL
+    CHECK (event_type IN (
+      'requested',
+      'approved',
+      'rejected',
+      'processing',
+      'succeeded',
+      'failed'
+    )),
+
+  actor_id UUID,                          -- admin/system/customer
+  payload JSONB,                          -- chi tiết thêm
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+

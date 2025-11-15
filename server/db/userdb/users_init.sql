@@ -23,7 +23,7 @@ CREATE INDEX IF NOT EXISTS idx_users_is_active  ON users(is_active);
 CREATE TABLE IF NOT EXISTS roles (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   code        VARCHAR(30) UNIQUE NOT NULL
-                CHECK (code IN ('customer','owner','admin', 'shipper')),
+                CHECK (code IN ('customer','owner','admin')),
   description TEXT
 );
 
@@ -194,6 +194,7 @@ CREATE INDEX IF NOT EXISTS idx_outbox_processed ON outbox(processed, created_at)
 CREATE TABLE IF NOT EXISTS restaurant_accounts (
   id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   restaurant_id  UUID NOT NULL,                 -- soft ref: restaurants.id
+  branch_id      UUID,
   login_email    VARCHAR(150) NOT NULL,         -- email đăng nhập scoped theo restaurant
   display_name   VARCHAR(150),
   phone          VARCHAR(30),
@@ -242,7 +243,7 @@ CREATE TABLE IF NOT EXISTS restaurant_account_memberships (
   restaurant_id        UUID NOT NULL,           -- lặp lại để query nhanh/consistency
   branch_id            UUID,                    -- NULL => quyền cấp brand
   role_in_restaurant   VARCHAR(30) NOT NULL
-                       CHECK (role_in_restaurant IN ('owner_main','owner','manager','staff')),
+                       CHECK (role_in_restaurant IN ('owner_main','owner','manager','staff', 'shipper')),
   -- Quyền hạt mịn (tùy chọn):
   can_manage_branch      BOOLEAN NOT NULL DEFAULT FALSE,
   can_manage_menu      BOOLEAN NOT NULL DEFAULT FALSE,
@@ -263,7 +264,7 @@ CREATE TABLE IF NOT EXISTS restaurant_account_memberships (
   CONSTRAINT chk_ram_scope_logic CHECK (
     (role_in_restaurant = 'owner_main' AND branch_id IS NULL)
     OR
-    (role_in_restaurant IN ('manager','staff') AND branch_id IS NOT NULL)
+    (role_in_restaurant IN ('manager','staff','shipper') AND branch_id IS NOT NULL)
     OR
     (role_in_restaurant = 'owner')
   ),
@@ -324,6 +325,41 @@ CREATE INDEX IF NOT EXISTS idx_rat_exp     ON restaurant_account_tokens(expires_
 CREATE UNIQUE INDEX IF NOT EXISTS uq_rat_active
   ON restaurant_account_tokens(account_id, purpose)
   WHERE consumed_at IS NULL;
+
+-- =====================================================================
+-- 17) SHIPPER_PROFILES: hồ sơ nhân viên giao hàng (thuộc user-service)
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS shipper_profiles (
+  id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  account_id       UUID UNIQUE NOT NULL,     -- 1-1 với restaurant_accounts
+  full_name        VARCHAR(150),
+  phone            VARCHAR(30),
+  avatar_url       TEXT,
+  vehicle_type     VARCHAR(30) NOT NULL DEFAULT 'motorbike'
+                     CHECK (vehicle_type IN ('motorbike','bicycle','car')),
+  license_plate    VARCHAR(20),
+  identity_number  VARCHAR(20),
+  is_verified      BOOLEAN NOT NULL DEFAULT FALSE,   -- đã được duyệt giấy tờ
+  is_active        BOOLEAN NOT NULL DEFAULT TRUE,    -- có được phép nhận đơn không
+  current_status   VARCHAR(30) NOT NULL DEFAULT 'offline'
+                     CHECK (current_status IN ('offline','available','delivering','suspended')),
+  last_lat         NUMERIC(10,6),            -- vị trí GPS gần nhất
+  last_lng         NUMERIC(10,6),
+  last_seen_at     TIMESTAMPTZ,              -- thời điểm cập nhật vị trí cuối cùng
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  CONSTRAINT fk_shipper_profiles_account FOREIGN KEY (account_id)
+    REFERENCES restaurant_accounts(id) ON DELETE CASCADE
+);
+
+-- Các chỉ mục phục vụ tìm kiếm / theo dõi hiệu suất
+CREATE INDEX IF NOT EXISTS idx_shipper_profiles_account    ON shipper_profiles(account_id);
+CREATE INDEX IF NOT EXISTS idx_shipper_profiles_status      ON shipper_profiles(current_status);
+CREATE INDEX IF NOT EXISTS idx_shipper_profiles_active      ON shipper_profiles(is_active);
+CREATE INDEX IF NOT EXISTS idx_shipper_profiles_last_seen   ON shipper_profiles(last_seen_at);
+
+
 
 -- =========================================================
 -- 0️⃣ ROLE DEFINITIONS
@@ -398,13 +434,14 @@ ON CONFLICT (user_id) DO NOTHING;
 DROP TABLE tmp_admin_seed;
 
 -- =========================================================
--- 2️⃣ OWNER SEED 
+-- 2️⃣ OWNER SEED (brand-level)
 -- =========================================================
 
 DROP TABLE IF EXISTS tmp_owner_seed;
 CREATE TEMP TABLE tmp_owner_seed (
   user_id UUID,
   restaurant_id UUID,
+  branch_id UUID,           -- thêm cột mới (chi nhánh chính)
   account_id UUID,
   email TEXT,
   first_name TEXT,
@@ -419,10 +456,11 @@ CREATE TEMP TABLE tmp_owner_seed (
   account_phone TEXT
 );
 
-
+-- 🟢 TODO: Điền branch_id thật từ bảng restaurant_branches (chi nhánh chính của mỗi brand)
 INSERT INTO tmp_owner_seed (
   user_id,
   restaurant_id,
+  branch_id,
   account_id,
   email,
   first_name,
@@ -437,17 +475,18 @@ INSERT INTO tmp_owner_seed (
   account_phone
 )
 VALUES
-  ('11111111-1111-4111-8111-000000000101'::uuid, '21111111-1111-4111-8111-000000000101'::uuid, '51111111-1111-4111-8111-000000000101'::uuid, 'lotte.owner@foodfast.vn', 'Minji', 'Park', '0901000101', 'Lotte Vietnam Co., Ltd.', '0101234561', '469 Le Loi, District 1, Ho Chi Minh City', 'Minji Park', 'owner@lottefoodhall.vn', 'Lotte Food Hall Owner', '02836223344'),
-  ('11111111-1111-4111-8111-000000000102'::uuid, '21111111-1111-4111-8111-000000000102'::uuid, '51111111-1111-4111-8111-000000000102'::uuid, 'kfc.owner@foodfast.vn', 'David', 'Nguyen', '0902000202', 'KFC Vietnam JSC', '0301234562', '94 Nguyen Trai, District 5, Ho Chi Minh City', 'David Nguyen', 'owner@kfcvietnam.vn', 'KFC Vietnam Owner', '19006886'),
-  ('11111111-1111-4111-8111-000000000103'::uuid, '21111111-1111-4111-8111-000000000103'::uuid, '51111111-1111-4111-8111-000000000103'::uuid, 'jollibee.owner@foodfast.vn', 'Maria', 'Tran', '0903000303', 'Jollibee Vietnam Co., Ltd.', '0301234563', '5 Tran Hung Dao, District 1, Ho Chi Minh City', 'Maria Tran', 'owner@jollibee.vn', 'Jollibee Vietnam Owner', '19001533'),
-  ('11111111-1111-4111-8111-000000000104'::uuid, '21111111-1111-4111-8111-000000000104'::uuid, '51111111-1111-4111-8111-000000000104'::uuid, 'busan.owner@foodfast.vn', 'Jiho', 'Lee', '0904000404', 'Busan Bistro Company Limited', '0311234564', '12 Nguyen Hue, District 1, Ho Chi Minh City', 'Jiho Lee', 'owner@busanbistro.vn', 'Busan Bistro Owner', '02822997788'),
-  ('11111111-1111-4111-8111-000000000105'::uuid, '21111111-1111-4111-8111-000000000105'::uuid, '51111111-1111-4111-8111-000000000105'::uuid, 'sasin.owner@foodfast.vn', 'Phuong', 'Le', '0905000505', 'Sasin Hotpot Vietnam', '0311234565', '88 Tran Hung Dao, District 5, Ho Chi Minh City', 'Phuong Le', 'owner@sasinhotpot.vn', 'Sasin Hotpot Owner', '02822112211'),
-  ('11111111-1111-4111-8111-000000000106'::uuid, '21111111-1111-4111-8111-000000000106'::uuid, '51111111-1111-4111-8111-000000000106'::uuid, 'highlands.owner@foodfast.vn', 'Lan', 'Pham', '0906000606', 'Highlands Coffee Service JSC', '0311234566', '44 Ngo Duc Ke, District 1, Ho Chi Minh City', 'Lan Pham', 'owner@highlandscoffee.vn', 'Highlands Coffee Owner', '02862744444'),
-  ('11111111-1111-4111-8111-000000000107'::uuid, '21111111-1111-4111-8111-000000000107'::uuid, '51111111-1111-4111-8111-000000000107'::uuid, 'katinat.owner@foodfast.vn', 'Bao', 'Vo', '0907000707', 'Katinat Saigon Kafe', '0311234567', '58 Ly Tu Trong, District 1, Ho Chi Minh City', 'Bao Vo', 'owner@katinat.vn', 'Katinat Owner', '02866886688'),
-  ('11111111-1111-4111-8111-000000000108'::uuid, '21111111-1111-4111-8111-000000000108'::uuid, '51111111-1111-4111-8111-000000000108'::uuid, 'bonchon.owner@foodfast.vn', 'Hana', 'Kim', '0908000808', 'Bonchon Vietnam Ltd.', '0311234568', '5B Nguyen Thi Minh Khai, District 1, Ho Chi Minh City', 'Hana Kim', 'owner@bonchon.vn', 'Bonchon Owner', '02839393939'),
-  ('11111111-1111-4111-8111-000000000109'::uuid, '21111111-1111-4111-8111-000000000109'::uuid, '51111111-1111-4111-8111-000000000109'::uuid, 'texas.owner@foodfast.vn', 'Quang', 'Pham', '0909000909', 'Texas Chicken Vietnam', '0311234569', '250 Le Loi, District 1, Ho Chi Minh City', 'Quang Pham', 'owner@texaschicken.vn', 'Texas Chicken Owner', '02838486666'),
-  ('11111111-1111-4111-8111-000000000110'::uuid, '21111111-1111-4111-8111-000000000110'::uuid, '51111111-1111-4111-8111-000000000110'::uuid, 'pizza4ps.owner@foodfast.vn', 'Yuki', 'Matsumoto', '0910000100', 'Pizza 4Ps Corporation', '0311234570', '8/15 Le Thanh Ton, District 1, Ho Chi Minh City', 'Yuki Matsumoto', 'owner@pizza4ps.vn', 'Pizza 4Ps Owner', '02836229988');
+  ('11111111-1111-4111-8111-000000000101'::uuid, '21111111-1111-4111-8111-000000000101'::uuid, NULL, '51111111-1111-4111-8111-000000000101'::uuid, 'lotte.owner@foodfast.vn', 'Minji', 'Park', '0901000101', 'Lotte Vietnam Co., Ltd.', '0101234561', '469 Le Loi, District 1, Ho Chi Minh City', 'Minji Park', 'owner@lottefoodhall.vn', 'Lotte Food Hall Owner', '02836223344'),
+  ('11111111-1111-4111-8111-000000000102'::uuid, '21111111-1111-4111-8111-000000000102'::uuid, NULL, '51111111-1111-4111-8111-000000000102'::uuid, 'kfc.owner@foodfast.vn', 'David', 'Nguyen', '0902000202', 'KFC Vietnam JSC', '0301234562', '94 Nguyen Trai, District 5, Ho Chi Minh City', 'David Nguyen', 'owner@kfcvietnam.vn', 'KFC Vietnam Owner', '19006886'),
+  ('11111111-1111-4111-8111-000000000103'::uuid, '21111111-1111-4111-8111-000000000103'::uuid, NULL, '51111111-1111-4111-8111-000000000103'::uuid, 'jollibee.owner@foodfast.vn', 'Maria', 'Tran', '0903000303', 'Jollibee Vietnam Co., Ltd.', '0301234563', '5 Tran Hung Dao, District 1, Ho Chi Minh City', 'Maria Tran', 'owner@jollibee.vn', 'Jollibee Vietnam Owner', '19001533'),
+  ('11111111-1111-4111-8111-000000000104'::uuid, '21111111-1111-4111-8111-000000000104'::uuid, NULL, '51111111-1111-4111-8111-000000000104'::uuid, 'busan.owner@foodfast.vn', 'Jiho', 'Lee', '0904000404', 'Busan Bistro Company Limited', '0311234564', '12 Nguyen Hue, District 1, Ho Chi Minh City', 'Jiho Lee', 'owner@busanbistro.vn', 'Busan Bistro Owner', '02822997788'),
+  ('11111111-1111-4111-8111-000000000105'::uuid, '21111111-1111-4111-8111-000000000105'::uuid, NULL, '51111111-1111-4111-8111-000000000105'::uuid, 'sasin.owner@foodfast.vn', 'Phuong', 'Le', '0905000505', 'Sasin Hotpot Vietnam', '0311234565', '88 Tran Hung Dao, District 5, Ho Chi Minh City', 'Phuong Le', 'owner@sasinhotpot.vn', 'Sasin Hotpot Owner', '02822112211'),
+  ('11111111-1111-4111-8111-000000000106'::uuid, '21111111-1111-4111-8111-000000000106'::uuid, NULL, '51111111-1111-4111-8111-000000000106'::uuid, 'highlands.owner@foodfast.vn', 'Lan', 'Pham', '0906000606', 'Highlands Coffee Service JSC', '0311234566', '44 Ngo Duc Ke, District 1, Ho Chi Minh City', 'Lan Pham', 'owner@highlandscoffee.vn', 'Highlands Coffee Owner', '02862744444'),
+  ('11111111-1111-4111-8111-000000000107'::uuid, '21111111-1111-4111-8111-000000000107'::uuid, NULL, '51111111-1111-4111-8111-000000000107'::uuid, 'katinat.owner@foodfast.vn', 'Bao', 'Vo', '0907000707', 'Katinat Saigon Kafe', '0311234567', '58 Ly Tu Trong, District 1, Ho Chi Minh City', 'Bao Vo', 'owner@katinat.vn', 'Katinat Owner', '02866886688'),
+  ('11111111-1111-4111-8111-000000000108'::uuid, '21111111-1111-4111-8111-000000000108'::uuid, NULL, '51111111-1111-4111-8111-000000000108'::uuid, 'bonchon.owner@foodfast.vn', 'Hana', 'Kim', '0908000808', 'Bonchon Vietnam Ltd.', '0311234568', '5B Nguyen Thi Minh Khai, District 1, Ho Chi Minh City', 'Hana Kim', 'owner@bonchon.vn', 'Bonchon Owner', '02839393939'),
+  ('11111111-1111-4111-8111-000000000109'::uuid, '21111111-1111-4111-8111-000000000109'::uuid, NULL, '51111111-1111-4111-8111-000000000109'::uuid, 'texas.owner@foodfast.vn', 'Quang', 'Pham', '0909000909', 'Texas Chicken Vietnam', '0311234569', '250 Le Loi, District 1, Ho Chi Minh City', 'Quang Pham', 'owner@texaschicken.vn', 'Texas Chicken Owner', '02838486666'),
+  ('11111111-1111-4111-8111-000000000110'::uuid, '21111111-1111-4111-8111-000000000110'::uuid, NULL, '51111111-1111-4111-8111-000000000110'::uuid, 'pizza4ps.owner@foodfast.vn', 'Yuki', 'Matsumoto', '0910000100', 'Pizza 4Ps Corporation', '0311234570', '8/15 Le Thanh Ton, District 1, Ho Chi Minh City', 'Yuki Matsumoto', 'owner@pizza4ps.vn', 'Pizza 4Ps Owner', '02836229988');
 
+-- =========================================================
 -- 2️⃣.1 Tạo users (owner)
 INSERT INTO users (id, email, first_name, last_name, phone, is_active, email_verified)
 SELECT user_id, email, first_name, last_name, phone, TRUE, TRUE
@@ -510,9 +549,9 @@ FROM tmp_owner_seed seed
 CROSS JOIN owner_role
 ON CONFLICT (user_id, role_id) DO NOTHING;
 
--- 2️⃣.5 Restaurant accounts
-INSERT INTO restaurant_accounts (id, restaurant_id, login_email, display_name, phone, user_id, is_active)
-SELECT account_id, restaurant_id, login_email, display_name, account_phone, user_id, TRUE
+-- 2️⃣.5 Restaurant accounts (đã có branch_id)
+INSERT INTO restaurant_accounts (id, restaurant_id, branch_id, login_email, display_name, phone, user_id, is_active)
+SELECT account_id, restaurant_id, branch_id, login_email, display_name, account_phone, user_id, TRUE
 FROM tmp_owner_seed
 ON CONFLICT (id) DO NOTHING;
 
@@ -538,7 +577,7 @@ INSERT INTO restaurant_account_memberships (
 SELECT
   account_id,
   restaurant_id,
-  NULL,
+  branch_id,  -- ⚠️ giờ có thể NULL hoặc chi nhánh cụ thể
   'owner_main',
   TRUE,
   TRUE,
@@ -550,3 +589,91 @@ FROM tmp_owner_seed
 ON CONFLICT (account_id, branch_id) DO NOTHING;
 
 DROP TABLE tmp_owner_seed;
+
+-- =========================================================
+-- 3️⃣ SHIPPER SEED (Busan Bistro)
+-- =========================================================
+
+DROP TABLE IF EXISTS tmp_shipper_seed;
+CREATE TEMP TABLE tmp_shipper_seed (
+  account_id    UUID,
+  restaurant_id UUID,
+  branch_id     UUID,         -- thêm chi nhánh cụ thể
+  login_email   TEXT,
+  display_name  TEXT,
+  phone         TEXT,
+  user_id       UUID
+);
+
+-- 🟢 TODO: điền branch_id thật từ bảng restaurant_branches
+INSERT INTO tmp_shipper_seed (account_id, restaurant_id, branch_id, login_email, display_name, phone, user_id)
+VALUES
+  ('61111111-1111-4111-8111-000000000141'::uuid, '21111111-1111-4111-8111-000000000104'::uuid, '31111111-1111-4111-8111-000000000208', 'shipper1@busanbistro.vn', 'Busan Shipper #1', '0909000141', '11111111-1111-4111-8111-000000000104'),
+  ('61111111-1111-4111-8111-000000000142'::uuid, '21111111-1111-4111-8111-000000000104'::uuid, '31111111-1111-4111-8111-000000000209', 'shipper2@busanbistro.vn', 'Busan Shipper #2', '0909000142', '11111111-1111-4111-8111-000000000104'),
+  ('61111111-1111-4111-8111-000000000143'::uuid, '21111111-1111-4111-8111-000000000104'::uuid, '31111111-1111-4111-8111-000000000210', 'shipper3@busanbistro.vn', 'Busan Shipper #3', '0909000143', '11111111-1111-4111-8111-000000000104');
+
+-- =========================================================
+-- 3️⃣.1 Tài khoản nhà hàng cho shipper
+-- =========================================================
+INSERT INTO restaurant_accounts (id, restaurant_id, branch_id, login_email, display_name, phone, user_id, is_active)
+SELECT account_id, restaurant_id, branch_id, login_email, display_name, phone, user_id, TRUE
+FROM tmp_shipper_seed
+ON CONFLICT (id) DO NOTHING;
+
+-- =========================================================
+-- 3️⃣.2 Gán mật khẩu cho shipper (bcrypt của "shipper123")
+-- bcrypt: $2b$10$ouesWDcuLaI5RoHqBq0huujaz/F2GTR5vASH3/ViuY2GZcgxl77z6
+INSERT INTO restaurant_account_credentials (account_id, password_hash, is_temp)
+SELECT account_id, '$2b$10$ouesWDcuLaI5RoHqBq0huujaz/F2GTR5vASH3/ViuY2GZcgxl77z6', FALSE
+FROM tmp_shipper_seed
+ON CONFLICT (account_id) DO NOTHING;
+
+-- =========================================================
+-- 3️⃣.3 Membership cho shipper (mỗi chi nhánh 1 người)
+-- =========================================================
+INSERT INTO restaurant_account_memberships (
+  account_id,
+  restaurant_id,
+  branch_id,
+  role_in_restaurant,
+  can_manage_branch,
+  can_manage_menu,
+  can_manage_orders,
+  can_manage_finance,
+  can_manage_staff,
+  is_active
+)
+SELECT
+  account_id,
+  restaurant_id,
+  branch_id,
+  'shipper',
+  FALSE, FALSE, TRUE, FALSE, FALSE,
+  TRUE
+FROM tmp_shipper_seed
+ON CONFLICT (account_id, branch_id) DO NOTHING;
+
+-- =========================================================
+-- 3️⃣.4 Hồ sơ chi tiết shipper (profile)
+-- =========================================================
+INSERT INTO shipper_profiles (
+  id,
+  account_id,
+  full_name,
+  phone,
+  vehicle_type,
+  license_plate,
+  is_verified,
+  is_active,
+  current_status
+)
+VALUES
+  (gen_random_uuid(), '61111111-1111-4111-8111-000000000141'::uuid,
+   'Nguyen Van A', '0909000141', 'motorbike', '59A1-14141', TRUE, TRUE, 'available'),
+  (gen_random_uuid(), '61111111-1111-4111-8111-000000000142'::uuid,
+   'Tran Van B', '0909000142', 'motorbike', '59A1-14242', TRUE, TRUE, 'available'),
+  (gen_random_uuid(), '61111111-1111-4111-8111-000000000143'::uuid,
+   'Le Thi C', '0909000143', 'motorbike', '59A1-14343', TRUE, TRUE, 'available')
+ON CONFLICT (account_id) DO NOTHING;
+
+DROP TABLE tmp_shipper_seed;

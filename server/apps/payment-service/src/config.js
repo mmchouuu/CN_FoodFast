@@ -53,6 +53,7 @@ module.exports = {
   STRIPE_WEBHOOK_SECRET: process.env.STRIPE_WEBHOOK_SECRET || '',
   DEFAULT_CURRENCY: process.env.DEFAULT_CURRENCY || 'VND',
   SETTLEMENT_CRON: process.env.SETTLEMENT_CRON || '0 3 * * *',
+
   MOMO: {
     partnerCode: process.env.MOMO_PARTNER_CODE || '',
     accessKey: process.env.MOMO_ACCESS_KEY || '',

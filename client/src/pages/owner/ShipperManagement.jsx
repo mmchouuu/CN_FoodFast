@@ -179,7 +179,3 @@ const InfoPill = ({ label, value }) => (
 export default ShipperManagement;
 
 
-
-
-
-

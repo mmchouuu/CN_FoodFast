@@ -2,6 +2,7 @@ const { pool } = require('../models/payment.model');
 const paymentModel = require('../models/payment.model');
 const stripeService = require('./stripe.service');
 const { publishEvent } = require('../publishers/outbox.publisher');
+const settlementsService = require('./settlements.service');
 
 const insertRefund = async (client, payload) => {
   const {
@@ -124,6 +125,7 @@ async function processRefund({
         refund_id: refund.id,
         amount,
       });
+      await settlementsService.recordRefund(refund, payment);
     } else {
       await publishEvent('RefundFailed', {
         order_id: payment.order_id,
@@ -151,3 +153,4 @@ module.exports = {
   processRefund,
   listRefunds,
 };
+

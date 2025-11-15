@@ -1,4 +1,4 @@
-﻿const { pool } = require('../db');
+const { pool } = require('../db');
 const bcrypt = require('../utils/bcrypt');
 
 function getExecutor(client) {

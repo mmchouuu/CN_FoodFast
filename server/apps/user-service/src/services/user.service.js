@@ -6,7 +6,7 @@ const jwt = require('../utils/jwt');
 const amqp = require('amqplib');
 
 // ===// OTP
-// ===function generateOTP() {
+function generateOTP() {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
@@ -43,7 +43,7 @@ async function sendEmailToQueue(payload) {
 }
 
 // ===// Register
-// ===async function register(payload) {
+async function register(payload) {
   const existing = await userModel.findByEmail(payload.email);
   if (existing) throw new Error('Email already used');
 
@@ -76,7 +76,7 @@ async function sendEmailToQueue(payload) {
 }
 
 // ===// Verify OTP
-// ===async function verifyOTP(email, otp) {
+async function verifyOTP(email, otp) {
   const user = await userModel.findByEmail(email);
   if (!user) throw new Error('User not found');
   if (user.role !== 'customer') throw new Error('OTP verification only for customers');
@@ -86,7 +86,7 @@ async function sendEmailToQueue(payload) {
 }
 
 // ===// Login
-// ===async function login({ email, password }) {
+async function login({ email, password }) {
   const user = await userModel.findByEmail(email);
   if (!user) throw new Error('Invalid credentials');
 
@@ -101,7 +101,7 @@ async function sendEmailToQueue(payload) {
 }
 
 // ===// Admin Approve Restaurant
-// ===async function approveRestaurant(email) {
+async function approveRestaurant(email) {
   const user = await userModel.findByEmail(email);
   if (!user) throw new Error('Restaurant not found');
   if (user.role !== 'restaurant') throw new Error('User is not a restaurant');

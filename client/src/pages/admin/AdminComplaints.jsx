@@ -95,3 +95,4 @@ const StatusBadge = ({ status }) => (
 );
 
 export default AdminComplaints;
+

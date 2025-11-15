@@ -1,4 +1,4 @@
-﻿const bcrypt = require('../utils/bcrypt');
+const bcrypt = require('../utils/bcrypt');
 const jwt = require('../utils/jwt');
 const roleRepository = require('../repositories/role.repository');
 const userRepository = require('../repositories/user.repository');

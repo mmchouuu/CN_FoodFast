@@ -190,10 +190,3 @@ const StatusBadge = ({ status }) => (
 );
 
 export default Promotions;
-
-
-
-
-
-
-

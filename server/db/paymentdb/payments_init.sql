@@ -263,7 +263,6 @@ CREATE TABLE restaurant_settlements (
   
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now(),
-
   UNIQUE (branch_id, period_start, period_end)
 );
 
@@ -287,7 +286,7 @@ CREATE INDEX IF NOT EXISTS idx_rsi_settlement ON restaurant_settlement_items(set
 CREATE TABLE IF NOT EXISTS payouts (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   settlement_id UUID NOT NULL REFERENCES restaurant_settlements(id) ON DELETE CASCADE,
-  restaurant_id UUID NOT NULL,
+  branch_id UUID NOT NULL,
   payout_account_id UUID NOT NULL REFERENCES restaurant_payout_accounts(id),
   amount NUMERIC(12,2) NOT NULL,
   currency VARCHAR(10) NOT NULL DEFAULT 'VND',
@@ -299,7 +298,7 @@ CREATE TABLE IF NOT EXISTS payouts (
   paid_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT now()
 );
-CREATE INDEX IF NOT EXISTS idx_payouts_rest ON payouts(restaurant_id, status);
+CREATE INDEX IF NOT EXISTS idx_payouts_rest ON payouts(branch_id, status);
 
 CREATE TABLE IF NOT EXISTS platform_invoices (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

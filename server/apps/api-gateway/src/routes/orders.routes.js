@@ -29,5 +29,6 @@ router.get('/user/:userId', OrdersController.listOrdersByUser);
 router.get('/:id', OrdersController.getOrderById);
 router.post('/', OrdersController.createOrder);
 router.put('/:id/status', OrdersController.updateOrderStatus);
+router.post('/:id/complete', OrdersController.confirmOrder);
 
 module.exports = router;

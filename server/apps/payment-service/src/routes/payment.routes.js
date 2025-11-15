@@ -24,7 +24,6 @@ router.post('/intents', paymentIntentController.createIntent);
 router.post('/confirm', paymentIntentController.confirmPayment);
 
 router.post('/refunds', refundController.createRefund);
-
 router.get('/', paymentController.listPayments);
 router.post('/', paymentController.createPayment);
 router.get('/:id', paymentController.getPaymentById);

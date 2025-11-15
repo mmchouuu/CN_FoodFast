@@ -60,7 +60,6 @@ async function getPayment(id){
   return res.rows[0];
 }
 
-
 async function findPaymentByTransactionId(transactionId) {
   if (!transactionId) return null;
   const res = await pool.query(
@@ -70,7 +69,6 @@ async function findPaymentByTransactionId(transactionId) {
       ORDER BY created_at DESC
       LIMIT 1`,
     [transactionId],
-
   );
   return res.rows[0] || null;
 }
@@ -305,3 +303,4 @@ module.exports = {
   listRefunds,
   findLatestPaymentsByOrderIds,
 };
+

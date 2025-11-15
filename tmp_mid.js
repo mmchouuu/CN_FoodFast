@@ -1,6 +1,3 @@
-  };
-}
-
 async function verifyOwner({ email, otp }) {
   if (!email || !otp) {
     throw createError('Email and OTP are required');
@@ -118,3 +115,4 @@ async function getOwnerStatus(email) {
 
 async function adminApproveOwner({ ownerId, adminUserId }) {
   if (!ownerId) {
+  }}

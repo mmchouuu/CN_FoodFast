@@ -1,4 +1,4 @@
-﻿const { pool } = require('../db');
+const { pool } = require('../db');
 
 const ROLE_PERMISSIONS = {
   owner_main: {

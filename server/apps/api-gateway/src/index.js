@@ -1,4 +1,4 @@
-// api-gateway/src/index.js
+﻿// // api-gateway/src/index.js
 
 // require('dotenv').config();
 // const fs = require('fs');
@@ -7,7 +7,6 @@
 // const express = require('express');
 // const bodyParser = require('body-parser');
 // const config = require('./config');
-
 // const requestId = require('./middlewares/requestId');
 // const errorHandler = require('./middlewares/errorHandler');
 // const health = require('./health');
@@ -20,7 +19,6 @@
 // const customerOrderRoutes = require('./routes/orders.customer.routes');
 // const ownerOrderRoutes = require('./routes/orders.owner.routes');
 // const adminOrderRoutes = require('./routes/orders.admin.routes');
-
 // const app = express();
 
 // // ======================================================
@@ -74,7 +72,6 @@
 //   if (req.method === 'OPTIONS') return res.sendStatus(204);
 //   next();
 // });
-
 // app.use(requestId);
 
 // app.use('/api/customers', customersRoutes);
@@ -86,9 +83,9 @@
 // app.use('/customer/orders', customerOrderRoutes);
 // app.use('/owner/orders', ownerOrderRoutes);
 // app.use('/admin/orders', adminOrderRoutes);
-
 // app.get('/health', health);
 // app.use(errorHandler);
+
 
 // // ======================================================
 // // 🔹 HTTPS startup
@@ -126,26 +123,20 @@ require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
-
 const express = require('express');
 const bodyParser = require('body-parser');
 const config = require('./config');
-
 const requestId = require('./middlewares/requestId');
 const errorHandler = require('./middlewares/errorHandler');
 const health = require('./health');
-
-// Routes
 const customersRoutes = require('./routes/customers.routes');
 const restaurantsRoutes = require('./routes/restaurants.routes');
 const adminRoutes = require('./routes/admin.routes');
-
 const ordersRoutes = require('./routes/orders.routes');
 const paymentsRoutes = require('./routes/payments.routes');
 const customerOrderRoutes = require('./routes/orders.customer.routes');
 const ownerOrderRoutes = require('./routes/orders.owner.routes');
 const adminOrderRoutes = require('./routes/orders.admin.routes');
-
 const app = express();
 
 // ======================================================
@@ -163,7 +154,6 @@ app.use(
     verify: captureRawBody,
   }),
 );
-
 app.use(
   bodyParser.urlencoded({
     limit: '50mb',
@@ -184,7 +174,7 @@ app.use((req, res, next) => {
   res.header('Access-Control-Allow-Credentials', 'true');
   res.header(
     'Access-Control-Allow-Headers',
-    'Origin, X-Requested-With, Content-Type, Accept, Authorization, x-request-id'
+    'Origin, X-Requested-With, Content-Type, Accept, Authorization, x-request-id, x-user-id, x-user-role, x-customer-id'
   );
   res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
   if (req.method === 'OPTIONS') return res.sendStatus(204);
@@ -192,23 +182,15 @@ app.use((req, res, next) => {
 });
 
 app.use(requestId);
-
-// ======================================================
-// 🔹 ROUTES
-// ======================================================
-
 app.use('/api/customers', customersRoutes);
 app.use('/api/customer', customersRoutes);
 app.use('/api/restaurants', restaurantsRoutes);
 app.use('/api/admin', adminRoutes);
-
 app.use('/api/orders', ordersRoutes);
 app.use('/api/payments', paymentsRoutes);
-
 app.use('/customer/orders', customerOrderRoutes);
 app.use('/owner/orders', ownerOrderRoutes);
 app.use('/admin/orders', adminOrderRoutes);
-
 app.get('/health', health);
 app.use(errorHandler);
 
@@ -234,7 +216,6 @@ const buildHttpsOptions = () => {
 };
 
 const httpsOptions = buildHttpsOptions();
-
 if (httpsOptions) {
   https.createServer(httpsOptions, app).listen(config.port, () => {
     console.log(`API Gateway listening (HTTPS) on port ${config.port}`);

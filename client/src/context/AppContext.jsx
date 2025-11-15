@@ -62,6 +62,8 @@ const DEFAULT_PAYMENT_METHOD =
     'card';
 const ORDER_HISTORY_STATUSES = new Set(['delivered', 'completed', 'cancelled']);
 const ORDER_REVIEWABLE_STATUSES = new Set(['delivered', 'completed']);
+const ORDER_STATUS_SEQUENCE = ['pending', 'confirmed', 'preparing', 'ready', 'delivering', 'completed'];
+const ACTIVE_ORDER_REFRESH_INTERVAL = 15000;
 
 const toNumberOr = (value, fallback = 0) => {
     const parsed = Number(value);
@@ -586,8 +588,27 @@ const adaptAddressFromApi = (address) => {
     };
 };
 
+const formatTimelineTimestamp = (value) => {
+    if (!value) return null;
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+        return null;
+    }
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+};
+
+const normaliseStatusKey = (value) => {
+    if (typeof value !== 'string') {
+        return null;
+    }
+    const key = value.trim().toLowerCase();
+    if (!key) {
+        return null;
+    }
+    return ORDER_STATUS_SEQUENCE.includes(key) ? key : null;
+};
+
 const buildDefaultTimeline = (status, placedAt) => {
-    const ORDER_STATUS_SEQUENCE = ['pending', 'confirmed', 'preparing', 'ready', 'delivering', 'completed'];
     const normalizedStatus = typeof status === 'string' ? status.toLowerCase() : '';
     const statusIndex = ORDER_STATUS_SEQUENCE.indexOf(normalizedStatus);
     const placedTime = placedAt
@@ -606,6 +627,93 @@ const buildDefaultTimeline = (status, placedAt) => {
                 timestamp = 'In progress';
             } else {
                 timestamp = 'Completed';
+            }
+        }
+        return {
+            id: `status-${key}`,
+            label,
+            status: key,
+            completed,
+            timestamp,
+        };
+    });
+};
+
+const buildTimelineFromEvents = (rawOrder, status, placedAt) => {
+    const events = Array.isArray(rawOrder?.events) ? rawOrder.events : [];
+    const metadataTimeline = Array.isArray(rawOrder?.metadata?.timeline)
+        ? rawOrder.metadata.timeline
+        : [];
+    if (!events.length && !metadataTimeline.length && !placedAt) {
+        return null;
+    }
+
+    const timestamps = new Map();
+    if (placedAt) {
+        timestamps.set('pending', placedAt);
+    }
+
+    metadataTimeline.forEach((entry) => {
+        if (!entry) return;
+        const entryStatus = normaliseStatusKey(entry.status || entry.code);
+        if (!entryStatus) return;
+        const resolvedTimestamp = entry.at || entry.timestamp || entry.created_at || null;
+        if (resolvedTimestamp && !timestamps.has(entryStatus)) {
+            timestamps.set(entryStatus, resolvedTimestamp);
+        }
+    });
+
+    events.forEach((event) => {
+        if (!event) {
+            return;
+        }
+        const type = event.event_type || event.type;
+        const payload = event.payload && typeof event.payload === 'object' ? event.payload : {};
+        if (type === 'OrderCreated') {
+            if (event.created_at) {
+                timestamps.set('pending', event.created_at);
+            }
+            return;
+        }
+        if (type === 'OrderStatusUpdated') {
+            const nextStatus =
+                normaliseStatusKey(payload.next) ||
+                normaliseStatusKey(payload.status) ||
+                normaliseStatusKey(payload.to);
+            if (nextStatus) {
+                timestamps.set(nextStatus, event.created_at || payload.at || null);
+            }
+            return;
+        }
+        if (type === 'OrderCompleted') {
+            timestamps.set('completed', event.created_at || payload.at || null);
+            return;
+        }
+        if (type === 'OrderCancelled') {
+            timestamps.set('cancelled', event.created_at || payload.at || null);
+        }
+    });
+
+    if (!timestamps.size) {
+        return null;
+    }
+
+    const normalizedStatus = typeof status === 'string' ? status.toLowerCase() : '';
+    const statusIndex = ORDER_STATUS_SEQUENCE.indexOf(normalizedStatus);
+
+    return ORDER_STATUS_SEQUENCE.map((key, index) => {
+        const label = key.charAt(0).toUpperCase() + key.slice(1);
+        const rawTimestamp = timestamps.get(key);
+        const formattedTimestamp = formatTimelineTimestamp(rawTimestamp);
+        const completed = statusIndex >= 0 ? index <= statusIndex : Boolean(formattedTimestamp);
+        let timestamp = formattedTimestamp;
+        if (!timestamp) {
+            if (statusIndex === index) {
+                timestamp = 'In progress';
+            } else if (index < statusIndex) {
+                timestamp = 'Completed';
+            } else {
+                timestamp = 'Pending';
             }
         }
         return {
@@ -786,7 +894,8 @@ const adaptOrderFromApi = (order) => {
         fallbackSnapshotFromMap?.heroImage ||
         fallbackSnapshotFromMap?.image ||
         restaurantPlaceholderImage;
-    const timeline = buildDefaultTimeline(lowerStatus, placedAt);
+    const timelineFromEvents = buildTimelineFromEvents(order, lowerStatus, placedAt);
+    const timeline = timelineFromEvents || buildDefaultTimeline(lowerStatus, placedAt);
 
     return {
         id: order.id,
@@ -1342,6 +1451,21 @@ export const AppContextProvider = ({ children }) => {
     useEffect(() => {
         refreshOrders();
     }, [refreshOrders]);
+
+    useEffect(() => {
+        if (!authToken || !authProfileId) {
+            return undefined;
+        }
+        if (!activeOrders.length) {
+            return undefined;
+        }
+        const intervalId = setInterval(() => {
+            refreshOrders();
+        }, ACTIVE_ORDER_REFRESH_INTERVAL);
+        return () => {
+            clearInterval(intervalId);
+        };
+    }, [authToken, authProfileId, activeOrders.length, refreshOrders]);
 
     useEffect(() => {
         if (!authToken && !authProfileId) {
@@ -2547,36 +2671,31 @@ export const AppContextProvider = ({ children }) => {
     );
 
     const confirmOrderDelivered = useCallback(
-        async (orderId, options = {}) => {
+        async (orderId) => {
             if (!orderId) {
-                throw new Error('Order identifier is required.');
+                throw new Error('Order identifier is required');
             }
-            // Cho phép fallback qua user_id nếu không có token nhưng đã biết profile id
-            if (!authToken && !authProfileId) {
-                throw new Error('Please sign in to confirm an order.');
-            }
+
             try {
-                const data = await ordersService.confirmOrder(
-                    orderId,
-                    { confirmed: true, ...options },
-                    { userId: authProfileId || undefined },
-                );
+                const data = await ordersService.confirmOrder(orderId);
                 const adapted = adaptOrderFromApi(data);
+
                 if (adapted) {
                     updateOrderCollections(adapted);
                 }
-                toast.success('Cảm ơn bạn! Đơn hàng đã hoàn tất.');
+
+                toast.success('Thank you! Your order is complete.');
                 return adapted;
             } catch (error) {
                 const message =
                     error?.response?.data?.error ||
                     error?.message ||
-                    'Không thể xác nhận đơn hàng. Vui lòng thử lại.';
+                    'Unable to confirm order.';
                 toast.error(message);
                 throw new Error(message);
             }
         },
-        [authToken, authProfileId, updateOrderCollections],
+        [updateOrderCollections],
     );
 
     const applyDiscountCode = (code) => {
@@ -2783,7 +2902,3 @@ export const AppContextProvider = ({ children }) => {
 };
 
 export const useAppContext = () => useContext(AppContext);
-
-
-
-

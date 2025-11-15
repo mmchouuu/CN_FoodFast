@@ -34,20 +34,29 @@ const ensureUserContext = (req, res, next) => {
   if (req.originalUrl?.startsWith('/api/payments/webhook')) {
     return next();
   }
-  if (req.headers.authorization || req.headers.Authorization) {
+
+  const headerUserId =
+    req.headers['x-user-id'] ||
+    req.headers['x-userid'] ||
+    req.headers['x-customer-id'] ||
+    req.headers['x-owner-id'];
+  const bodyUserId = req.body?.user_id || req.body?.userId;
+  const queryUserId = req.query?.user_id || req.query?.userId;
+  const hasExplicitUserContext = Boolean(headerUserId || bodyUserId || queryUserId);
+
+  if ((req.headers.authorization || req.headers.Authorization) && !hasExplicitUserContext) {
     return auth(req, res, next);
   }
 
-  if (req.query?.user_id && !req.headers['x-user-id']) {
-    req.headers['x-user-id'] = req.query.user_id;
+  const resolvedUserId = headerUserId || bodyUserId || queryUserId;
+  if (queryUserId && !headerUserId && resolvedUserId) {
+    req.headers['x-user-id'] = resolvedUserId;
   }
 
-  // Accept direct user context via header/body and normalize to req.user
-  const headerUserId = req.headers['x-user-id'];
-  const bodyUserId = req.body?.user_id;
-  if (headerUserId || bodyUserId) {
-    const userId = headerUserId || bodyUserId;
-    req.user = req.user || { userId };
+  if (resolvedUserId) {
+    req.user = req.user || {};
+    req.user.userId = resolvedUserId;
+    req.user.id = req.user.id || resolvedUserId;
     return next();
   }
 

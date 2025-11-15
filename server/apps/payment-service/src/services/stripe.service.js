@@ -1,5 +1,4 @@
 // payment-service/src/services/stripe.service.js
-
 const Stripe = require('stripe');
 const config = require('../config');
 const paymentMethodModel = require('../models/paymentMethod.model');
@@ -59,7 +58,6 @@ async function createSetupIntent({ customerId, paymentMethodTypes = ['card'] }) 
 
 async function attachPaymentMethod({ customerId, paymentMethodId, setDefault = true }) {
   assertStripe();
-
   let paymentMethod;
   try {
     paymentMethod = await stripeClient.paymentMethods.attach(paymentMethodId, {
@@ -86,13 +84,11 @@ async function attachPaymentMethod({ customerId, paymentMethodId, setDefault = t
     conflictError.details = { attachedCustomerId };
     throw conflictError;
   }
-
   if (setDefault) {
     await stripeClient.customers.update(customerId, {
       invoice_settings: { default_payment_method: paymentMethodId },
     });
   }
-
   return paymentMethod;
 
 }

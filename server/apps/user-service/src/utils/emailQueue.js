@@ -1,4 +1,4 @@
-﻿// user-service/src/utils/emailQueue.js
+// user-service/src/utils/emailQueue.js
 
 const rabbitmq = require('./rabbitmq');
 const { buildEmailTemplate } = require('./otp');

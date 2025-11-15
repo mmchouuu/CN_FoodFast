@@ -13,7 +13,6 @@ const OrderHistory = () => {
     pastOrders,
     getRestaurantById,
     getBrandById,
-
     getDishById,
     currency,
   } =
@@ -100,7 +99,6 @@ const OrderHistory = () => {
                           {branchAddress}
                         </span>
                       ) : null}
-
                     </p>
                   </div>
                 </div>

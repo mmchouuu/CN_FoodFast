@@ -44,6 +44,7 @@ const Signup = () => {
       navigate("/auth/verify", {
         state: { email: email.trim(), userId: result?.userId || null },
       });
+
     } catch (err) {
       setError(
         err?.response?.data?.message ||
