@@ -1,11 +1,12 @@
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAppContext } from "../../context/AppContext";
 
 const OTP_LENGTH = 6;
+const RESEND_DELAY_SECONDS = 5 * 60;
 
 const Verify = () => {
-  const { verifyOtp } = useAppContext();
+  const { verifyOtp, resendSignupOtp } = useAppContext();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -22,9 +23,38 @@ const Verify = () => {
   const [otpDigits, setOtpDigits] = useState(Array(OTP_LENGTH).fill(""));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [resendLoading, setResendLoading] = useState(false);
+  const [cooldown, setCooldown] = useState(() => {
+    try {
+      const stored = Number(localStorage.getItem("pending_otp_sent_at"));
+      if (stored) {
+        const elapsed = Math.floor((Date.now() - stored) / 1000);
+        if (elapsed < RESEND_DELAY_SECONDS) {
+          return RESEND_DELAY_SECONDS - elapsed;
+        }
+      }
+    } catch {
+      // ignore reading failures
+    }
+    return 0;
+  });
   const inputsRef = useRef([]);
 
   const otpValue = useMemo(() => otpDigits.join(""), [otpDigits]);
+  const cooldownLabel = useMemo(() => {
+    if (cooldown <= 0) return "Ready";
+    const minutes = String(Math.floor(cooldown / 60)).padStart(2, "0");
+    const seconds = String(cooldown % 60).padStart(2, "0");
+    return `${minutes}:${seconds}`;
+  }, [cooldown]);
+
+  useEffect(() => {
+    if (cooldown <= 0) return undefined;
+    const timer = setInterval(() => {
+      setCooldown((prev) => (prev <= 1 ? 0 : prev - 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [cooldown]);
 
   const focusInput = (index) => {
     const input = inputsRef.current[index];
@@ -88,6 +118,26 @@ const Verify = () => {
     }
   };
 
+  const handleResendOtp = async () => {
+    if (cooldown > 0 || resendLoading) return;
+    setResendLoading(true);
+    setError("");
+    try {
+      await resendSignupOtp(email.trim());
+      setCooldown(RESEND_DELAY_SECONDS);
+    } catch (err) {
+      setError(
+        err?.response?.data?.message ||
+          err?.message ||
+          "Unable to resend OTP at the moment."
+      );
+    } finally {
+      setResendLoading(false);
+    }
+  };
+
+  const canResend = cooldown <= 0 && !resendLoading;
+
   return (
     <div className="max-padd-container py-20">
       <div className="mx-auto max-w-md rounded-3xl bg-white p-8 shadow">
@@ -130,6 +180,21 @@ const Verify = () => {
               ))}
             </div>
           </div>
+          <div className="flex items-center justify-between text-sm text-gray-600">
+            <span>Didn't get the code?</span>
+            <button
+              type="button"
+              onClick={handleResendOtp}
+              disabled={!canResend}
+              className={`font-semibold ${
+                canResend ? "text-orange-500 hover:underline" : "text-gray-400"
+              }`}
+            >
+              {canResend
+                ? "Resend OTP"
+                : `Resend in ${cooldownLabel}`}
+            </button>
+          </div>
           <button
             type="submit"
             disabled={loading || otpValue.length !== OTP_LENGTH}
@@ -149,4 +214,3 @@ const Verify = () => {
 };
 
 export default Verify;
-

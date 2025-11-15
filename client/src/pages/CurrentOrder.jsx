@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import React, { useEffect, useMemo, useState } from "react";
+import { Link, useLocation } from "react-router-dom";
 import { useAppContext } from "../context/AppContext";
 import {
   restaurantPlaceholderImage,
@@ -113,11 +113,51 @@ const CurrentOrder = () => {
     currency,
     cancelOrder,
     confirmOrderDelivered,
-  } =
-    useAppContext();
+    refreshOrders,
+  } = useAppContext();
+  const location = useLocation();
+  const requestedOrderId = location.state?.orderId || null;
   const [isCancelling, setIsCancelling] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
-  const order = activeOrders[0];
+  const order = useMemo(() => {
+    if (requestedOrderId) {
+      return (
+        activeOrders.find((item) => item.id === requestedOrderId) ||
+        activeOrders[0] ||
+        null
+      );
+    }
+    return activeOrders[0];
+  }, [activeOrders, requestedOrderId]);
+
+  useEffect(() => {
+    if (requestedOrderId && !order && typeof refreshOrders === "function") {
+      refreshOrders();
+    }
+  }, [requestedOrderId, order, refreshOrders]);
+
+  useEffect(() => {
+    if (requestedOrderId && order) {
+      window.history.replaceState(
+        {},
+        document.title,
+        location.pathname + location.search,
+      );
+    }
+  }, [requestedOrderId, order, location.pathname, location.search]);
+
+  if (requestedOrderId && !order) {
+    return (
+      <div className="max-padd-container py-24 text-center">
+        <h1 className="text-3xl font-bold text-gray-900">
+          Loading your new order…
+        </h1>
+        <p className="mt-2 text-gray-500">
+          We just placed your order. Fetching the latest status now.
+        </p>
+      </div>
+    );
+  }
 
   if (!order) {
     return (
@@ -150,7 +190,6 @@ const CurrentOrder = () => {
     restaurantSnapshot?.heroImage ||
     restaurantSnapshot?.image ||
     restaurantPlaceholderImage;
-  const courier = order.courier || {};
   const deliveryAddress = order.deliveryAddress || {};
   const trackingSteps = useMemo(
     () => buildTrackingSteps(order.status, order.placedAt),
@@ -385,50 +424,26 @@ const CurrentOrder = () => {
           </p>
         </div>
 
-        <div className="grid gap-6 md:grid-cols-2">
-          <div className="rounded-3xl bg-white p-6 shadow-sm">
-            <h3 className="text-sm font-semibold uppercase text-gray-400">
-              Driver
-            </h3>
-            <p className="mt-2 text-lg font-semibold text-gray-900">
-              {courier.name || "Assigning driver..."}
-            </p>
-            <p className="text-sm text-gray-500">
-              {courier.phone || "We'll share contact details once available."}
-            </p>
+        <div className="rounded-3xl bg-white p-6 shadow-sm">
+          <h3 className="text-sm font-semibold uppercase text-gray-400">
+            Delivery address
+          </h3>
+          <p className="mt-2 text-sm text-gray-600">
+            {deliveryAddressLine
+              ? `We will deliver to ${deliveryAddressLine}.`
+              : "The courier is heading to your selected address."}
+          </p>
+          {deliveryAddress.instructions ? (
             <p className="mt-2 text-xs text-gray-400">
-              {courier.vehicle || "Vehicle information pending."}
+              Note: {deliveryAddress.instructions}
             </p>
-            <div className="mt-4 flex gap-3">
-              <button className="rounded-full border border-gray-200 px-4 py-2 text-xs font-semibold text-gray-600 hover:border-orange-300 hover:text-orange-500">
-                Message
-              </button>
-              <button className="rounded-full bg-orange-500 px-4 py-2 text-xs font-semibold text-white hover:bg-orange-600">
-                Call driver
-              </button>
-            </div>
-          </div>
-          <div className="rounded-3xl bg-white p-6 shadow-sm">
-            <h3 className="text-sm font-semibold uppercase text-gray-400">
-              Delivery address
-            </h3>
-            <p className="mt-2 text-sm text-gray-600">
-              {deliveryAddressLine
-                ? `We will deliver to ${deliveryAddressLine}.`
-                : "The driver is heading to your selected address."}
-            </p>
-            {deliveryAddress.instructions ? (
-              <p className="mt-2 text-xs text-gray-400">
-                Note: {deliveryAddress.instructions}
-              </p>
-            ) : null}
-            <p className="mt-4 text-xs uppercase text-orange-500">
-              Real time map preview
-            </p>
-            <div className="mt-2 h-40 w-full rounded-2xl bg-gradient-to-br from-gray-100 to-gray-200 text-center text-xs font-semibold uppercase text-gray-400">
-              <div className="flex h-full items-center justify-center">
-                Map preview placeholder
-              </div>
+          ) : null}
+          <p className="mt-4 text-xs uppercase text-orange-500">
+            Real time map preview
+          </p>
+          <div className="mt-2 h-40 w-full rounded-2xl bg-gradient-to-br from-gray-100 to-gray-200 text-center text-xs font-semibold uppercase text-gray-400">
+            <div className="flex h-full items-center justify-center">
+              Map preview placeholder
             </div>
           </div>
         </div>

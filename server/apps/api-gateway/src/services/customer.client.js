@@ -22,6 +22,11 @@ async function login(payload, opts = {}) {
   return res.data;
 }
 
+async function resendOtp(payload, opts = {}) {
+  const res = await client.post('/resend-otp', payload, { headers: opts.headers });
+  return res.data;
+}
+
 async function listAddresses(opts = {}) {
   const res = await client.get('/me/addresses', { headers: opts.headers });
   return res.data;
@@ -56,6 +61,7 @@ module.exports = {
   register,
   verify,
   login,
+  resendOtp,
   listAddresses,
   createAddress,
   updateAddress,
@@ -63,4 +69,3 @@ module.exports = {
   requestPasswordReset,
   resetPassword,
 };
-

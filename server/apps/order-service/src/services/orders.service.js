@@ -72,6 +72,13 @@ class ForbiddenError extends ServiceError {
   }
 }
 
+class ConflictError extends ServiceError {
+  constructor(message, details) {
+    super(message, 409, details);
+    this.name = 'ConflictError';
+  }
+}
+
 const toNumber = (value, fallback = 0) => {
   if (value === null || value === undefined) return fallback;
   const numeric = Number(value);
@@ -958,7 +965,15 @@ async function insertOrderGraph({
   return order;
 }
 
-async function fetchOrdersByIds(orderIds, { client, includeEvents = false, includeRevisions = false } = {}) {
+async function fetchOrdersByIds(
+  orderIds,
+  {
+    client,
+    includeEvents = false,
+    includeRevisions = false,
+    includePayments = true,
+  } = {},
+) {
   if (!orderIds.length) return [];
 
   const orderRes = await client.query(
@@ -1200,15 +1215,16 @@ async function fetchOrdersByIds(orderIds, { client, includeEvents = false, inclu
   }
 
   const hydratedOrders = [];
-  let paymentSummaries = [];
-  try {
-    paymentSummaries = await paymentClient.lookupPayments(orderIds);
-  } catch (error) {
-    paymentSummaries = [];
+  let paymentsByOrder = new Map();
+  if (includePayments) {
+    let paymentSummaries = [];
+    try {
+      paymentSummaries = await paymentClient.lookupPayments(orderIds);
+    } catch (error) {
+      paymentSummaries = [];
+    }
+    paymentsByOrder = new Map(paymentSummaries.map((summary) => [summary.order_id, summary]));
   }
-  const paymentsByOrder = new Map(
-    paymentSummaries.map((summary) => [summary.order_id, summary]),
-  );
   for (const orderId of orderIds) {
     const orderRow = ordersById.get(orderId);
     if (!orderRow) continue;
@@ -1241,7 +1257,7 @@ async function fetchOrdersByIds(orderIds, { client, includeEvents = false, inclu
       order.revisions = revisionsByOrder.get(orderId) || [];
     }
 
-    if (paymentsByOrder.has(orderId)) {
+    if (includePayments && paymentsByOrder.has(orderId)) {
       order.payment_details = paymentsByOrder.get(orderId);
     } else {
       order.payment_details = null;
@@ -1253,8 +1269,19 @@ async function fetchOrdersByIds(orderIds, { client, includeEvents = false, inclu
   return hydratedOrders;
 }
 
-async function fetchOrderById(orderId, { client = pool, includeEvents = true, includeRevisions = true } = {}) {
-  const orders = await fetchOrdersByIds([orderId], { client, includeEvents, includeRevisions });
+async function fetchOrderById(
+  orderId,
+  {
+    client = pool,
+    includeEvents = true,
+    includeRevisions = true,
+    includePayments = true,
+  } = {},
+) {
+  const orders = await fetchOrdersByIds(
+    [orderId],
+    { client, includeEvents, includeRevisions, includePayments },
+  );
   return orders.length ? orders[0] : null;
 }
 
@@ -1447,21 +1474,23 @@ async function createCustomerOrder({ user, payload = {}, context = {} }) {
       'order.created',
     );
 
-    dispatchOrderEvent(
-      'PaymentPending',
-      {
-        order_id: order.id,
-        user_id: order.user_id,
-        restaurant_id: order.restaurant_id,
-        amount: pricing.totals.total_amount,
-        currency: pricing.totals.currency,
-        flow: paymentFlow,
-        method: paymentMethod,
-        payment_method_id: paymentMethodId,
-        branch_id: order.branch_id,
-      },
-      'PaymentPending',
-    );
+    if (paymentFlow === 'online') {
+      dispatchOrderEvent(
+        'PaymentPending',
+        {
+          order_id: order.id,
+          user_id: order.user_id,
+          restaurant_id: order.restaurant_id,
+          amount: pricing.totals.total_amount,
+          currency: pricing.totals.currency,
+          flow: paymentFlow,
+          method: paymentMethod,
+          payment_method_id: paymentMethodId,
+          branch_id: order.branch_id,
+        },
+        'PaymentPending',
+      );
+    }
 
     return finalOrder;
   } catch (error) {
@@ -2033,15 +2062,24 @@ async function confirmCustomerOrderDelivery({ user, orderId, payload = {} }) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const orderRes = await client.query(
-      `
+    await client.query(`SET LOCAL lock_timeout = '5s'`);
+
+    const orderRes = await client
+      .query(
+        `
         SELECT *
         FROM orders
         WHERE id = $1 AND user_id = $2
-        FOR UPDATE
+        FOR UPDATE NOWAIT
       `,
-      [orderId, userId],
-    );
+        [orderId, userId],
+      )
+      .catch((error) => {
+        if (error?.code === '55P03') {
+          throw new ConflictError('order is being updated, please retry shortly');
+        }
+        throw error;
+      });
 
     const order = orderRes.rows[0];
     if (!order) {
@@ -2054,7 +2092,7 @@ async function confirmCustomerOrderDelivery({ user, orderId, payload = {} }) {
 
     if (order.status === 'completed') {
       await client.query('ROLLBACK');
-      return fetchOrderById(orderId);
+      return fetchOrderById(orderId, { includePayments: false });
     }
 
     if (!['delivering', 'ready'].includes(order.status)) {
@@ -2106,7 +2144,11 @@ async function confirmCustomerOrderDelivery({ user, orderId, payload = {} }) {
 
     await client.query('COMMIT');
 
-    const updated = await fetchOrderById(orderId);
+    const updated = await fetchOrderById(orderId, {
+      includeEvents: false,
+      includeRevisions: false,
+      includePayments: false,
+    });
 
     dispatchOrderEvent(
       'order.status_updated',
@@ -2138,6 +2180,12 @@ async function confirmCustomerOrderDelivery({ user, orderId, payload = {} }) {
     return updated;
   } catch (error) {
     await client.query('ROLLBACK');
+    if (error instanceof ConflictError) {
+      throw error;
+    }
+    if (error?.code === '55P03') {
+      throw new ConflictError('order is being updated, please retry shortly');
+    }
     throw error;
   } finally {
     client.release();

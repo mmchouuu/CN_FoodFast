@@ -313,6 +313,56 @@ async function resetPassword({ email, otp, newPassword }) {
   return { message: 'Password updated successfully' };
 }
 
+async function resendVerificationOtp(email) {
+  if (!email) {
+    throw createError('Email is required');
+  }
+
+  const normalizedEmail = email.trim().toLowerCase();
+  const user = await userRepository.findByEmail(normalizedEmail);
+  if (!user) {
+    throw createError('User not found', 404);
+  }
+
+  const roles = await userRepository.getUserRoleCodes(user.id);
+  if (!roles.includes('customer')) {
+    throw createError('Account is not a customer', 403);
+  }
+
+  if (user.email_verified) {
+    throw createError('Account already verified', 400);
+  }
+
+  const existingToken = await tokenRepository.getActiveToken({
+    userId: user.id,
+    purpose: 'verify_email',
+  });
+
+  if (existingToken) {
+    const expiresAt = new Date(existingToken.expires_at);
+    if (expiresAt.getTime() > Date.now()) {
+      const secondsLeft = Math.ceil((expiresAt.getTime() - Date.now()) / 1000);
+      throw createError(
+        `OTP already sent. Please wait ${Math.ceil(secondsLeft / 60)} minute(s) before requesting again.`,
+        429,
+      );
+    }
+  }
+
+  const otpCode = generateOTP();
+  await tokenRepository.createToken({
+    userId: user.id,
+    purpose: 'verify_email',
+    code: otpCode,
+    ttlMs: OTP_TTL_MS,
+  });
+  await sendOtpEmail(normalizedEmail, user.first_name || normalizedEmail, otpCode, 'VERIFY');
+
+  return {
+    message: 'A new OTP has been sent to your email.',
+  };
+}
+
 module.exports = {
   registerCustomer,
   verifyCustomer,
@@ -323,4 +373,5 @@ module.exports = {
   deleteAddress,
   requestPasswordReset,
   resetPassword,
+  resendVerificationOtp,
 };

@@ -339,53 +339,57 @@ ON CONFLICT (code) DO NOTHING;
 -- 1️⃣ ADMIN SEED
 -- =========================================================
 DROP TABLE IF EXISTS tmp_admin_seed;
+
 CREATE TEMP TABLE tmp_admin_seed (
-  user_id UUID,
-  email TEXT,
-  first_name TEXT,
-  last_name TEXT,
-  phone TEXT,
-  full_name TEXT,
-  position TEXT,
-  password_hash TEXT
+  user_id        UUID,
+  email          TEXT,
+  first_name     TEXT,
+  last_name      TEXT,
+  phone          TEXT,
+  full_name      TEXT,
+  position       TEXT,
+  password_hash  TEXT
 );
 
--- bcrypt của "admin123"
-INSERT INTO tmp_admin_seed VALUES
-  (
-    '11111111-1111-4111-8111-000000000001',
-    'admin@foodfast.vn',
-    'System',
-    'Admin',
-    '0900000000',
-    'System Administrator',
-    'Super Admin',
-    '$2b$10$uZDWt4AjQ8RkM95TtZ9Fz.4yvuq38DJKxwFy0P9BFW86vujr0FtTe'
-  );
 
--- 1️⃣.1 Tạo user admin
+-- bcrypt admin123 = $2b$10$uZDWt4AjQ8RkM95TtZ9Fz.4yvuq38DJKxwFy0P9BFW86vujr0FtTe
+INSERT INTO tmp_admin_seed VALUES
+(
+  '11111111-1111-4111-8111-000000000001',
+  'admin@foodfast.vn',
+  'System',
+  'Admin',
+  '0900000000',
+  'System Administrator',
+  'Super Admin',
+  '$2b$10$uZDWt4AjQ8RkM95TtZ9Fz.4yvuq38DJKxwFy0P9BFW86vujr0FtTe'
+);
+
+-- 3️⃣ TẠO USERS
 INSERT INTO users (id, email, first_name, last_name, phone, is_active, email_verified)
 SELECT user_id, email, first_name, last_name, phone, TRUE, TRUE
 FROM tmp_admin_seed
 ON CONFLICT (email) DO NOTHING;
 
--- 1️⃣.2 Gán role admin
-WITH admin_role AS (SELECT id FROM roles WHERE code = 'admin' LIMIT 1)
+
+-- 4️⃣ GÁN ROLE ADMIN CHO USER
+WITH admin_role AS (SELECT id FROM roles WHERE code='admin')
 INSERT INTO user_roles (user_id, role_id)
 SELECT seed.user_id, admin_role.id
 FROM tmp_admin_seed seed
 CROSS JOIN admin_role
 ON CONFLICT DO NOTHING;
 
--- 1️⃣.3 Gán mật khẩu
-WITH admin_role AS (SELECT id FROM roles WHERE code = 'admin' LIMIT 1)
+-- 5️⃣ GÁN PASSWORD ADMIN
+WITH admin_role AS (SELECT id FROM roles WHERE code='admin')
 INSERT INTO user_credentials (user_id, role_id, password_hash, is_temp)
 SELECT seed.user_id, admin_role.id, seed.password_hash, FALSE
 FROM tmp_admin_seed seed
 CROSS JOIN admin_role
 ON CONFLICT (user_id, role_id) DO NOTHING;
 
--- 1️⃣.4 Hồ sơ admin
+
+-- 6️⃣ TẠO ADMIN PROFILE
 INSERT INTO admin_profiles (user_id, full_name, position, permissions)
 SELECT user_id, full_name, position, '{"all": true}'::jsonb
 FROM tmp_admin_seed

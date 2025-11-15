@@ -11,6 +11,11 @@ const catalogAdminClient = createAxiosInstance({
   timeout: config.requestTimeout,
 });
 
+async function login(payload = {}, opts = {}) {
+  const res = await userAdminClient.post('/login', payload, { headers: opts.headers });
+  return res.data;
+}
+
 async function listCustomers(opts = {}) {
   const res = await userAdminClient.get('/customers', { headers: opts.headers });
   return res.data;
@@ -82,4 +87,5 @@ module.exports = {
   assignTax,
   createCalendar,
   createGlobalPromotion,
+  login,
 };

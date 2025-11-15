@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { NavLink, Outlet } from "react-router-dom";
+import React, { useEffect, useMemo, useState } from "react";
+import { NavLink, Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
 import GradientBackgrounds from "./GradientBackgrounds";
 
 const navItems = [
@@ -14,8 +14,70 @@ const navItems = [
     { path: "/admin/activity", label: "Activity Monitoring" },
 ];
 
+const getStoredAdminProfile = () => {
+    try {
+        const raw = localStorage.getItem('admin_profile');
+        return raw ? JSON.parse(raw) : null;
+    } catch {
+        return null;
+    }
+};
+
 const AdminLayout = () => {
+    const navigate = useNavigate();
+    const location = useLocation();
     const [sidebarOpen, setSidebarOpen] = useState(false);
+    const [token, setToken] = useState(() => {
+        try {
+            return localStorage.getItem('admin_token');
+        } catch {
+            return null;
+        }
+    });
+    const [profile, setProfile] = useState(() => getStoredAdminProfile());
+
+    useEffect(() => {
+        const syncAuth = () => {
+            try {
+                setToken(localStorage.getItem('admin_token'));
+                setProfile(getStoredAdminProfile());
+            } catch {
+                setToken(null);
+                setProfile(null);
+            }
+        };
+        window.addEventListener('storage', syncAuth);
+        window.addEventListener('admin:auth-changed', syncAuth);
+        window.addEventListener('admin:expired', syncAuth);
+        return () => {
+            window.removeEventListener('storage', syncAuth);
+            window.removeEventListener('admin:auth-changed', syncAuth);
+            window.removeEventListener('admin:expired', syncAuth);
+        };
+    }, []);
+
+    const initials = useMemo(() => {
+        if (!profile?.full_name) return 'AD';
+        const parts = profile.full_name.split(' ').filter(Boolean);
+        if (!parts.length) return 'AD';
+        if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+        return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
+    }, [profile]);
+
+    const handleLogout = () => {
+        try {
+            localStorage.removeItem('admin_token');
+            localStorage.removeItem('admin_profile');
+        } catch {
+            // ignore
+        }
+        window.dispatchEvent(new CustomEvent('admin:auth-changed'));
+        navigate('/admin/login');
+    };
+
+    if (!token) {
+        return <Navigate to="/admin/login" state={{ redirect: location.pathname + location.search }} replace />;
+    }
 
     return (
         <div className="relative min-h-screen bg-neutral-50 text-neutral-800">
@@ -95,7 +157,16 @@ const AdminLayout = () => {
                                 <button className="rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm font-medium text-neutral-600 hover:text-neutral-900">
                                     Refresh
                                 </button>
-                                <div className="h-9 w-9 rounded-full bg-gradient-to-r from-neutral-400 to-neutral-600" />
+                                <button
+                                    type="button"
+                                    onClick={handleLogout}
+                                    className="rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm font-medium text-neutral-600 hover:text-neutral-900"
+                                >
+                                    Sign out
+                                </button>
+                                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-r from-neutral-400 to-neutral-600 text-sm font-semibold text-white">
+                                    {initials}
+                                </div>
                             </div>
                         </div>
                     </header>

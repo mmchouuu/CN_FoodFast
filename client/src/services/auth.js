@@ -48,6 +48,14 @@ export const authService = {
     return data;
   },
 
+  async resendOtp(email) {
+    const body = {
+      email: typeof email === 'string' ? email.trim() : email,
+    };
+    const { data } = await api.post(`${basePath}/resend-otp`, body);
+    return data;
+  },
+
   async requestPasswordReset(email) {
     const body = { email: typeof email === 'string' ? email.trim() : email };
     const { data } = await api.post(`${basePath}/forgot-password`, body);

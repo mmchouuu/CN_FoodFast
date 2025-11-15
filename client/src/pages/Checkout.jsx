@@ -96,11 +96,6 @@ const Checkout = () => {
   const paymentMethods = useMemo(
     () => [
       {
-        id: "cod",
-        label: "Cash on delivery (COD)",
-        description: "Hand the cash to our courier when your food arrives.",
-      },
-      {
         id: "wallet",
         label: "MoMo wallet",
         description: "Pay via your linked MoMo wallet for instant confirmation.",
@@ -170,9 +165,19 @@ const Checkout = () => {
       // toast.success("Order confirmed! We're preparing your meal.");
       // navigate("/orders/current");
 
-      await placeOrder({ paymentMethod: method, address: selectedAddress });
+      const createdOrder = await placeOrder({
+        paymentMethod: method,
+        address: selectedAddress,
+      });
+      const firstOrder = Array.isArray(createdOrder)
+        ? createdOrder[0]
+        : createdOrder;
       toast.success("Order successful");
-      navigate("/my-orders");
+      if (firstOrder?.id) {
+        navigate("/orders/current", { state: { orderId: firstOrder.id } });
+      } else {
+        navigate("/orders/current");
+      }
     } catch (error) {
       const message =
         error?.message || "We could not place your order. Please try again.";
@@ -236,7 +241,7 @@ const Checkout = () => {
   };
 
   return (
-    <div className="max-padd-container grid gap-10 py-24 lg:grid-cols-[2fr,1.2fr]">
+    <div className="max-padd-container grid gap-10 py-24 lg:grid-cols-2">
       <section className="space-y-12">
         <div className="rounded-3xl bg-white p-8 shadow-sm">
           <h2 className="text-xl font-semibold text-gray-900">
@@ -460,7 +465,7 @@ const Checkout = () => {
           <p className="mt-1 text-sm text-gray-500">
             Choose how you'd like to pay for this order.
           </p>
-          <div className="mt-6 grid gap-4 md:grid-cols-3">
+          <div className="mt-6 grid gap-4 md:grid-cols-2">
             {paymentMethods.map((option) => {
               // const isSelected = activePaymentMethodId === option.id;
               // const isBank = option.id === "bank";
@@ -605,8 +610,9 @@ const Checkout = () => {
             </div>
           </div>
         ) : null}
+      </section>
 
-
+      <aside className="space-y-10">
         <div className="rounded-3xl bg-white p-8 shadow-sm">
           <h2 className="text-xl font-semibold text-gray-900">
             Promo code
@@ -632,64 +638,64 @@ const Checkout = () => {
             </p>
           ) : null}
         </div>
-      </section>
 
-      <aside className="rounded-3xl bg-white p-8 shadow-lg">
-        <h2 className="text-xl font-semibold text-gray-900">
-          Order summary
-        </h2>
-        <p className="mt-1 text-sm text-gray-500">
-          Review the charges before confirming.
-        </p>
+        <div className="rounded-3xl bg-white p-8 shadow-lg">
+          <h2 className="text-xl font-semibold text-gray-900">
+            Order summary
+          </h2>
+          <p className="mt-1 text-sm text-gray-500">
+            Review the charges before confirming.
+          </p>
 
-        <div className="mt-8 space-y-4 text-sm text-gray-600">
-          <div className="flex items-center justify-between">
-            <span>Subtotal</span>
-            <span className="font-semibold">
-              {currency}
-              {subtotal.toLocaleString()}
-            </span>
+          <div className="mt-8 space-y-4 text-sm text-gray-600">
+            <div className="flex items-center justify-between">
+              <span>Subtotal</span>
+              <span className="font-semibold">
+                {currency}
+                {subtotal.toLocaleString()}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span>Delivery fee</span>
+              <span className="font-semibold">
+                {currency}
+                {shippingFee.toLocaleString()}
+              </span>
+            </div>
+            <div className="flex items-center justify-between text-green-600">
+              <span>Discount</span>
+              <span className="font-semibold">
+                -{currency}
+                {discount.toLocaleString()}
+              </span>
+            </div>
           </div>
-          <div className="flex items-center justify-between">
-            <span>Delivery fee</span>
-            <span className="font-semibold">
-              {currency}
-              {shippingFee.toLocaleString()}
-            </span>
+
+          <div className="mt-6 border-t border-gray-200 pt-6">
+            <div className="flex items-center justify-between text-lg font-bold text-gray-900">
+              <span>Total</span>
+              <span>
+                {currency}
+                {total.toLocaleString()}
+              </span>
+            </div>
           </div>
-          <div className="flex items-center justify-between text-green-600">
-            <span>Discount</span>
-            <span className="font-semibold">
-              -{currency}
-              {discount.toLocaleString()}
-            </span>
-          </div>
+
+          <button
+            onClick={handlePlaceOrder}
+            disabled={isCartEmpty || isPlacingOrder}
+            className={`mt-8 w-full rounded-full px-6 py-3 text-sm font-semibold text-white transition ${
+              isCartEmpty || isPlacingOrder
+                ? "cursor-not-allowed bg-gray-300"
+                : "bg-orange-500 hover:bg-orange-600"
+            }`}
+          >
+            {isPlacingOrder ? "Processing..." : "Proceed to Payment"}
+          </button>
+          <p className="mt-3 text-center text-xs text-gray-400">
+            By placing an order you agree to FoodFast's terms of use.
+          </p>
         </div>
-
-        <div className="mt-6 border-t border-gray-200 pt-6">
-          <div className="flex items-center justify-between text-lg font-bold text-gray-900">
-            <span>Total</span>
-            <span>
-              {currency}
-              {total.toLocaleString()}
-            </span>
-          </div>
-        </div>
-
-        <button
-          onClick={handlePlaceOrder}
-          disabled={isCartEmpty || isPlacingOrder}
-          className={`mt-8 w-full rounded-full px-6 py-3 text-sm font-semibold text-white transition ${
-            isCartEmpty || isPlacingOrder
-              ? "cursor-not-allowed bg-gray-300"
-              : "bg-orange-500 hover:bg-orange-600"
-          }`}
-        >
-          {isPlacingOrder ? "Processing..." : "Proceed to Payment"}
-        </button>
-        <p className="mt-3 text-center text-xs text-gray-400">
-          By placing an order you agree to FoodFast's terms of use.
-        </p>
       </aside>
     </div>
   );

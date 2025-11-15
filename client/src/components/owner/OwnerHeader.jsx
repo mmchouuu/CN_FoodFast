@@ -1,10 +1,11 @@
 import React, { useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAppContext } from "../../context/AppContext";
 
 const buildBadges = (profile = {}) => {
   const isActive = profile.isActive ?? profile.is_active;
   if (isActive) {
-    return [{ label: "Active", className: "bg-emerald-100 text-emerald-600" }];
+     return [];
   }
   if (isActive === false) {
     return [{ label: "Inactive", className: "bg-rose-100 text-rose-600" }];
@@ -13,7 +14,8 @@ const buildBadges = (profile = {}) => {
 };
 
 const OwnerHeader = () => {
-  const { restaurantProfile } = useAppContext();
+  const navigate = useNavigate();
+  const { restaurantProfile, logoutOwner } = useAppContext();
 
   const {
     initials,
@@ -55,6 +57,13 @@ const OwnerHeader = () => {
     };
   }, [restaurantProfile]);
 
+  const handleLogout = () => {
+    if (typeof logoutOwner === 'function') {
+      logoutOwner();
+    }
+    navigate('/restaurant/auth/login', { replace: true });
+  };
+
   return (
     <section className="mb border bg-white border-white p-3 shadow-sm md">
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -68,18 +77,27 @@ const OwnerHeader = () => {
           </div>
         </div>
 
-        {badges.length ? (
-          <div className="flex flex-wrap gap-2 md:justify-end">
-            {badges.map((badge) => (
-              <span
-                key={`${badge.label}`}
-                className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${badge.className}`}
-              >
-                {badge.label}
-              </span>
-            ))}
-          </div>
-        ) : null}
+        <div className="flex flex-col gap-2 md:items-end">
+          {badges.length ? (
+            <div className="flex flex-wrap gap-2 md:justify-end">
+              {badges.map((badge) => (
+                <span
+                  key={`${badge.label}`}
+                  className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${badge.className}`}
+                >
+                  {badge.label}
+                </span>
+              ))}
+            </div>
+          ) : null}
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="inline-flex items-center justify-center rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 md:text-sm"
+          >
+            Log out
+          </button>
+        </div>
       </div>
     </section>
 

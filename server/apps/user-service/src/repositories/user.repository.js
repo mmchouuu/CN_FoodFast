@@ -185,6 +185,41 @@ async function getCredential(userId, roleId, client) {
   return result.rows[0] || null;
 }
 
+async function getAnyCredential(userId, client) {
+  const executor = getExecutor(client);
+  const result = await executor.query(
+    `
+      SELECT *
+      FROM user_credentials
+      WHERE user_id = $1
+      ORDER BY created_at DESC
+      LIMIT 1
+    `,
+    [userId],
+  );
+  return result.rows[0] || null;
+}
+
+async function hasAdminProfile(userId, client) {
+  if (!userId) return false;
+  const executor = getExecutor(client);
+  try {
+    const result = await executor.query(
+      `
+        SELECT 1
+        FROM admin_profiles
+        WHERE user_id = $1
+        LIMIT 1
+      `,
+      [userId],
+    );
+    return Boolean(result.rowCount);
+  } catch (error) {
+    // back compatible: table might not exist on older schemas
+    return false;
+  }
+}
+
 async function createCustomerProfile(userId, client) {
   const executor = getExecutor(client);
   await executor.query(
@@ -400,6 +435,8 @@ module.exports = {
   getUserRoleCodes,
   upsertCredential,
   getCredential,
+  getAnyCredential,
+  hasAdminProfile,
   createCustomerProfile,
   getCustomerProfile,
   createOwnerProfile,

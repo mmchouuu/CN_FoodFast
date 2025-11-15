@@ -56,7 +56,10 @@ const sanitizeUser = (rawUser) => {
 
 const FALLBACK_PRODUCTS = menuDishes;
 const FALLBACK_RESTAURANTS = restaurantList;
-const DEFAULT_PAYMENT_METHOD = paymentOptionList[0]?.id || 'cod';
+const DEFAULT_PAYMENT_METHOD =
+    (paymentOptionList.find((option) => option.id === 'card')?.id) ||
+    paymentOptionList[0]?.id ||
+    'card';
 const ORDER_HISTORY_STATUSES = new Set(['delivered', 'completed', 'cancelled']);
 const ORDER_REVIEWABLE_STATUSES = new Set(['delivered', 'completed']);
 
@@ -67,19 +70,17 @@ const toNumberOr = (value, fallback = 0) => {
 
 const normalizePaymentMethodForSubmit = (value) => {
     const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
-    if (!normalized) return 'cod';
-    if (
-        normalized === 'wallet' ||
-        normalized === 'cod' ||
-        normalized === 'cash' ||
-        normalized === 'cash_on_delivery'
-    ) {
-        return 'cod';
-    }
-    if (normalized === 'bank' || normalized === 'bank_transfer') {
-        return 'bank_transfer';
+    if (!normalized) return 'card';
+    // if (normalized === 'cod' || normalized === 'cash' || normalized === 'cash_on_delivery') {
+    //     return 'cod';
+    // }
+    if (normalized === 'wallet') {
+        return 'wallet';
     }
     if (normalized === 'credit' || normalized === 'debit') {
+        return 'card';
+    }
+    if (normalized === 'card' || normalized === 'stripe') {
         return 'card';
     }
     return normalized;
@@ -1936,6 +1937,8 @@ export const AppContextProvider = ({ children }) => {
             };
         });
 
+        const paymentFlowValue = paymentMethodCanonical === 'card' ? 'online' : 'cash';
+
         const metadata = {
             source: 'web-app',
             discount_code: appliedDiscountCode?.code || null,
@@ -1959,10 +1962,12 @@ export const AppContextProvider = ({ children }) => {
                 metadata.branch_snapshot = branchSnapshots[branchIds[0]];
             }
         }
-        metadata.payment_method = paymentMethodCanonical;
-        if (paymentMethodId) {
-            metadata.payment_method_id = paymentMethodId;
-        }
+        metadata.payment = {
+            method: paymentMethodCanonical,
+            status: 'pending',
+            flow: paymentFlowValue,
+            payment_method_id: paymentMethodId || null,
+        };
         if (notes) {
             metadata.notes = notes;
         }
@@ -1987,6 +1992,8 @@ export const AppContextProvider = ({ children }) => {
             currency: currencyCode,
             payment_method: paymentMethodCanonical,
             payment_method_id: paymentMethodId,
+            payment_flow: paymentFlowValue,
+            paymentFlow: paymentFlowValue,
             fulfillment_type: 'delivery',
             delivery_address: deliveryAddressSnapshot,
             delivery_address_id: deliveryAddressId,
@@ -2029,6 +2036,12 @@ export const AppContextProvider = ({ children }) => {
                 const tasks = createdList.map(async (orderRecord, index) => {
                     try {
                         const paymentAmount = Number(orderRecord.total_amount) || adaptedList[index]?.totalAmount || 0;
+                        const paymentBranchId =
+                            orderRecord.branch_id ||
+                            orderRecord.branchId ||
+                            (branchIds.length === 1 ? branchIds[0] : null) ||
+                            orderRecord.metadata?.branch_id ||
+                            null;
                         const paymentRestaurantId =
                             orderRecord.restaurant_id ||
                             orderRecord.restaurantId ||
@@ -2036,12 +2049,10 @@ export const AppContextProvider = ({ children }) => {
                             primaryRestaurantId ||
                             orderRecord.metadata?.restaurant_id ||
                             null;
-                        const paymentBranchId =
-                            orderRecord.branch_id ||
-                            orderRecord.branchId ||
-                            (branchIds.length === 1 ? branchIds[0] : null) ||
-                            orderRecord.metadata?.branch_id ||
-                            null;
+
+                        if (paymentMethodCanonical !== 'card' || !paymentMethodId) {
+                            return;
+                        }
 
                         const paymentPayload = {
                             order_id: orderRecord.id,
@@ -2053,9 +2064,7 @@ export const AppContextProvider = ({ children }) => {
                             restaurant_id: paymentRestaurantId,
                             branch_id: paymentBranchId,
                         };
-                        if (paymentMethodId) {
-                            paymentPayload.payment_method_id = paymentMethodId;
-                        }
+                        paymentPayload.payment_method_id = paymentMethodId;
                         const paymentRecord = await paymentsService.createPayment(paymentPayload);
                         if (paymentRecord?.status && adaptedList[index]) {
                             adaptedList[index].paymentStatus = paymentRecord.status;
@@ -2325,6 +2334,11 @@ export const AppContextProvider = ({ children }) => {
         try {
             const res = await authService.register({ firstName, lastName, email, password, phone });
             toast.success(res?.message || 'Account created. Please check your email for the OTP.');
+            try {
+                localStorage.setItem('pending_otp_sent_at', Date.now().toString());
+            } catch {
+                // ignore storage failures
+            }
             return res;
         } catch (error) {
             const message = error?.response?.data?.message || error.message || 'Sign up failed';
@@ -2344,7 +2358,7 @@ export const AppContextProvider = ({ children }) => {
         }
     };
 
-    const logoutLocal = () => {
+    const logoutLocal = (message = 'Logged out') => {
         setAuthToken(null);
         setAuthProfile(null);
         setAddresses([]);
@@ -2360,7 +2374,11 @@ export const AppContextProvider = ({ children }) => {
         localStorage.removeItem('pending_user_id');
         localStorage.removeItem('restaurant_token');
         localStorage.removeItem('restaurant_profile');
-        toast('Logged out');
+        toast(message);
+    };
+
+    const logoutOwner = () => {
+        logoutLocal('Signed out of restaurant console.');
     };
 
     const verifyOtp = async (email, otp) => {
@@ -2377,6 +2395,11 @@ export const AppContextProvider = ({ children }) => {
                 localStorage.setItem('auth_profile', JSON.stringify(sanitizedUser));
             }
             toast.success(res?.message || 'Verification successful.');
+            try {
+                localStorage.removeItem('pending_otp_sent_at');
+            } catch {
+                // ignore
+            }
             try {
                 const pending = localStorage.getItem('pending_address');
                 if (pending) {
@@ -2399,6 +2422,28 @@ export const AppContextProvider = ({ children }) => {
             return res;
         } catch (error) {
             const message = error?.response?.data?.message || error.message || 'Verification failed';
+            toast.error(message);
+            throw error;
+        }
+    };
+
+    const resendSignupOtp = async (email) => {
+        if (!email) {
+            const message = 'Please enter your email before requesting a new OTP.';
+            toast.error(message);
+            throw new Error(message);
+        }
+        try {
+            const res = await authService.resendOtp(email);
+            toast.success(res?.message || 'A new OTP has been sent to your inbox.');
+            try {
+                localStorage.setItem('pending_otp_sent_at', Date.now().toString());
+            } catch {
+                // ignore storage issues
+            }
+            return res;
+        } catch (error) {
+            const message = error?.response?.data?.message || error.message || 'Unable to resend OTP right now.';
             toast.error(message);
             throw error;
         }
@@ -2729,7 +2774,9 @@ export const AppContextProvider = ({ children }) => {
         signupWithCredentials,
         requestPasswordReset,
         logoutLocal,
+        logoutOwner,
         verifyOtp,
+        resendSignupOtp,
     };
 
     return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

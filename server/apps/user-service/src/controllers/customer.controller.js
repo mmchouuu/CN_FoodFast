@@ -115,6 +115,16 @@ async function resetPassword(req, res, next) {
   }
 }
 
+async function resendOtp(req, res, next) {
+  try {
+    const { email } = req.body || {};
+    const result = await customerService.resendVerificationOtp(email);
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
   register,
   verify,
@@ -125,4 +135,5 @@ module.exports = {
   deleteAddress,
   forgotPassword,
   resetPassword,
+  resendOtp,
 };

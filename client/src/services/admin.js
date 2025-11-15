@@ -82,6 +82,16 @@ const fetchOwners = async () => {
 };
 
 const adminService = {
+  async login({ email, password, rememberMe } = {}) {
+    const payload = {
+      email: email?.trim(),
+      password,
+      rememberMe: Boolean(rememberMe),
+    };
+    const { data } = await api.post(`${basePath}/login`, payload);
+    return data;
+  },
+
   async getCustomers() {
     const { data } = await api.get(`${basePath}/customers`);
     const items = unwrapItems(data);

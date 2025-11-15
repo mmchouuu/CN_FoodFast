@@ -1,5 +1,14 @@
 ﻿const adminService = require('../services/admin.service');
 
+async function login(req, res, next) {
+  try {
+    const result = await adminService.login(req.body || {});
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
 async function listCustomers(req, res, next) {
   try {
     const { limit, offset } = req.query;
@@ -75,6 +84,7 @@ async function rejectOwner(req, res, next) {
 }
 
 module.exports = {
+  login,
   listCustomers,
   updateCustomerStatus,
   customerDetails,

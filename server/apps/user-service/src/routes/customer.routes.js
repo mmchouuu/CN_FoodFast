@@ -35,6 +35,7 @@ function authMiddleware(req, res, next) {
 router.post('/signup', customerController.register);
 router.post('/verify', customerController.verify);
 router.post('/login', customerController.login);
+router.post('/resend-otp', customerController.resendOtp);
 router.post('/forgot-password', customerController.forgotPassword);
 router.post('/reset-password', customerController.resetPassword);
 

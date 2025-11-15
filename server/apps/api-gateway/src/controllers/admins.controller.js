@@ -4,6 +4,15 @@ function withRequestHeaders(req) {
   return { headers: { 'x-request-id': req.id } };
 }
 
+async function login(req, res, next) {
+  try {
+    const result = await adminClient.login(req.body || {}, withRequestHeaders(req));
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
 async function listCustomers(req, res, next) {
   try {
     const result = await adminClient.listCustomers(withRequestHeaders(req));
@@ -124,4 +133,5 @@ module.exports = {
   assignTax,
   createCalendar,
   createGlobalPromotion,
+  login,
 };

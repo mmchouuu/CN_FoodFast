@@ -118,6 +118,7 @@ import AdminPromotions from './pages/admin/AdminPromotions';
 import AdminActivity from './pages/admin/AdminActivity';
 import PayoutManagement from './pages/admin/PayoutManagement';
 import CODSettlements from './pages/admin/CODSettlements';
+import AdminLogin from './pages/admin/AdminLogin';
 
 const App = () => {
   const { pathname } = useLocation();
@@ -177,6 +178,7 @@ const App = () => {
         </Route>
 
         {/* Admin routes */}
+        <Route path="/admin/login" element={<AdminLogin />} />
         <Route path="/admin" element={<AdminLayout />}>
           <Route index element={<AdminDashboard />} />
           <Route path="customers" element={<AdminCustomers />} />

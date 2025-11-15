@@ -81,7 +81,7 @@ CREATE TABLE IF NOT EXISTS payment_methods (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL,                      -- soft ref: user-service.users.id
   type VARCHAR(50) NOT NULL                   -- 'card'|'wallet'|'bank_transfer'|'cod'
-    CHECK (type IN ('card','wallet','bank_transfer','cod')),
+    CHECK (type IN ('card','wallet')),
   provider VARCHAR(100),                      -- 'stripe'|'zalopay'|'momo'|'napas'...
   provider_data JSONB,                        -- token, customerRef...
   last4 VARCHAR(4),
@@ -111,16 +111,13 @@ CREATE TABLE IF NOT EXISTS payments (
   status VARCHAR(30) NOT NULL DEFAULT 'pending'
     CHECK (status IN ('pending','succeeded','failed','cancelled','refunded','partially_refunded')),
   flow VARCHAR(20) NOT NULL DEFAULT 'online'
-    CHECK (flow IN ('online','cash')),
+    CHECK (flow IN ('online')),
   transaction_id VARCHAR(200),                -- từ PSP (Stripe/MoMo)
   paid_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now(),
   CONSTRAINT chk_payment_method_presence
-    CHECK (
-      (flow = 'cash' AND payment_method_id IS NULL)
-      OR (flow = 'online' AND payment_method_id IS NOT NULL)
-    )
+    CHECK (payment_method_id IS NOT NULL)
 );
 CREATE INDEX IF NOT EXISTS idx_pay_order       ON payments(order_id);
 CREATE INDEX IF NOT EXISTS idx_pay_user        ON payments(user_id);
@@ -205,44 +202,44 @@ CREATE INDEX IF NOT EXISTS idx_op_order ON order_payments(order_id);
 -- =========================================================
 -- 9) BRANCH CASH MANAGEMENT (KÉT)
 -- =========================================================
-CREATE TABLE IF NOT EXISTS branch_cash_sessions (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  branch_id UUID NOT NULL,
-  opened_by UUID,
-  closed_by UUID,
-  opening_float NUMERIC(12,2) NOT NULL DEFAULT 0,
-  closing_cash NUMERIC(12,2),
-  variance NUMERIC(12,2),
-  status VARCHAR(20) NOT NULL DEFAULT 'open'
-    CHECK (status IN ('open','closed')),
-  opened_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  closed_at TIMESTAMPTZ
-);
-CREATE INDEX IF NOT EXISTS idx_bcs_branch ON branch_cash_sessions(branch_id, status);
+-- CREATE TABLE IF NOT EXISTS branch_cash_sessions (
+--   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+--   branch_id UUID NOT NULL,
+--   opened_by UUID,
+--   closed_by UUID,
+--   opening_float NUMERIC(12,2) NOT NULL DEFAULT 0,
+--   closing_cash NUMERIC(12,2),
+--   variance NUMERIC(12,2),
+--   status VARCHAR(20) NOT NULL DEFAULT 'open'
+--     CHECK (status IN ('open','closed')),
+--   opened_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+--   closed_at TIMESTAMPTZ
+-- );
+-- CREATE INDEX IF NOT EXISTS idx_bcs_branch ON branch_cash_sessions(branch_id, status);
 
-CREATE TABLE IF NOT EXISTS branch_cash_transactions (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  session_id UUID NOT NULL REFERENCES branch_cash_sessions(id) ON DELETE CASCADE,
-  order_id UUID,
-  txn_type VARCHAR(20) NOT NULL
-    CHECK (txn_type IN ('sale_cash','refund_cash','deposit_bank','withdrawal','adjustment')),
-  amount NUMERIC(12,2) NOT NULL,
-  note TEXT,
-  created_at TIMESTAMPTZ DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS idx_bct_session ON branch_cash_transactions(session_id, txn_type);
-CREATE INDEX IF NOT EXISTS idx_bct_order ON branch_cash_transactions(order_id);
+-- CREATE TABLE IF NOT EXISTS branch_cash_transactions (
+--   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+--   session_id UUID NOT NULL REFERENCES branch_cash_sessions(id) ON DELETE CASCADE,
+--   order_id UUID,
+--   txn_type VARCHAR(20) NOT NULL
+--     CHECK (txn_type IN ('sale_cash','refund_cash','deposit_bank','withdrawal','adjustment')),
+--   amount NUMERIC(12,2) NOT NULL,
+--   note TEXT,
+--   created_at TIMESTAMPTZ DEFAULT now()
+-- );
+-- CREATE INDEX IF NOT EXISTS idx_bct_session ON branch_cash_transactions(session_id, txn_type);
+-- CREATE INDEX IF NOT EXISTS idx_bct_order ON branch_cash_transactions(order_id);
 
-CREATE TABLE IF NOT EXISTS branch_cash_deposits (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  transaction_id UUID NOT NULL REFERENCES branch_cash_transactions(id) ON DELETE CASCADE,
-  bank_name VARCHAR(120),
-  bank_account VARCHAR(34),
-  slip_number VARCHAR(100),
-  deposited_amount NUMERIC(12,2) NOT NULL,
-  deposited_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS idx_bcd_txn ON branch_cash_deposits(transaction_id);
+-- CREATE TABLE IF NOT EXISTS branch_cash_deposits (
+--   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+--   transaction_id UUID NOT NULL REFERENCES branch_cash_transactions(id) ON DELETE CASCADE,
+--   bank_name VARCHAR(120),
+--   bank_account VARCHAR(34),
+--   slip_number VARCHAR(100),
+--   deposited_amount NUMERIC(12,2) NOT NULL,
+--   deposited_at TIMESTAMPTZ NOT NULL DEFAULT now()
+-- );
+-- CREATE INDEX IF NOT EXISTS idx_bcd_txn ON branch_cash_deposits(transaction_id);
 
 -- =========================================================
 -- 10) SETTLEMENT / PAYOUT / INVOICE
@@ -251,8 +248,6 @@ CREATE TABLE restaurant_settlements (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   restaurant_id UUID NOT NULL,
   branch_id UUID NOT NULL,
-  flow_type VARCHAR(20) NOT NULL
-    CHECK (flow_type IN ('online', 'cash')),
   period_start DATE NOT NULL,
   period_end DATE NOT NULL,
   currency VARCHAR(10) NOT NULL DEFAULT 'VND',
@@ -269,7 +264,7 @@ CREATE TABLE restaurant_settlements (
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now(),
 
-  UNIQUE (branch_id, period_start, period_end, flow_type)
+  UNIQUE (branch_id, period_start, period_end)
 );
 
 CREATE INDEX IF NOT EXISTS idx_rs_restaurant ON restaurant_settlements(restaurant_id, branch_id, period_start, period_end, status);
@@ -278,7 +273,7 @@ CREATE TABLE IF NOT EXISTS restaurant_settlement_items (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   settlement_id UUID NOT NULL REFERENCES restaurant_settlements(id) ON DELETE CASCADE,
   item_type VARCHAR(20) NOT NULL
-    CHECK (item_type IN ('payment','refund','cash_sale','cash_refund','adjustment')),
+    CHECK (item_type IN ('payment','refund','adjustment')),
   payment_id UUID REFERENCES payments(id) ON DELETE SET NULL,
   refund_id UUID REFERENCES refunds(id) ON DELETE SET NULL,
   branch_id UUID,

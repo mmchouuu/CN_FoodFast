@@ -3,6 +3,7 @@ const controller = require('../controllers/admins.controller');
 
 const router = express.Router();
 
+router.post('/login', controller.login);
 router.get('/customers', controller.listCustomers);
 router.get('/customers/:id', controller.customerDetails);
 router.patch('/customers/:id/status', controller.updateCustomerStatus);

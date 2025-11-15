@@ -73,7 +73,25 @@ async function consumeToken({ userId, purpose, code }, client) {
   return { success: true, token: record };
 }
 
+async function getActiveToken({ userId, purpose }, client) {
+  const executor = getExecutor(client);
+  const result = await executor.query(
+    `
+      SELECT *
+      FROM user_tokens
+      WHERE user_id = $1
+        AND purpose = $2
+        AND consumed_at IS NULL
+      ORDER BY expires_at DESC
+      LIMIT 1
+    `,
+    [userId, purpose],
+  );
+  return result.rows[0] || null;
+}
+
 module.exports = {
   createToken,
   consumeToken,
+  getActiveToken,
 };

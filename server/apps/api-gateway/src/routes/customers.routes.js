@@ -36,6 +36,7 @@ router.post('/register', controller.register);
 router.post('/signup', controller.register);
 router.post('/verify', controller.verify);
 router.post('/login', controller.login);
+router.post('/resend-otp', controller.resendOtp);
 router.post('/forgot-password', controller.requestPasswordReset);
 router.post('/reset-password', controller.resetPassword);
 
