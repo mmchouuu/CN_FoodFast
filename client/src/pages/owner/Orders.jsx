@@ -242,6 +242,8 @@ const adaptOwnerOrder = (order, lookups) => {
 const Orders = () => {
   const { currency, restaurantProfile } = useAppContext();
   const ownerId = restaurantProfile?.id || null;
+  const ownerRole = restaurantProfile?.role || 'owner_main';
+  const canFetchOwnerRestaurants = ownerRole === 'owner_main';
 
   const [ownerRestaurants, setOwnerRestaurants] = useState([]);
   const [rawOrders, setRawOrders] = useState([]);
@@ -270,9 +272,8 @@ const Orders = () => {
   );
 
   useEffect(() => {
-    if (!ownerId) {
+    if (!ownerId || !canFetchOwnerRestaurants) {
       setOwnerRestaurants([]);
-      setRawOrders([]);
       return;
     }
 
@@ -305,7 +306,7 @@ const Orders = () => {
     return () => {
       cancelled = true;
     };
-  }, [ownerId]);
+  }, [ownerId, canFetchOwnerRestaurants]);
 
   const loadOrders = useCallback(async () => {
     if (!ownerId) {

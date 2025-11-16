@@ -25,7 +25,7 @@ const ORDER_STATUS_STEPS = [
 ];
 
 const CANCELLABLE_STATUSES = new Set(["pending", "confirmed"]);
-const CONFIRMABLE_STATUSES = new Set(["ready", "delivering"]);
+const CONFIRMABLE_STATUSES = new Set(["delivering"]);
 
 const normaliseStatus = (value) =>
   typeof value === "string" ? value.trim().toLowerCase() : "";
@@ -170,9 +170,11 @@ const CurrentOrder = () => {
     .join(", ");
   const normalisedStatus = normaliseStatus(order.status);
   const canCancel =
-    CANCELLABLE_STATUSES.has(normalisedStatus) &&
-    (order.paymentStatus || "").toLowerCase() !== "paid";
-  const canConfirm = CONFIRMABLE_STATUSES.has(normalisedStatus);
+    order?.customerCanCancel ??
+    CANCELLABLE_STATUSES.has(normalisedStatus);
+  const canConfirm =
+    order?.customerCanConfirm ??
+    CONFIRMABLE_STATUSES.has(normalisedStatus);
 
   const handleCancelOrder = async () => {
     if (!canCancel || !order) return;

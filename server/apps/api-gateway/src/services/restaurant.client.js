@@ -38,6 +38,16 @@ async function ownerLogin(payload, opts = {}) {
   return res.data;
 }
 
+async function loginRestaurantAccount(payload, opts = {}) {
+  const res = await ownerClient.post('/accounts/login', payload, { headers: opts.headers });
+  return res.data;
+}
+
+async function listRestaurantMembers(restaurantId, opts = {}) {
+  const res = await ownerClient.get(`/${restaurantId}/accounts/members`, { headers: opts.headers });
+  return res.data;
+}
+
 async function ownerStatus(email, opts = {}) {
   const res = await ownerClient.get('/status', {
     params: { email },
@@ -294,6 +304,8 @@ module.exports = {
   signupOwner,
   verifyOwner,
   ownerLogin,
+  loginRestaurantAccount,
+  listRestaurantMembers,
   ownerStatus,
   resendVerification,
   listCatalog,

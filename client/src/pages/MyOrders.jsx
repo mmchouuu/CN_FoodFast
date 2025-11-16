@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAppContext } from "../context/AppContext";
 import {
@@ -6,6 +6,8 @@ import {
   dishPlaceholderImage,
 } from "../utils/imageHelpers";
 import { buildRestaurantLink } from "../utils/orderHelpers";
+
+const CUSTOMER_CANCELLABLE_STATUSES = new Set(["pending", "confirmed"]);
 
 const OrderHistory = () => {
   const {
@@ -15,8 +17,22 @@ const OrderHistory = () => {
     getBrandById,
     getDishById,
     currency,
+    cancelOrder,
   } =
     useAppContext();
+  const [cancellingId, setCancellingId] = useState(null);
+
+  const handleCancel = async (orderId, canCancel) => {
+    if (!orderId || !canCancel) return;
+    setCancellingId(orderId);
+    try {
+      await cancelOrder(orderId);
+    } catch (error) {
+      console.error("Failed to cancel order", error);
+    } finally {
+      setCancellingId(null);
+    }
+  };
 
   const sortedOrders = useMemo(
     () =>
@@ -67,6 +83,12 @@ const OrderHistory = () => {
             branchSnapshot?.address ||
             branch?.address ||
             "";
+          const normalisedStatus = (order.status || "").toLowerCase();
+          const fallbackCanCancel = CUSTOMER_CANCELLABLE_STATUSES.has(normalisedStatus);
+          const canCancel =
+            order.customerCanCancel !== undefined
+              ? order.customerCanCancel
+              : fallbackCanCancel;
           return (
             <div
               key={order.id}
@@ -124,6 +146,19 @@ const OrderHistory = () => {
                     >
                       Order again
                     </Link>
+                    {canCancel ? (
+                      <button
+                        type="button"
+                        onClick={() => handleCancel(order.id, canCancel)}
+                        disabled={cancellingId === order.id}
+                        className={`rounded-full border px-4 py-2 text-xs font-semibold transition ${cancellingId === order.id
+                            ? "border-gray-200 text-gray-400"
+                            : "border-gray-200 text-gray-600 hover:border-orange-300 hover:text-orange-500"
+                          }`}
+                      >
+                        {cancellingId === order.id ? "Cancelling..." : "Cancel order"}
+                      </button>
+                    ) : null}
                     {order.canReview ? (
                       <Link
                         to={`/reviews?orderId=${order.id}`}

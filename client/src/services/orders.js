@@ -68,13 +68,118 @@ export async function createOrder(payload) {
   return Array.isArray(data) ? data : unwrapRecord(data);
 }
 
-export async function cancelOrder(orderId, payload = {}) {
+// export async function cancelOrder(orderId, payload = {}, options = {}) {
+//   if (!orderId) {
+//     throw new Error('orderId is required');
+//   }
+
+//   const safePayload =
+//     payload && typeof payload === 'object'
+//       ? { ...payload }
+//       : {};
+
+//   const config = {};
+//   const userId = options?.userId || options?.user_id;
+//   if (userId) {
+//     config.params = { user_id: userId };
+//   }
+
+//   const forceCustomerRoute = options?.scope === 'customer';
+//   const forcePublicRoute = options?.scope === 'public';
+
+//   const invokeCustomerRoute = async () => {
+//     const { data } = await api.post(
+//       `${customerBasePath}/${orderId}/cancel`,
+//       safePayload,
+//       config,
+//     );
+//     return unwrapRecord(data);
+//   };
+
+//   const invokePublicRoute = async () => {
+//     const { data } = await api.post(
+//       `${basePath}/${orderId}/cancel`,
+//       safePayload,
+//       config,
+//     );
+//     return unwrapRecord(data);
+//   };
+
+//   if (forceCustomerRoute) {
+//     return invokeCustomerRoute();
+//   }
+
+//   if (forcePublicRoute) {
+//     return invokePublicRoute();
+//   }
+
+//   try {
+//     return await invokePublicRoute();
+//   } catch (error) {
+//     if (error?.response?.status && error.response.status !== 404) {
+//       throw error;
+//     }
+//   }
+
+//   return invokeCustomerRoute();
+// }
+
+export async function cancelOrder(orderId, payload = {}, options = {}) {
   if (!orderId) {
     throw new Error('orderId is required');
   }
-  const { data } = await api.post(`${customerBasePath}/${orderId}/cancel`, payload);
-  return unwrapRecord(data);
+
+  const safePayload =
+    payload && typeof payload === 'object'
+      ? { ...payload }
+      : {};
+
+  const config = {};
+  const userId = options?.userId || options?.user_id;
+  if (userId) {
+    config.params = { user_id: userId };
+  }
+
+  const forceCustomerRoute = options?.scope === 'customer';
+  const forcePublicRoute = options?.scope === 'public';
+
+  const invokeCustomerRoute = async () => {
+    const { data } = await api.post(
+      `${customerBasePath}/${orderId}/cancel`,
+      safePayload,
+      config,
+    );
+    return unwrapRecord(data);
+  };
+
+  const invokePublicRoute = async () => {
+    const { data } = await api.post(
+      `${basePath}/${orderId}/cancel`,
+      safePayload,
+      config,
+    );
+    return unwrapRecord(data);
+  };
+
+  if (forceCustomerRoute) {
+    return invokeCustomerRoute();
+  }
+
+  if (forcePublicRoute) {
+    return invokePublicRoute();
+  }
+
+  try {
+    return await invokeCustomerRoute();
+  } catch (error) {
+    if (error?.response?.status && error.response.status !== 404) {
+      throw error;
+    }
+  }
+
+  return invokePublicRoute();
 }
+
 
 // export async function confirmOrder(orderId, payload = {}, options = {}) {
 //   if (!orderId) {

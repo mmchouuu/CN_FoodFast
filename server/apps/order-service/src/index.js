@@ -4,6 +4,7 @@ const morgan = require('morgan');
 const config = require('./config');
 const auth = require('./middlewares/auth');
 const requireRoles = require('./middlewares/authorize');
+const ordersRouter = require('./routes/order.routes');
 const customerOrderRoutes = require('./routes/orders.customer.routes');
 const ownerOrderRoutes = require('./routes/orders.owner.routes');
 const adminOrderRoutes = require('./routes/orders.admin.routes');
@@ -15,8 +16,10 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use(morgan('dev'));
 
+app.use('/api/orders', ordersRouter);
+
 app.use('/customer/orders', auth, requireRoles(['customer', 'user']), customerOrderRoutes);
-app.use('/owner/orders', auth, requireRoles(['owner', 'manager']), ownerOrderRoutes);
+app.use('/owner/orders', auth, requireRoles(['owner_main', 'owner', 'manager', 'staff']), ownerOrderRoutes);
 app.use('/admin/orders', auth, requireRoles(['admin', 'superadmin']), adminOrderRoutes);
 app.get('/health', (req, res) => res.json({ ok: true, service: 'order-service' }));
 

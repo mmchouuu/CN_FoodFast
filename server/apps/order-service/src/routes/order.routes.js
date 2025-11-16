@@ -8,6 +8,7 @@ router.get('/user/:userId', OrderController.getOrdersByUser);
 router.get('/:id', OrderController.getOrderById);
 router.post('/', OrderController.createOrder);
 router.put('/:id/status', OrderController.updateOrderStatus);
+router.post('/:id/cancel', OrderController.cancelOrder);
 router.post('/:id/complete', OrderController.confirmOrder);
 router.delete('/:id', OrderController.deleteOrder);
 

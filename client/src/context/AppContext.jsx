@@ -11,6 +11,7 @@ import ordersService from '../services/orders';
 import paymentsService from '../services/payments';
 import { restaurantPlaceholderImage, dishPlaceholderImage } from '../utils/imageHelpers';
 import { formatPaymentMethodLabel, formatPaymentStatusLabel } from '../utils/paymentDisplay';
+import { buildRestaurantSession } from '../utils/restaurantSession';
 
 // --- Auth Systems ---
 import authService from '../services/auth';
@@ -1113,7 +1114,15 @@ export const AppContextProvider = ({ children }) => {
     });
     const authProfileId = authProfile?.id || null;
     const [restaurantProfile, setRestaurantProfile] = useState(() => {
-        try { return JSON.parse(localStorage.getItem('restaurant_profile') || 'null'); } catch { return null; }
+        try {
+            const raw = JSON.parse(localStorage.getItem('restaurant_profile') || 'null');
+            if (!raw) return null;
+            if (raw.permissions) return raw;
+            const hydrated = buildRestaurantSession({ account: raw }) || buildRestaurantSession({ owner: raw });
+            return hydrated || raw;
+        } catch {
+            return null;
+        }
     });
 
 
@@ -2239,17 +2248,16 @@ export const AppContextProvider = ({ children }) => {
         };
 
         const handleOwnerSuccess = (data) => {
-            const ownerToken = data?.token || null;
-            const ownerProfile = data?.user
-                ? {
-                    ...data.user,
-                    authToken: ownerToken || data.user?.authToken || null,
-                }
-                : null;
+            const session = buildRestaurantSession(data);
+            if (!session) {
+                const message = data?.message || 'Unable to resolve owner session.';
+                toast.error(message);
+                throw new Error(message);
+            }
 
             try {
-                if (ownerToken) {
-                    localStorage.setItem('restaurant_token', ownerToken);
+                if (session.authToken) {
+                    localStorage.setItem('restaurant_token', session.authToken);
                 } else {
                     localStorage.removeItem('restaurant_token');
                 }
@@ -2257,24 +2265,20 @@ export const AppContextProvider = ({ children }) => {
                 console.warn('Failed to persist owner token', storageErr);
             }
 
-            setRestaurantProfile(ownerProfile);
+            setRestaurantProfile(session);
             try {
-                if (ownerProfile) {
-                    localStorage.setItem('restaurant_profile', JSON.stringify(ownerProfile));
-                } else {
-                    localStorage.removeItem('restaurant_profile');
-                }
+                localStorage.setItem('restaurant_profile', JSON.stringify(session));
             } catch (storageErr) {
                 console.warn('Failed to persist owner profile', storageErr);
             }
 
-            setIsOwner(Boolean(ownerProfile));
+            setIsOwner(true);
             setAuthToken(null);
             setAuthProfile(null);
             localStorage.removeItem('auth_token');
             localStorage.removeItem('auth_profile');
             toast.success(data?.message || 'Signed in successfully.');
-            return { type: 'owner', response: data, user: ownerProfile };
+            return { type: 'owner', response: data, user: session };
         };
 
         const shouldTryCustomer = accountType !== 'owner';

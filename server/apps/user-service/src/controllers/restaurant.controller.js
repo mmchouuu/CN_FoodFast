@@ -27,6 +27,15 @@ async function login(req, res, next) {
   }
 }
 
+async function accountLogin(req, res, next) {
+  try {
+    const result = await restaurantService.loginRestaurantAccount(req.body || {});
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
 async function status(req, res, next) {
   try {
     const { email } = req.query;
@@ -61,6 +70,16 @@ async function createMember(req, res, next) {
   }
 }
 
+async function listMembers(req, res, next) {
+  try {
+    const { restaurantId } = req.params;
+    const result = await restaurantService.listRestaurantMembers(restaurantId);
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
 async function setPassword(req, res, next) {
   try {
     const result = await restaurantService.setOwnerPassword(req.body || {});
@@ -84,9 +103,11 @@ module.exports = {
   register,
   verify,
   login,
+  accountLogin,
   status,
   createOwnerMainAccount,
   createMember,
+  listMembers,
   setPassword,
   resendVerification,
 };

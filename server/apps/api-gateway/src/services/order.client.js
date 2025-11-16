@@ -57,6 +57,18 @@ async function updateOrderStatus(orderId, status, { headers = {} } = {}) {
 }
 
 // ----------------------------------------------------------------------
+// Hủy đơn hàng
+// ----------------------------------------------------------------------
+async function cancelOrder(orderId, payload, { headers = {}, params = {} } = {}) {
+  const res = await client.post(
+    `/${orderId}/cancel`,
+    payload,
+    buildConfig({ headers, params }),
+  );
+  return res.data;
+}
+
+// ----------------------------------------------------------------------
 // Xác nhận đơn hàng hoàn tất
 // ----------------------------------------------------------------------
 async function confirmOrder(orderId, payload, { headers = {}, params = {} } = {}) {
@@ -77,5 +89,6 @@ module.exports = {
   listOrdersByUser,
   createOrder,
   updateOrderStatus,
+  cancelOrder,
   confirmOrder,
 };

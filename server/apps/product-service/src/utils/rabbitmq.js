@@ -2,6 +2,8 @@ const amqp = require('amqplib');
 
 const DEFAULT_URL = process.env.RABBITMQ_URL || 'amqp://guest:guest@rabbitmq:5672';
 const SOCKET_QUEUE = process.env.SOCKET_QUEUE || 'socket_events';
+const RESTAURANT_EVENTS_QUEUE =
+  process.env.RESTAURANT_EVENTS_QUEUE || 'restaurant_events';
 
 let channel = null;
 let connection = null;
@@ -38,6 +40,9 @@ const connectRabbitMQ = async () => {
 
       const ch = await connection.createChannel();
       await ch.assertQueue(SOCKET_QUEUE, { durable: true });
+      if (RESTAURANT_EVENTS_QUEUE) {
+        await ch.assertQueue(RESTAURANT_EVENTS_QUEUE, { durable: true });
+      }
       channel = ch;
       console.log('[product-service] Connected to RabbitMQ');
       return channel;
@@ -71,8 +76,33 @@ const publishSocketEvent = (event, payload, rooms = []) => {
   channel.sendToQueue(SOCKET_QUEUE, Buffer.from(JSON.stringify(message)), { persistent: false });
 };
 
+const publishRestaurantEvent = (event, payload = {}) => {
+  if (!channel || !RESTAURANT_EVENTS_QUEUE) {
+    console.error('[product-service] Restaurant events queue is not ready; skipping event:', event);
+    return;
+  }
+
+  const message = {
+    event,
+    payload,
+    emittedAt: new Date().toISOString(),
+    source: 'product-service',
+  };
+
+  channel.sendToQueue(
+    RESTAURANT_EVENTS_QUEUE,
+    Buffer.from(JSON.stringify(message)),
+    { persistent: true },
+  );
+};
+
 module.exports = {
   connectRabbitMQ,
   publishSocketEvent,
+  publishRestaurantEvent,
 };
+
+
+
+
 

@@ -58,6 +58,28 @@ const restaurantManagerService = {
     const { data } = await api.put(`${basePath}/${restaurantId}`, payload);
     return data;
   },
+
+  async inviteMember(restaurantId, payload) {
+    if (!restaurantId) {
+      throw new Error('restaurantId is required');
+    }
+    const body = { ...(payload || {}) };
+    if (typeof body.loginEmail === 'string') {
+      body.loginEmail = body.loginEmail.trim().toLowerCase();
+    }
+    if (typeof body.displayName === 'string') {
+      body.displayName = body.displayName.trim();
+    }
+    const { data } = await api.post(`${basePath}/${restaurantId}/members`, body);
+    return data;
+  },
+
+  async listMembers(restaurantId) {
+    if (!restaurantId) {
+      return [];
+    }
+    const { data } = await api.get(`${basePath}/${restaurantId}/members`);
+    return data;
+  },
 };
 export default restaurantManagerService;
-

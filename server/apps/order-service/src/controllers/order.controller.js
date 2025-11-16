@@ -313,6 +313,34 @@ exports.getOrdersByUser = async (req, res) => {
   }
 };
 
+exports.cancelOrder = async (req, res) => {
+  const orderId = req.params.id || req.params.orderId;
+  if (!orderId) {
+    return res.status(400).json({ error: 'order id is required' });
+  }
+
+  const payload = req.body && typeof req.body === 'object' ? { ...req.body } : {};
+  const userId = resolveUserIdFromRequest(req, payload);
+
+  if (!userId) {
+    return res.status(400).json({ error: 'user_id is required to cancel order' });
+  }
+
+  if (!payload.user_id) {
+    payload.user_id = userId;
+  }
+  if (!payload.userId) {
+    payload.userId = userId;
+  }
+
+  try {
+    const order = await OrderService.cancelCustomerOrder(orderId, userId, payload);
+    res.json(order);
+  } catch (error) {
+    respondWithError(res, error);
+  }
+};
+
 exports.confirmOrder = async (req, res) => {
   const orderId = req.params.id || req.params.orderId;
   if (!orderId) {

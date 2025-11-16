@@ -7,6 +7,7 @@ const router = express.Router();
 router.post('/signup', controller.ownerSignup);
 router.post('/verify', controller.ownerVerify);
 router.post('/login', controller.ownerLogin);
+router.post('/accounts/login', controller.accountLogin);
 router.get('/status', controller.ownerStatus);
 router.post('/resend-verification', controller.resendVerification);
 
@@ -23,6 +24,7 @@ router.get('/:restaurantId/branches', controller.listBranches);
 router.put('/:restaurantId/branches/:branchId', controller.updateBranch);
 router.put('/:restaurantId/branches/:branchId/schedules', controller.updateBranchSchedules);
 router.delete('/:restaurantId/branches/:branchId', controller.deleteBranch);
+router.get('/:restaurantId/members', controller.listMembers);
 router.post('/:restaurantId/members', controller.inviteMember);
 
 router.post('/:restaurantId/categories', controller.createCategory);

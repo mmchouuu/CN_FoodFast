@@ -1,25 +1,42 @@
 import React, { useMemo } from "react";
 import { useAppContext } from "../../context/AppContext";
+import useOwnerPermission from "../../hooks/useOwnerPermission";
 
-const buildBadges = (profile = {}) => {
-  const isActive = profile.isActive ?? profile.is_active;
-  if (isActive) {
-    return [{ label: "Active", className: "bg-emerald-100 text-emerald-600" }];
+const ROLE_LABELS = {
+  owner_main: "Owner Main",
+  owner: "Owner",
+  manager: "Manager",
+  staff: "Staff",
+};
+
+const buildBadges = (profile = {}, role = null) => {
+  const badges = [];
+  const isActive = profile.isActive ?? profile.is_active ?? true;
+  badges.push(
+    isActive
+      ? { label: "Active", className: "bg-emerald-100 text-emerald-600" }
+      : { label: "Inactive", className: "bg-rose-100 text-rose-600" },
+  );
+
+  if (role) {
+    badges.push({
+      label: ROLE_LABELS[role] || role,
+      className: "bg-slate-100 text-slate-600",
+    });
   }
-  if (isActive === false) {
-    return [{ label: "Inactive", className: "bg-rose-100 text-rose-600" }];
-  }
-  return [];
+  return badges;
 };
 
 const OwnerHeader = () => {
   const { restaurantProfile } = useAppContext();
+  const { role } = useOwnerPermission();
 
   const {
     initials,
     ownerName,
     restaurantName,
     badges,
+    branchLabel,
   } = useMemo(() => {
     if (!restaurantProfile) {
       return {
@@ -27,6 +44,7 @@ const OwnerHeader = () => {
         ownerName: "Restaurant owner",
         restaurantName: "No restaurant profile",
         badges: [],
+        branchLabel: "",
       };
     }
 
@@ -37,7 +55,7 @@ const OwnerHeader = () => {
 
     const displayName = rawManager || rawFullName || email || "Restaurant owner";
     const displayRestaurant = rawRestaurant || "Restaurant profile not completed";
-    const badgeList = buildBadges(restaurantProfile);
+    const badgeList = buildBadges(restaurantProfile, role);
 
     const computedInitials =
       displayName
@@ -52,8 +70,11 @@ const OwnerHeader = () => {
       ownerName: displayName,
       restaurantName: displayRestaurant,
       badges: badgeList,
+      branchLabel:
+        restaurantProfile.branchName ||
+        (restaurantProfile.branchId ? `Branch #${restaurantProfile.branchId}` : ""),
     };
-  }, [restaurantProfile]);
+  }, [restaurantProfile, role]);
 
   return (
     <section className="mb border bg-white border-white p-3 shadow-sm md">
@@ -69,7 +90,13 @@ const OwnerHeader = () => {
         </div>
 
         {badges.length ? (
-          <div className="flex flex-wrap gap-2 md:justify-end">
+          <div className="flex flex-col items-start gap-2 md:items-end">
+            {branchLabel ? (
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                {branchLabel}
+              </p>
+            ) : null}
+            <div className="flex flex-wrap gap-2 md:justify-end">
             {badges.map((badge) => (
               <span
                 key={`${badge.label}`}
@@ -78,6 +105,7 @@ const OwnerHeader = () => {
                 {badge.label}
               </span>
             ))}
+            </div>
           </div>
         ) : null}
       </div>
