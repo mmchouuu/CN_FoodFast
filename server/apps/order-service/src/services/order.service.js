@@ -1002,6 +1002,21 @@ const createOrder = async (payload, userContext = null) => {
     await client.query('COMMIT');
 
     let hydratedOrder = await getOrderById(orderRow.id);
+    if (!hydratedOrder) {
+      try {
+        hydratedOrder = await advancedOrdersService.getAdminOrder({ orderId: orderRow.id });
+      } catch (error) {
+        hydratedOrder = null;
+      }
+    }
+
+    await syncInventoryAfterLegacyOrder(hydratedOrder, {
+      orderId: orderRow.id,
+      restaurantId,
+      branchId,
+      items,
+    });
+
     if (hydratedOrder) {
       if (!hydratedOrder.metadata) {
         hydratedOrder.metadata = orderMetadata;
@@ -1079,6 +1094,44 @@ const getOrdersByUserId = async (userId) => {
     [userId],
   );
   return attachOrderRelations(result.rows);
+};
+
+const syncInventoryAfterLegacyOrder = async (orderPayload, context = {}) => {
+  if (typeof advancedOrdersService.syncInventoryAfterOrder !== 'function') {
+    return;
+  }
+  const basePayload = orderPayload
+    ? { ...orderPayload }
+    : {
+        id: context.orderId || null,
+        restaurant_id: context.restaurantId || null,
+        branch_id: context.branchId || null,
+        items: context.items || [],
+      };
+
+  if (!basePayload.restaurant_id && context.restaurantId) {
+    basePayload.restaurant_id = context.restaurantId;
+  }
+  if (!basePayload.branch_id && context.branchId) {
+    basePayload.branch_id = context.branchId;
+  }
+  if (!Array.isArray(basePayload.items) || !basePayload.items.length) {
+    basePayload.items = context.items || [];
+  }
+
+  if (!basePayload.restaurant_id || !Array.isArray(basePayload.items) || !basePayload.items.length) {
+    return;
+  }
+
+  try {
+    await advancedOrdersService.syncInventoryAfterOrder(basePayload);
+  } catch (error) {
+    console.error(
+      '[order-service] Failed to sync product inventory for order %s: %s',
+      basePayload.id || context.orderId || 'unknown',
+      error?.message || error,
+    );
+  }
 };
 
 const buildCustomerUserContext = (userId) => ({

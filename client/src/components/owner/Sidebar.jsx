@@ -6,7 +6,7 @@ import useOwnerPermission from '../../hooks/useOwnerPermission';
 
 const NAV_CONFIG = [
   { path: '/owner', label: 'Dashboard', icon: assets.dashboard, roles: ['owner_main', 'owner', 'manager'] },
-  { path: '/owner/profile', label: 'Restaurant Info', icon: assets.house, roles: ['owner_main'] },
+  { path: '/owner/profile', label: 'Restaurant Info', icon: assets.house, roles: ['owner_main', 'owner', 'manager', 'staff'] },
   { path: '/owner/menu', label: 'Dish Management', icon: assets.list, permissions: ['canManageMenu'] },
   { path: '/owner/orders', label: 'Order Management', icon: assets.graph, permissions: ['canManageOrders'], roles: ['owner_main', 'owner', 'manager', 'staff'] },
   { path: '/owner/settlements', label: 'Settlement Reports', icon: assets.secure, permissions: ['canManageFinance'] },

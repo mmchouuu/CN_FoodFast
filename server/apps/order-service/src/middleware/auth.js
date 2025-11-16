@@ -21,6 +21,14 @@ const applyScopeFromHeaders = (req, user) => {
     user.restaurantIds = scopeList;
     user.restaurants = scopeList;
   }
+
+  const branchScope = parseScopeHeader(req.headers['x-branch-ids']);
+  if (branchScope.length && user) {
+    user.branch_ids = branchScope;
+    user.branchIds = branchScope;
+    user.managed_branches = branchScope;
+    user.managedBranches = branchScope;
+  }
 };
 
 const buildUserFromHeaders = (req) => {

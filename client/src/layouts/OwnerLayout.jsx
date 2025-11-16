@@ -5,7 +5,7 @@ import OwnerHeader from '../components/owner/OwnerHeader';
 import useOwnerPermission from '../hooks/useOwnerPermission';
 
 const ROUTE_RULES = [
-  { pattern: /^\/owner\/profile/i, requirements: { roles: ['owner_main'] } },
+  { pattern: /^\/owner\/profile/i, requirements: { roles: ['owner_main', 'owner', 'manager', 'staff'] } },
   { pattern: /^\/owner\/menu/i, requirements: { permissions: ['canManageMenu'] } },
   { pattern: /^\/owner\/orders/i, requirements: { permissions: ['canManageOrders'], roles: ['owner_main', 'owner', 'manager', 'staff'] } },
   { pattern: /^\/owner\/settlements/i, requirements: { permissions: ['canManageFinance'] } },

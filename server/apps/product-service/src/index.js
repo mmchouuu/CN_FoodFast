@@ -7,6 +7,7 @@ const { connectRabbitMQ } = require('./utils/rabbitmq');
 
 const restaurantRoutes = require('./routes/restaurant.routes');
 const adminRoutes = require('./routes/admin.routes');
+const internalRoutes = require('./routes/internal.routes');
 
 const app = express();
 app.use(express.json({ limit: '25mb' }));
@@ -23,6 +24,7 @@ app.get('/health', (req, res) => {
 
 app.use('/api/restaurants', restaurantRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/internal', internalRoutes);
 
 app.use((err, req, res, next) => {
   if (!err) return next();

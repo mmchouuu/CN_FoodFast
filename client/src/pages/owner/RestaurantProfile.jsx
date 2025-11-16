@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { FaStar } from "react-icons/fa";
 import { useAppContext } from "../../context/AppContext";
+import useOwnerPermission from "../../hooks/useOwnerPermission";
 import restaurantManagerService from "../../services/restaurantManager";
 
 const containerClasses = "bg-white shadow-sm rounded-2xl p-6 space-y-6";
@@ -129,6 +130,14 @@ const mapBranchData = (branch) => {
   };
 };
 
+const formatList = (values = []) => {
+  if (!Array.isArray(values) || !values.length) return "";
+  if (values.length === 1) return values[0];
+  if (values.length === 2) return `${values[0]} and ${values[1]}`;
+  const last = values[values.length - 1];
+  return `${values.slice(0, -1).join(", ")}, and ${last}`;
+};
+
 const buildRestaurantFormFromData = (restaurant) => ({
   name: restaurant?.name || "",
   description: restaurant?.description || "",
@@ -180,11 +189,44 @@ const formatOpeningSchedule = (openingHours = []) => {
 
 const RestaurantProfile = () => {
   const { restaurantProfile } = useAppContext();
-  const ownerId = restaurantProfile?.id || null;
+  const { role, scope } = useOwnerPermission();
+  const isOwnerMain = role === "owner_main";
+  const ownerId = isOwnerMain ? restaurantProfile?.id || null : null;
+  const accountRestaurantId = !isOwnerMain
+    ? restaurantProfile?.restaurantId ||
+      (Array.isArray(scope?.restaurantIds) && scope.restaurantIds.length ? scope.restaurantIds[0] : null)
+    : null;
+  const hasProfileAccess = Boolean(ownerId || accountRestaurantId);
+
+  const restrictedBranchIds = useMemo(() => {
+    if (isOwnerMain) return [];
+    const ids = [];
+    if (restaurantProfile?.branchId) {
+      ids.push(String(restaurantProfile.branchId));
+    }
+    if (Array.isArray(scope?.branchIds)) {
+      scope.branchIds.forEach((branchId) => {
+        if (branchId != null) {
+          ids.push(String(branchId));
+        }
+      });
+    }
+    if (Array.isArray(restaurantProfile?.memberships)) {
+      restaurantProfile.memberships.forEach((membership) => {
+        const branchId = membership?.branchId || membership?.branch_id;
+        if (branchId) {
+          ids.push(String(branchId));
+        }
+      });
+    }
+    return Array.from(new Set(ids.filter(Boolean)));
+  }, [isOwnerMain, restaurantProfile, scope]);
+  const branchScopeSet = useMemo(() => new Set(restrictedBranchIds), [restrictedBranchIds]);
 
   const [restaurant, setRestaurant] = useState(null);
   const [branches, setBranches] = useState([]);
-  const [viewMode, setViewMode] = useState(ownerId ? "loading" : "createRestaurant");
+  const initialViewMode = hasProfileAccess ? "loading" : isOwnerMain ? "createRestaurant" : "summary";
+  const [viewMode, setViewMode] = useState(initialViewMode);
   const [editingBranchId, setEditingBranchId] = useState(null);
 
   const [branchSearch, setBranchSearch] = useState("");
@@ -202,23 +244,52 @@ const RestaurantProfile = () => {
   const [specialHours, setSpecialHours] = useState([]);
   const [specialEnabled, setSpecialEnabled] = useState(false);
 
-  const [loading, setLoading] = useState(Boolean(ownerId));
+  const [loading, setLoading] = useState(hasProfileAccess);
   const [error, setError] = useState("");
   const [savingRestaurant, setSavingRestaurant] = useState(false);
   const [savingBranch, setSavingBranch] = useState(false);
 
   const restaurantExists = Boolean(restaurant && restaurant.id);
+  const canManageProfile = isOwnerMain;
+  const canManageBranches = isOwnerMain;
+  const assignedBranchNames = useMemo(() => {
+    if (isOwnerMain) return [];
+    const names = [];
+    if (branchScopeSet.size && branches.length) {
+      branches.forEach((branch) => {
+        const id =
+          branch.id ??
+          branch.branchId ??
+          branch.branch_id ??
+          branch.branchNumber ??
+          branch.branch_number;
+        if (id && branchScopeSet.has(String(id))) {
+          names.push(branch.name || `Branch #${branch.branchNumber || id}`);
+        }
+      });
+    }
+    if (!names.length) {
+      if (restaurantProfile?.branchName) {
+        names.push(restaurantProfile.branchName);
+      } else if (restaurantProfile?.branchId) {
+        names.push(`Branch #${restaurantProfile.branchId}`);
+      }
+    }
+    return names;
+  }, [branchScopeSet, branches, isOwnerMain, restaurantProfile]);
+  const assignedBranchLabel = useMemo(() => formatList(assignedBranchNames), [assignedBranchNames]);
 
   useEffect(() => {
     let cancelled = false;
+    const targetRestaurantId = isOwnerMain ? ownerId : accountRestaurantId;
 
-    if (!ownerId) {
+    if (!hasProfileAccess || !targetRestaurantId) {
       setRestaurant(null);
       setBranches([]);
       setRestaurantForm(emptyRestaurantForm);
       setLogoPreview("");
       setCoverPreview("");
-      setViewMode("createRestaurant");
+      setViewMode(isOwnerMain ? "createRestaurant" : "summary");
       setLoading(false);
       return;
     }
@@ -227,7 +298,9 @@ const RestaurantProfile = () => {
       setLoading(true);
       setError("");
       try {
-        const data = await restaurantManagerService.getByOwner(ownerId);
+        const data = isOwnerMain
+          ? await restaurantManagerService.getByOwner(ownerId)
+          : await restaurantManagerService.getRestaurant(targetRestaurantId);
         if (cancelled) return;
         if (!data) {
           setRestaurant(null);
@@ -235,19 +308,38 @@ const RestaurantProfile = () => {
           setRestaurantForm(emptyRestaurantForm);
           setLogoPreview("");
           setCoverPreview("");
-          setViewMode("createRestaurant");
+          setViewMode(isOwnerMain ? "createRestaurant" : "summary");
+          if (!isOwnerMain) {
+            setError("No restaurant profile is linked to your account yet. Please contact the owner main.");
+          }
           return;
         }
-        const mappedRestaurant = mapRestaurantData(data);
-        const mappedBranches = Array.isArray(data.branches)
-          ? data.branches.map((branch) => mapBranchData(branch)).filter(Boolean)
+        const rawRestaurant = data?.restaurant || data;
+        const mappedRestaurant = mapRestaurantData(rawRestaurant);
+        const sourceBranches = Array.isArray(data?.branches)
+          ? data.branches
+          : Array.isArray(rawRestaurant?.branches)
+          ? rawRestaurant.branches
           : [];
+        let mappedBranches = sourceBranches.map((branch) => mapBranchData(branch)).filter(Boolean);
+        if (!isOwnerMain && branchScopeSet.size) {
+          mappedBranches = mappedBranches.filter((branch) => {
+            const id =
+              branch.id ??
+              branch.branchId ??
+              branch.branch_id ??
+              branch.branchNumber ??
+              branch.branch_number;
+            return id ? branchScopeSet.has(String(id)) : false;
+          });
+        }
         setRestaurant(mappedRestaurant);
         setBranches(mappedBranches);
         setRestaurantForm(buildRestaurantFormFromData(mappedRestaurant));
         setLogoPreview(mappedRestaurant.logoUrl || "");
         setCoverPreview(mappedRestaurant.coverPhoto || "");
-        setViewMode(data.pending_profile ? "createRestaurant" : "summary");
+        const nextViewMode = isOwnerMain && data?.pending_profile ? "createRestaurant" : "summary";
+        setViewMode(nextViewMode);
       } catch (err) {
         if (cancelled) return;
         const message = err?.response?.data?.message || err?.message || "Unable to load restaurant profile.";
@@ -257,7 +349,7 @@ const RestaurantProfile = () => {
         setRestaurantForm(emptyRestaurantForm);
         setLogoPreview("");
         setCoverPreview("");
-        setViewMode("createRestaurant");
+        setViewMode(isOwnerMain ? "createRestaurant" : "summary");
       } finally {
         if (!cancelled) {
           setLoading(false);
@@ -270,8 +362,8 @@ const RestaurantProfile = () => {
     return () => {
       cancelled = true;
     };
-  }, [ownerId]);
-  const showBranchForm = viewMode === "createBranch" || viewMode === "editBranch";
+  }, [accountRestaurantId, branchScopeSet, hasProfileAccess, isOwnerMain, ownerId]);
+  const showBranchForm = canManageBranches && (viewMode === "createBranch" || viewMode === "editBranch");
 
   const handleRestaurantTextChange = (event) => {
     const { name, value } = event.target;
@@ -295,6 +387,10 @@ const RestaurantProfile = () => {
 
   const handleRestaurantSubmit = async (event) => {
     event.preventDefault();
+    if (!canManageProfile) {
+      setError("You do not have permission to update the restaurant profile.");
+      return;
+    }
     if (!ownerId) {
       setError("Please sign in with a restaurant account first.");
       return;
@@ -401,6 +497,7 @@ const RestaurantProfile = () => {
   };
 
   const startCreateBranch = () => {
+    if (!canManageBranches) return;
     setEditingBranchId(null);
     resetBranchState();
     setError("");
@@ -408,6 +505,7 @@ const RestaurantProfile = () => {
   };
 
   const startEditBranch = (branch) => {
+    if (!canManageBranches) return;
     setEditingBranchId(branch.id);
     resetBranchState(branch);
     setError("");
@@ -551,6 +649,10 @@ const RestaurantProfile = () => {
 
   const handleBranchSubmit = async (event) => {
     event.preventDefault();
+    if (!canManageBranches) {
+      setError("You do not have permission to manage branches.");
+      return;
+    }
     if (!restaurantExists) {
       setError("Create the restaurant profile before adding a branch.");
       return;
@@ -623,6 +725,7 @@ const RestaurantProfile = () => {
   };
 
   const handleToggleBranchStatus = async (branchId) => {
+    if (!canManageBranches) return;
     if (!restaurantExists) return;
     const target = branches.find((branch) => branch.id === branchId);
     if (!target) return;
@@ -688,13 +791,13 @@ const RestaurantProfile = () => {
   const rangeStart = filteredBranches.length ? (safePage - 1) * BRANCHES_PER_PAGE + 1 : 0;
   const rangeEnd = filteredBranches.length ? Math.min(safePage * BRANCHES_PER_PAGE, filteredBranches.length) : 0;
 
-  const canCreateRestaurant = !loading && !restaurantExists;
+  const canCreateRestaurant = canManageProfile && !loading && !restaurantExists;
 
-  if (!ownerId) {
+  if (!hasProfileAccess) {
     return (
       <div className={containerClasses}>
         <div className="flex min-h-[200px] items-center justify-center rounded-2xl border border-slate-100 bg-white text-sm text-slate-600 shadow-sm">
-          Sign in with your restaurant account to manage profile and branches.
+          Sign in with your restaurant account or ask the owner main to assign you to a branch to view this page.
         </div>
       </div>
     );
@@ -718,6 +821,17 @@ const RestaurantProfile = () => {
         ) : null}
       </header>
 
+      {!canManageProfile ? (
+        <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+          <p className="font-semibold">View-only access</p>
+          <p className="mt-1">
+            {assignedBranchLabel
+              ? `You can view current details for ${assignedBranchLabel}. Please contact the owner main if you need to update this information.`
+              : "You can view the current restaurant details assigned to you. Please contact the owner main if you need to make changes."}
+          </p>
+        </div>
+      ) : null}
+
       {error ? <ErrorBanner message={error} onDismiss={() => setError("")} /> : null}
 
       {loading ? (
@@ -739,13 +853,19 @@ const RestaurantProfile = () => {
             <>
               <RestaurantSummary
                 restaurant={restaurant}
-                onEdit={() => {
-                  setRestaurantForm(buildRestaurantFormFromData(restaurant));
-                  setLogoPreview(restaurant.logoUrl || "");
-                  setCoverPreview(restaurant.coverPhoto || "");
-                  setViewMode("createRestaurant");
-                }}
-                onCreateBranch={startCreateBranch}
+                canEditProfile={canManageProfile}
+                canCreateBranch={canManageBranches}
+                onEdit={
+                  canManageProfile
+                    ? () => {
+                        setRestaurantForm(buildRestaurantFormFromData(restaurant));
+                        setLogoPreview(restaurant.logoUrl || "");
+                        setCoverPreview(restaurant.coverPhoto || "");
+                        setViewMode("createRestaurant");
+                      }
+                    : undefined
+                }
+                onCreateBranch={canManageBranches ? startCreateBranch : undefined}
               />
               <RestaurantHero restaurant={restaurant} branches={branches} />
             </>
@@ -755,6 +875,7 @@ const RestaurantProfile = () => {
 
           {restaurantExists ? (
             <BranchManagement
+              canManageBranches={canManageBranches}
               branches={paginatedBranches}
               branchCount={filteredBranches.length}
               branchRangeStart={rangeStart}
@@ -994,7 +1115,7 @@ const RestaurantForm = ({ form, logoPreview, coverPreview, onChange, onFileChang
     </form>
   </section>
 );
-const RestaurantSummary = ({ restaurant, onEdit, onCreateBranch }) => (
+const RestaurantSummary = ({ restaurant, canEditProfile, canCreateBranch, onEdit, onCreateBranch }) => (
   <section className="rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
     <div className="flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
       <div className="flex items-start gap-4">
@@ -1028,20 +1149,29 @@ const RestaurantSummary = ({ restaurant, onEdit, onCreateBranch }) => (
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-3">
-        <button
-          type="button"
-          onClick={onEdit}
-          className="rounded-lg border border-emerald-500 px-4 py-2 text-sm font-semibold text-emerald-600 hover:bg-emerald-50"
-        >
-          Edit
-        </button>
-        <button
-          type="button"
-          onClick={onCreateBranch}
-          className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-600"
-        >
-          Create branch
-        </button>
+        {canEditProfile ? (
+          <button
+            type="button"
+            onClick={onEdit}
+            className="rounded-lg border border-emerald-500 px-4 py-2 text-sm font-semibold text-emerald-600 hover:bg-emerald-50"
+          >
+            Edit
+          </button>
+        ) : null}
+        {canCreateBranch ? (
+          <button
+            type="button"
+            onClick={onCreateBranch}
+            className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-600"
+          >
+            Create branch
+          </button>
+        ) : null}
+        {!canEditProfile && !canCreateBranch ? (
+          <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Viewing only
+          </span>
+        ) : null}
       </div>
     </div>
   </section>
@@ -1124,6 +1254,7 @@ const HeroStat = ({ label, value }) => (
   </div>
 );
 const BranchManagement = ({
+  canManageBranches,
   branches,
   branchCount,
   branchRangeStart,
@@ -1194,19 +1325,25 @@ const BranchManagement = ({
           >
             Reset filters
           </button>
-          <button
-            type="button"
-            onClick={onCreateBranch}
-            disabled={showForm}
-            className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            Create new branch
-          </button>
+          {canManageBranches ? (
+            <button
+              type="button"
+              onClick={onCreateBranch}
+              disabled={showForm}
+              className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Create new branch
+            </button>
+          ) : (
+            <span className="text-xs font-semibold text-slate-500">
+              Branch creation is limited to the owner main.
+            </span>
+          )}
         </div>
       </div>
     </div>
 
-    {showForm ? (
+    {showForm && canManageBranches ? (
       <BranchForm
         form={branchForm}
         openingHours={openingHours}
@@ -1234,6 +1371,7 @@ const BranchManagement = ({
           <BranchCard
             key={branch.id}
             branch={branch}
+            canManageBranches={canManageBranches}
             onToggleStatus={() => onToggleBranchStatus(branch.id)}
             onEdit={() => onEditBranch(branch)}
           />
@@ -1270,7 +1408,7 @@ const BranchManagement = ({
     ) : null}
   </section>
 );
-const BranchCard = ({ branch, onToggleStatus, onEdit }) => {
+const BranchCard = ({ branch, canManageBranches, onToggleStatus, onEdit }) => {
   const statusDot = branch.isOpen ? "bg-emerald-500" : "bg-rose-500";
   const statusLabel = branch.isOpen ? "Open now" : "Closed";
   const badgeLabel = branch.isPrimary ? "Primary" : `Branch ${branch.branchNumber}`;
@@ -1355,22 +1493,28 @@ const BranchCard = ({ branch, onToggleStatus, onEdit }) => {
       </div>
       <div className="flex flex-1 flex-col gap-4 lg:items-end">
         <RatingBadge rating={ratingValue} count={ratingCount} />
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={onToggleStatus}
-            className="rounded-lg border border-emerald-500 px-3 py-1 text-xs font-semibold text-emerald-600 hover:bg-emerald-50"
-          >
-            {branch.isOpen ? "Mark as closed" : "Mark as open"}
-          </button>
-          <button
-            type="button"
-            onClick={onEdit}
-            className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-100"
-          >
-            Edit branch
-          </button>
-        </div>
+        {canManageBranches ? (
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={onToggleStatus}
+              className="rounded-lg border border-emerald-500 px-3 py-1 text-xs font-semibold text-emerald-600 hover:bg-emerald-50"
+            >
+              {branch.isOpen ? "Mark as closed" : "Mark as open"}
+            </button>
+            <button
+              type="button"
+              onClick={onEdit}
+              className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-100"
+            >
+              Edit branch
+            </button>
+          </div>
+        ) : (
+          <p className="text-xs text-slate-500">
+            Contact the owner main to update branch availability or details.
+          </p>
+        )}
       </div>
     </div>
   );

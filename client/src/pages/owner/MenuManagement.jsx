@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import toast from "react-hot-toast";
 import { dishPlaceholderImage } from "../../utils/imageHelpers";
 import { useAppContext } from "../../context/AppContext";
+import useOwnerPermission from "../../hooks/useOwnerPermission";
 import restaurantManagerService from "../../services/restaurantManager";
 import ownerProductService from "../../services/ownerProducts";
 
@@ -59,6 +60,19 @@ const SAMPLE_PRODUCTS = [
 
 const SAMPLE_CATEGORIES = ["Noodles", "Rice Dishes", "Drinks"];
 
+const uniqueStrings = (values = []) =>
+  Array.from(
+    new Set(
+      values
+        .map((value) => {
+          if (value === null || value === undefined) return null;
+          const str = String(value).trim();
+          return str.length ? str : null;
+        })
+        .filter(Boolean),
+    ),
+  );
+
 const isSampleId = (value) => typeof value === "string" && value.startsWith("sample-");
 const isSampleRestaurant = (restaurant) => !restaurant || isSampleId(restaurant.id);
 
@@ -81,6 +95,14 @@ const computePricing = (state) => {
     taxAmount,
     priceWithTax,
   };
+};
+
+const formatList = (values = []) => {
+  if (!Array.isArray(values) || !values.length) return "";
+  if (values.length === 1) return values[0];
+  if (values.length === 2) return `${values[0]} and ${values[1]}`;
+  const last = values[values.length - 1];
+  return `${values.slice(0, -1).join(", ")}, and ${last}`;
 };
 
 const createOptionChoice = () => ({
@@ -311,16 +333,29 @@ const formatPriceDeltaLabel = (value) => {
 };
 
 const normalizeBranchId = (value) => {
-  if (!value) return null;
-  if (typeof value === "string") return value;
+  if (value === undefined || value === null) return null;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed.length ? trimmed : null;
+  }
+  if (typeof value === "number") {
+    return String(value);
+  }
   if (typeof value === "object") {
-    return (
-      value.id ||
-      value.branchId ||
-      value.branch_id ||
-      value.branch?.id ||
-      null
-    );
+    const branchFromNested =
+      value.branch &&
+      (value.branch.branch_id ||
+        value.branch.branchId ||
+        value.branch.id);
+    const raw =
+      value.branch_id ??
+      value.branchId ??
+      branchFromNested ??
+      value.id ??
+      value.branch_product_id ??
+      value.branchProductId;
+    if (raw === undefined || raw === null) return null;
+    return String(raw);
   }
   return null;
 };
@@ -360,7 +395,9 @@ const buildInventorySummary = (items = []) => {
       0;
     const rawReserved =
       item.reserved_qty ??
+      item.reserved ??
       item?.inventory?.reserved_qty ??
+      item?.inventory?.reserved ??
       0;
     const quantity = Number.isFinite(Number(rawQuantity)) ? Number(rawQuantity) : 0;
     const reserved = Number.isFinite(Number(rawReserved)) ? Number(rawReserved) : 0;
@@ -374,24 +411,157 @@ const buildInventorySummary = (items = []) => {
   return summary;
 };
 
+const adaptInventorySummary = (source) => {
+  if (!source || typeof source !== "object") {
+    return null;
+  }
+  const toNumber = (value, fallback = 0) => {
+    if (value === undefined || value === null || value === "") return fallback;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
+
+  const summary = {
+    quantity: toNumber(
+      source.quantity ??
+        source.total_quantity ??
+        source.totalQuantity ??
+        source.available ??
+        source.stock,
+      0,
+    ),
+    reserved_qty: toNumber(
+      source.reserved_qty ?? source.reserved ?? source.total_reserved ?? source.on_hold,
+      0,
+    ),
+    byBranch: {},
+  };
+
+  const branchEntries =
+    source.byBranch ||
+    source.by_branch ||
+    source.branchBreakdown ||
+    source.branch_breakdown ||
+    source.branches ||
+    null;
+
+  const assignBranchRecord = (entry, key) => {
+    if (entry === undefined || entry === null) return;
+    let branchId = normalizeBranchId(entry);
+    if (!branchId && key !== undefined) {
+      branchId = normalizeBranchId({ id: key }) || String(key);
+    }
+    if (!branchId) return;
+    let record = entry;
+    if (typeof entry === "number") {
+      record = { quantity: entry };
+    }
+    const quantity = toNumber(
+      record.quantity ??
+        record.qty ??
+        record.stock ??
+        record.available ??
+        record.quantity_on_hand,
+      0,
+    );
+    const reserved = toNumber(
+      record.reserved_qty ?? record.reserved ?? record.on_hold ?? record.hold,
+      0,
+    );
+    summary.byBranch[branchId] = {
+      quantity,
+      reserved_qty: reserved,
+    };
+  };
+
+  if (Array.isArray(branchEntries)) {
+    branchEntries.forEach((entry) => assignBranchRecord(entry));
+  } else if (branchEntries && typeof branchEntries === "object") {
+    Object.entries(branchEntries).forEach(([key, value]) => assignBranchRecord(value, key));
+  }
+
+  const branchTotals = Object.values(summary.byBranch);
+  if ((!summary.quantity || summary.quantity === 0) && branchTotals.length) {
+    summary.quantity = branchTotals.reduce((total, item) => total + (item.quantity || 0), 0);
+  }
+  if ((!summary.reserved_qty || summary.reserved_qty === 0) && branchTotals.length) {
+    summary.reserved_qty = branchTotals.reduce((total, item) => total + (item.reserved_qty || 0), 0);
+  }
+
+  return summary;
+};
+
+const mergeInventorySummaries = (primary, fallback) => {
+  if (!primary && !fallback) {
+    return { quantity: 0, reserved_qty: 0, byBranch: {} };
+  }
+  if (!primary) return fallback;
+  if (!fallback) return primary;
+  return {
+    quantity: Number.isFinite(primary.quantity) ? primary.quantity : fallback.quantity || 0,
+    reserved_qty: Number.isFinite(primary.reserved_qty)
+      ? primary.reserved_qty
+      : fallback.reserved_qty || 0,
+    byBranch: { ...(fallback.byBranch || {}), ...(primary.byBranch || {}) },
+  };
+};
+
 const decorateProductsWithInventory = (items = []) =>
   (Array.isArray(items) ? items : []).map((product) => {
     const assignments = Array.isArray(product?.branch_assignments)
       ? product.branch_assignments
       : [];
+    const derivedSummary = buildInventorySummary(assignments);
+    const providedSummary = adaptInventorySummary(
+      product?.inventory_summary || product?.inventorySummary,
+    );
     return {
       ...product,
-      inventory_summary: buildInventorySummary(assignments),
+      inventory_summary: mergeInventorySummaries(providedSummary, derivedSummary),
     };
   });
 
 const decorateProductWithInventory = (product = {}) =>
   decorateProductsWithInventory([product])[0] || {
     ...product,
-    inventory_summary: buildInventorySummary(
-      Array.isArray(product?.branch_assignments) ? product.branch_assignments : [],
+    inventory_summary: mergeInventorySummaries(
+      adaptInventorySummary(product?.inventory_summary || product?.inventorySummary),
+      buildInventorySummary(
+        Array.isArray(product?.branch_assignments) ? product.branch_assignments : [],
+      ),
     ),
   };
+
+const resolveBranchInventory = (product, branchId) => {
+  if (!branchId || branchId === "all" || !product) {
+    return null;
+  }
+  const summaryRecord =
+    product?.inventory_summary?.byBranch &&
+    product.inventory_summary.byBranch[branchId];
+  if (summaryRecord) {
+    return summaryRecord;
+  }
+  const assignments = Array.isArray(product.branch_assignments)
+    ? product.branch_assignments
+    : [];
+  const assignment = assignments.find(
+    (item) => normalizeBranchId(item) === branchId,
+  );
+  if (!assignment) return null;
+  const quantity =
+    assignment.quantity ??
+    assignment?.inventory?.quantity ??
+    0;
+  const reserved =
+    assignment.reserved_qty ??
+    assignment?.inventory?.reserved_qty ??
+    0;
+  return {
+    quantity: Number(quantity || 0),
+    reserved_qty: Number(reserved || 0),
+  };
+};
 
 const normalizeCategoryAssignments = (assignments = []) =>
   (Array.isArray(assignments) ? assignments : [])
@@ -1464,7 +1634,86 @@ const InventoryModal = ({
 
 const MenuManagement = () => {
   const { restaurantProfile, refreshCatalog } = useAppContext();
-  const ownerRestaurantId = restaurantProfile?.id || null;
+  const { role, scope, permissions } = useOwnerPermission();
+  const isOwnerMain = role === "owner_main";
+  const ownerRestaurantId = isOwnerMain ? restaurantProfile?.id || null : null;
+  const isMenuReadOnly = role === "manager";
+  const canModifyMenu = Boolean(permissions?.canManageMenu) && !isMenuReadOnly;
+
+  const scopedRestaurantIds = useMemo(() => {
+    if (isOwnerMain) return [];
+    const ids = [];
+    if (restaurantProfile?.restaurantId) {
+      ids.push(restaurantProfile.restaurantId);
+    }
+    if (Array.isArray(scope?.restaurantIds)) {
+      scope.restaurantIds.forEach((id) => ids.push(id));
+    }
+    if (Array.isArray(restaurantProfile?.memberships)) {
+      restaurantProfile.memberships.forEach((membership) => {
+        const membershipRestaurantId = membership?.restaurantId || membership?.restaurant_id;
+        if (membershipRestaurantId) {
+          ids.push(membershipRestaurantId);
+        }
+      });
+    }
+    return uniqueStrings(ids);
+  }, [isOwnerMain, restaurantProfile, scope]);
+
+  const branchScopeSet = useMemo(() => {
+    if (isOwnerMain) return new Set();
+    const branchIds = [];
+    if (restaurantProfile?.branchId) {
+      branchIds.push(restaurantProfile.branchId);
+    }
+    if (Array.isArray(scope?.branchIds)) {
+      scope.branchIds.forEach((id) => branchIds.push(id));
+    }
+    if (Array.isArray(restaurantProfile?.memberships)) {
+      restaurantProfile.memberships.forEach((membership) => {
+        const membershipBranchId = membership?.branchId || membership?.branch_id;
+        if (membershipBranchId) {
+          branchIds.push(membershipBranchId);
+        }
+      });
+    }
+    return new Set(uniqueStrings(branchIds));
+  }, [isOwnerMain, restaurantProfile, scope]);
+
+  const sessionBranchNames = useMemo(() => {
+    if (isOwnerMain) return [];
+    const names = [];
+    if (restaurantProfile?.branchName) {
+      names.push(restaurantProfile.branchName);
+    }
+    if (Array.isArray(restaurantProfile?.memberships)) {
+      restaurantProfile.memberships.forEach((membership) => {
+        const value =
+          membership?.branchName ||
+          membership?.branch_label ||
+          membership?.branchLabel ||
+          membership?.branch;
+        if (value) {
+          names.push(value);
+        }
+      });
+    }
+    return Array.from(
+      new Set(
+        names
+          .map((name) => (typeof name === "string" ? name.trim() : null))
+          .filter((name) => name && name.length),
+      ),
+    );
+  }, [isOwnerMain, restaurantProfile]);
+
+  const requireMenuWriteAccess = useCallback(() => {
+    if (!canModifyMenu) {
+      toast.error("You have view-only access to the menu.");
+      return false;
+    }
+    return true;
+  }, [canModifyMenu]);
 
   const [restaurant, setRestaurant] = useState(() => SAMPLE_RESTAURANT);
   const [loading, setLoading] = useState(true);
@@ -1474,7 +1723,9 @@ const MenuManagement = () => {
   const [usingSampleData, setUsingSampleData] = useState(true);
   const [ownerRestaurants, setOwnerRestaurants] = useState([]);
   const [selectedRestaurantId, setSelectedRestaurantId] = useState(null);
-  const [selectedBranchId, setSelectedBranchId] = useState("all");
+  const [selectedBranchId, setSelectedBranchId] = useState(() =>
+    branchScopeSet.size ? null : "all",
+  );
   const [productsLoading, setProductsLoading] = useState(false);
   const [apiCategories, setApiCategories] = useState(() =>
   SAMPLE_CATEGORIES.map((name) => ({
@@ -1513,6 +1764,28 @@ const MenuManagement = () => {
   const [comboModalOpen, setComboModalOpen] = useState(false);
   const [comboForm, setComboForm] = useState({ name: "", price: "", productIds: [] });
   const [localCombos, setLocalCombos] = useState([]);
+
+  const hasBranchRestriction = branchScopeSet.size > 0;
+  const assignedBranchLabel = useMemo(() => {
+    const branchNames = branches.length
+      ? branches.map(
+          (branch) =>
+            branch.name ||
+            branch.branch_name ||
+            (branch.branchNumber ? `Branch #${branch.branchNumber}` : null) ||
+            (branch.id ? `Branch #${branch.id}` : null),
+        )
+      : sessionBranchNames;
+    return formatList(
+      Array.from(
+        new Set(
+          branchNames
+            .map((name) => (typeof name === "string" ? name.trim() : null))
+            .filter((name) => name && name.length),
+        ),
+      ),
+    );
+  }, [branches, sessionBranchNames]);
 
   const loadProducts = useCallback(async (restaurantId, query = {}) => {
     if (!restaurantId || isSampleId(restaurantId)) {
@@ -1609,8 +1882,14 @@ const MenuManagement = () => {
     try {
       const list = await restaurantManagerService.listBranches(restaurantId);
       const mapped = Array.isArray(list) ? list : [];
-      setBranches(mapped);
-      return mapped;
+      const filtered = branchScopeSet.size
+        ? mapped.filter((branch) => {
+            if (!branch || branch.id === undefined || branch.id === null) return false;
+            return branchScopeSet.has(String(branch.id));
+          })
+        : mapped;
+      setBranches(filtered);
+      return filtered;
     } catch (requestError) {
       const message =
         requestError?.response?.data?.error ||
@@ -1620,22 +1899,62 @@ const MenuManagement = () => {
       setBranches([]);
       return [];
     }
-  }, []);
+  }, [branchScopeSet]);
 
   const loadOwnerRestaurants = useCallback(async () => {
-    if (!ownerRestaurantId) {
+    if (isOwnerMain) {
+      if (!ownerRestaurantId) {
+        setOwnerRestaurants([]);
+        return [];
+      }
+      try {
+        const response = await restaurantManagerService.listByOwner(ownerRestaurantId);
+        const items = Array.isArray(response?.items)
+          ? response.items
+          : Array.isArray(response)
+          ? response
+          : [];
+        setOwnerRestaurants(items);
+        return items;
+      } catch (requestError) {
+        const message =
+          requestError?.response?.data?.error ||
+          requestError?.message ||
+          "Unable to load restaurants.";
+        toast.error(message);
+        setOwnerRestaurants([]);
+        return [];
+      }
+    }
+
+    if (!scopedRestaurantIds.length) {
       setOwnerRestaurants([]);
       return [];
     }
+
     try {
-      const response = await restaurantManagerService.listByOwner(ownerRestaurantId);
-      const items = Array.isArray(response?.items)
-        ? response.items
-        : Array.isArray(response)
-        ? response
-        : [];
-      setOwnerRestaurants(items);
-      return items;
+      const results = await Promise.all(
+        scopedRestaurantIds.map(async (restaurantId) => {
+          try {
+            const detail = await restaurantManagerService.getRestaurant(restaurantId);
+            const resolved = detail?.restaurant || detail;
+            if (!resolved) return null;
+            const resolvedId = resolved.id || restaurantId;
+            const resolvedName =
+              resolved.name ||
+              resolved.legal_name ||
+              resolved.restaurant_name ||
+              `Restaurant ${resolvedId}`;
+            return { id: resolvedId, name: resolvedName };
+          } catch (error) {
+            console.warn("[menu] failed to load scoped restaurant", restaurantId, error);
+            return null;
+          }
+        }),
+      );
+      const filtered = results.filter(Boolean);
+      setOwnerRestaurants(filtered);
+      return filtered;
     } catch (requestError) {
       const message =
         requestError?.response?.data?.error ||
@@ -1645,7 +1964,7 @@ const MenuManagement = () => {
       setOwnerRestaurants([]);
       return [];
     }
-  }, [ownerRestaurantId]);
+  }, [isOwnerMain, ownerRestaurantId, scopedRestaurantIds]);
 
   const loadRestaurantDetail = useCallback(
     async (restaurantId, options = {}) => {
@@ -1658,7 +1977,7 @@ const MenuManagement = () => {
         setBranchInventoryCache({});
         setBranches([]);
         setSelectedRestaurantId(SAMPLE_RESTAURANT.id);
-        setSelectedBranchId("all");
+        setSelectedBranchId(branchScopeSet.size ? null : "all");
         return false;
       }
 
@@ -1672,21 +1991,55 @@ const MenuManagement = () => {
           setBranchInventoryCache({});
           setBranches([]);
           setSelectedRestaurantId(SAMPLE_RESTAURANT.id);
-          setSelectedBranchId("all");
+          setSelectedBranchId(branchScopeSet.size ? null : "all");
           return false;
         }
 
         setRestaurant(data);
         setSelectedRestaurantId(restaurantId);
         const branchList = Array.isArray(data?.branches) ? data.branches : [];
-        setBranches(branchList);
-        const resolvedBranch =
-          branchId && branchList.some((branch) => branch.id === branchId) ? branchId : "all";
-        setSelectedBranchId(resolvedBranch);
-        await loadProducts(
-          restaurantId,
-          resolvedBranch !== "all" ? { branchId: resolvedBranch } : {},
-        );
+        const accessibleBranches = branchScopeSet.size
+          ? branchList.filter((branch) => {
+              if (!branch || branch.id === undefined || branch.id === null) return false;
+              return branchScopeSet.has(String(branch.id));
+            })
+          : branchList;
+
+        if (branchScopeSet.size && !accessibleBranches.length) {
+          setBranches([]);
+          setSelectedBranchId(null);
+          setProducts([]);
+          setVisibilityOverrides(() => ({}));
+          setBranchInventoryCache({});
+          setError(
+            "No branches have been assigned to your account for this restaurant. Please contact the owner main.",
+          );
+          return false;
+        }
+
+        setBranches(accessibleBranches);
+        const resolvedBranch = (() => {
+          if (!branchScopeSet.size) {
+            return (
+              branchId &&
+              accessibleBranches.some((branch) => String(branch.id) === String(branchId))
+            )
+              ? branchId
+              : "all";
+          }
+          if (
+            branchId &&
+            accessibleBranches.some((branch) => String(branch.id) === String(branchId))
+          ) {
+            return branchId;
+          }
+          return accessibleBranches[0]?.id || null;
+        })();
+
+        setSelectedBranchId(resolvedBranch || (branchScopeSet.size ? accessibleBranches[0]?.id : "all"));
+        const branchQuery =
+          resolvedBranch && resolvedBranch !== "all" ? { branchId: resolvedBranch } : {};
+        await loadProducts(restaurantId, branchQuery);
         setError("");
         return true;
       } catch (requestError) {
@@ -1705,11 +2058,11 @@ const MenuManagement = () => {
         setBranchInventoryCache({});
         setBranches([]);
         setSelectedRestaurantId(SAMPLE_RESTAURANT.id);
-        setSelectedBranchId("all");
+        setSelectedBranchId(branchScopeSet.size ? null : "all");
         return false;
       }
     },
-    [loadProducts],
+    [branchScopeSet, loadProducts],
   );
 
   const handleRestaurantSelect = useCallback(
@@ -1717,55 +2070,42 @@ const MenuManagement = () => {
       const effectiveId =
         nextRestaurantId && nextRestaurantId !== SAMPLE_RESTAURANT.id ? nextRestaurantId : null;
       setSelectedRestaurantId(nextRestaurantId || SAMPLE_RESTAURANT.id);
-      setSelectedBranchId("all");
-      await loadRestaurantDetail(effectiveId, { branchId: "all" });
+      const branchTarget = hasBranchRestriction ? null : "all";
+      setSelectedBranchId(branchTarget);
+      await loadRestaurantDetail(effectiveId, { branchId: branchTarget });
     },
-    [loadRestaurantDetail],
+    [hasBranchRestriction, loadRestaurantDetail],
   );
 
   const handleBranchFilterChange = useCallback(
     async (nextBranchId) => {
-      const resolved = nextBranchId || "all";
+      const resolved = nextBranchId || (hasBranchRestriction ? null : "all");
+      if (hasBranchRestriction && (!resolved || resolved === "all")) {
+        return;
+      }
       setSelectedBranchId(resolved);
       if (!restaurant?.id || usingSampleData) {
         return;
       }
-      await loadProducts(
-        restaurant.id,
-        resolved !== "all" ? { branchId: resolved } : {},
-      );
+      const query =
+        resolved && resolved !== "all"
+          ? { branchId: resolved }
+          : {};
+      await loadProducts(restaurant.id, query);
     },
-    [restaurant, usingSampleData, loadProducts],
+    [hasBranchRestriction, restaurant, usingSampleData, loadProducts],
   );
 
   const loadData = useCallback(async () => {
-    if (!ownerRestaurantId) {
-      setLoading(false);
-      setError("");
-      setRestaurant(SAMPLE_RESTAURANT);
-      setUsingSampleData(true);
-      setApiCategories(
-        SAMPLE_CATEGORIES.map((name) => ({
-          id: `sample-${name.toLowerCase().replace(/\s+/g, "-")}`,
-          name,
-          branchAssignments: [],
-        })),
-      );
-      setProducts(decorateProductsWithInventory(SAMPLE_PRODUCTS));
-      setVisibilityOverrides(() => ({}));
-      setBranches([]);
-      setBranchInventoryCache({});
-      setOwnerRestaurants([]);
-      setSelectedRestaurantId(SAMPLE_RESTAURANT.id);
-      setSelectedBranchId("all");
-      return;
-    }
+    const hasRestaurantSource = isOwnerMain
+      ? Boolean(ownerRestaurantId)
+      : scopedRestaurantIds.length > 0;
 
-    setLoading(true);
-    setError("");
-    try {
-      const list = await loadOwnerRestaurants();
-      if (!list.length) {
+    if (!hasRestaurantSource) {
+      setLoading(false);
+      setOwnerRestaurants([]);
+      if (isOwnerMain) {
+        setError("");
         setRestaurant(SAMPLE_RESTAURANT);
         setUsingSampleData(true);
         setApiCategories(
@@ -1781,6 +2121,52 @@ const MenuManagement = () => {
         setBranchInventoryCache({});
         setSelectedRestaurantId(SAMPLE_RESTAURANT.id);
         setSelectedBranchId("all");
+      } else {
+        setRestaurant(SAMPLE_RESTAURANT);
+        setUsingSampleData(false);
+        setProducts([]);
+        setVisibilityOverrides(() => ({}));
+        setBranches([]);
+        setBranchInventoryCache({});
+        setSelectedRestaurantId(SAMPLE_RESTAURANT.id);
+        setSelectedBranchId(null);
+        setError("No restaurant is assigned to your account. Please contact the owner main.");
+      }
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+    try {
+      const list = await loadOwnerRestaurants();
+      if (!list.length) {
+        if (isOwnerMain) {
+          setRestaurant(SAMPLE_RESTAURANT);
+          setUsingSampleData(true);
+          setApiCategories(
+            SAMPLE_CATEGORIES.map((name) => ({
+              id: `sample-${name.toLowerCase().replace(/\s+/g, "-")}`,
+              name,
+              branchAssignments: [],
+            })),
+          );
+          setProducts(decorateProductsWithInventory(SAMPLE_PRODUCTS));
+          setVisibilityOverrides(() => ({}));
+          setBranches([]);
+          setBranchInventoryCache({});
+          setSelectedRestaurantId(SAMPLE_RESTAURANT.id);
+          setSelectedBranchId("all");
+        } else {
+          setRestaurant(SAMPLE_RESTAURANT);
+          setUsingSampleData(false);
+          setProducts([]);
+          setVisibilityOverrides(() => ({}));
+          setBranches([]);
+          setBranchInventoryCache({});
+          setSelectedRestaurantId(SAMPLE_RESTAURANT.id);
+          setSelectedBranchId(null);
+          setError("No restaurant is currently available for your account. Please contact the owner main.");
+        }
         return;
       }
 
@@ -1812,11 +2198,19 @@ const MenuManagement = () => {
       setBranchInventoryCache({});
       setOwnerRestaurants([]);
       setSelectedRestaurantId(SAMPLE_RESTAURANT.id);
-      setSelectedBranchId("all");
+      setSelectedBranchId(hasBranchRestriction ? null : "all");
     } finally {
       setLoading(false);
     }
-  }, [ownerRestaurantId, loadOwnerRestaurants, loadRestaurantDetail, selectedRestaurantId]);
+  }, [
+    isOwnerMain,
+    ownerRestaurantId,
+    scopedRestaurantIds,
+    loadOwnerRestaurants,
+    loadRestaurantDetail,
+    selectedRestaurantId,
+    hasBranchRestriction,
+  ]);
 
   useEffect(() => {
     loadData();
@@ -1833,14 +2227,14 @@ const MenuManagement = () => {
     }
     setNewCategoryBranchIds((previous) => {
       const validPrevious = Array.isArray(previous)
-        ? previous.filter((id) => branches.some((branch) => branch.id === id))
+        ? previous.filter((id) => branches.some((branch) => String(branch.id) === String(id)))
         : [];
       if (validPrevious.length) {
         return validPrevious;
       }
       if (
         selectedBranchId !== "all" &&
-        branches.some((branch) => branch.id === selectedBranchId)
+        branches.some((branch) => String(branch.id) === String(selectedBranchId))
       ) {
         return [selectedBranchId];
       }
@@ -1937,6 +2331,7 @@ const MenuManagement = () => {
   }
 
   const openCreateModal = () => {
+    if (!requireMenuWriteAccess()) return;
     setModalMode("create");
     setActiveProductId(null);
     setFormState(() => ({
@@ -1947,6 +2342,7 @@ const MenuManagement = () => {
   };
 
   const openComboModal = () => {
+    if (!requireMenuWriteAccess()) return;
     setComboForm({ name: "", price: "", productIds: [] });
     setComboModalOpen(true);
   };
@@ -1956,6 +2352,7 @@ const MenuManagement = () => {
   };
 
   const toggleComboProduct = (productId) => {
+    if (!canModifyMenu) return;
     setComboForm((previous) => {
       const hasProduct = previous.productIds.includes(productId);
       return {
@@ -1969,6 +2366,7 @@ const MenuManagement = () => {
 
   const handleComboSubmit = async (event) => {
     event.preventDefault();
+    if (!requireMenuWriteAccess()) return;
     const name = comboForm.name.trim();
     const priceValue = Number(comboForm.price);
 
@@ -2035,6 +2433,7 @@ const MenuManagement = () => {
   };
 
   const openEditModal = async (product) => {
+    if (!requireMenuWriteAccess()) return;
     if (!product) return;
     setModalMode("edit");
     setActiveProductId(product.id);
@@ -2107,6 +2506,7 @@ const MenuManagement = () => {
 
   const handleSubmit = async (event) => {
     event.preventDefault();
+    if (!requireMenuWriteAccess()) return;
 
     const trimmedTitle = formState.title.trim();
     if (!trimmedTitle) {
@@ -2161,7 +2561,7 @@ const MenuManagement = () => {
     const branchInventories = [];
     for (const branchId of assignedBranches) {
       if (!branchId) continue;
-      const branchExists = branches.some((branch) => branch.id === branchId);
+      const branchExists = branches.some((branch) => String(branch.id) === String(branchId));
       if (!branchExists) continue;
 
       const values = formState.branchInventory?.[branchId];
@@ -2250,6 +2650,11 @@ const MenuManagement = () => {
       : [];
 
     const normalizedOptionGroupsForState = normalizeOptionGroupsForState(sanitizedOptionGroups);
+    const updatePayloadWithOptions = {
+      ...payload,
+      optionGroups: sanitizedOptionGroups,
+      option_groups: sanitizedOptionGroups,
+    };
 
     let shouldCloseModal = false;
     let shouldRefresh = false;
@@ -2281,13 +2686,27 @@ const MenuManagement = () => {
           toast.success("Dish updated.");
           shouldCloseModal = true;
         } else {
-          const updated = await ownerProductService.update(restaurantId, activeProductId, payload);
-          setProducts((previous) =>
-            previous.map((product) => {
-              if (product.id !== activeProductId) return product;
-              return decorateProductWithInventory({ ...product, ...updated });
-            })
+          const updated = await ownerProductService.update(
+            restaurantId,
+            activeProductId,
+            updatePayloadWithOptions,
           );
+          const enrichedUpdated = {
+            ...updated,
+            optionGroups: normalizedOptionGroupsForState,
+          };
+          setProducts((previous) =>
+            previous.map((product) =>
+              product.id === activeProductId
+                ? decorateProductWithInventory(enrichedUpdated)
+                : product,
+            ),
+          );
+          setVisibilityOverrides((previous) => {
+            const next = { ...previous };
+            delete next[activeProductId];
+            return next;
+          });
           toast.success("Dish updated.");
           shouldRefresh = true;
           shouldCloseModal = true;
@@ -2389,6 +2808,7 @@ const MenuManagement = () => {
   };
 
   const handleDelete = async (product) => {
+    if (!requireMenuWriteAccess()) return;
     const confirmed = window.confirm(`Delete dish "${product.title}"?`);
     if (!confirmed) return;
 
@@ -2436,6 +2856,7 @@ const MenuManagement = () => {
   };
 
   const openInventoryManager = async (product) => {
+    if (!requireMenuWriteAccess()) return;
     if (!product) return;
     const readonly =
       usingSampleData || isSampleRestaurant(restaurant) || isSampleId(product.id);
@@ -2501,6 +2922,10 @@ const MenuManagement = () => {
   };
 
   const handleInventorySubmit = async () => {
+    if (!requireMenuWriteAccess()) {
+      closeInventoryManager();
+      return;
+    }
     if (!inventoryModal.productId || !restaurant?.id) {
       closeInventoryManager();
       return;
@@ -2625,6 +3050,7 @@ const MenuManagement = () => {
   };
 
   const handleVisibilityToggle = (productId) => {
+    if (!requireMenuWriteAccess()) return;
     const target = products.find((item) => item.id === productId);
     if (!target) return;
 
@@ -2651,8 +3077,9 @@ const MenuManagement = () => {
   };
 
   const toggleNewCategoryBranch = (branchId) => {
+    if (!canModifyMenu) return;
     if (!branchId) return;
-    if (!Array.isArray(branches) || !branches.some((branch) => branch.id === branchId)) return;
+    if (!Array.isArray(branches) || !branches.some((branch) => String(branch.id) === String(branchId))) return;
     setNewCategoryBranchIds((previous) => {
       const list = Array.isArray(previous) ? [...previous] : [];
       const index = list.indexOf(branchId);
@@ -2665,16 +3092,19 @@ const MenuManagement = () => {
   };
 
   const selectAllNewCategoryBranches = () => {
+    if (!canModifyMenu) return;
     if (!Array.isArray(branches) || !branches.length) return;
     const ids = branches.map((branch) => branch.id).filter(Boolean);
     setNewCategoryBranchIds(ids);
   };
 
   const clearNewCategoryBranches = () => {
+    if (!canModifyMenu) return;
     setNewCategoryBranchIds([]);
   };
 
   const handleAddCategory = async () => {
+    if (!requireMenuWriteAccess()) return;
     const trimmed = newCategoryName.trim();
     if (!trimmed) {
       toast.error("Category name cannot be empty.");
@@ -2719,7 +3149,7 @@ const MenuManagement = () => {
     const availableBranches = Array.isArray(branches) ? branches : [];
     const selectedBranchIds = availableBranches.length
       ? newCategoryBranchIds.filter((id) =>
-          availableBranches.some((branch) => branch.id === id),
+          availableBranches.some((branch) => String(branch.id) === String(id)),
         )
       : [];
 
@@ -2789,13 +3219,22 @@ const MenuManagement = () => {
         ? ownerRestaurants[0].id
         : SAMPLE_RESTAURANT.id;
 
-  const branchSelectDisabled = usingSampleData || !branches.length;
-  const selectedBranch = branches.find((branch) => branch.id === selectedBranchId);
+  const allowAllBranchesOption = !hasBranchRestriction;
+  const branchSelectDisabled =
+    usingSampleData || !branches.length || (hasBranchRestriction && branches.length <= 1);
+  const selectedBranch =
+    selectedBranchId && selectedBranchId !== "all"
+      ? branches.find((branch) => String(branch.id) === String(selectedBranchId))
+      : null;
   const branchFilterLabel = usingSampleData
     ? "Showing demo data"
-    : selectedBranchId === "all"
+    : selectedBranchId === "all" && allowAllBranchesOption
       ? "All branches"
-      : `Branch: ${selectedBranch?.name || selectedBranch?.branch_name || "Selected branch"}`;
+      : selectedBranch
+        ? `Branch: ${selectedBranch.name || selectedBranch.branch_name || "Selected branch"}`
+        : hasBranchRestriction
+          ? "Select one of your assigned branches to manage dishes."
+          : "Select a branch to filter dishes.";
 
   if (loading) {
     return (
@@ -2849,6 +3288,17 @@ const MenuManagement = () => {
             </button>
           </div>
         </div>
+
+        {!isOwnerMain ? (
+          <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+            <p className="font-semibold text-amber-900">Scoped access</p>
+            <p className="mt-1">
+              {assignedBranchLabel
+                ? `You can manage dishes for ${assignedBranchLabel}.`
+                : "You can manage dishes for the branches assigned to your account. Please contact the owner main if you need a different branch."}
+            </p>
+          </div>
+        ) : null}
 
         <div className="mt-6 rounded-xl border border-slate-200 bg-slate-50 p-4">
           <div className="flex items-center justify-between">
@@ -3059,7 +3509,7 @@ const MenuManagement = () => {
               disabled={branchSelectDisabled}
               className="mt-1 rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none disabled:cursor-not-allowed disabled:bg-slate-100"
             >
-              <option value="all">All branches</option>
+              {allowAllBranchesOption ? <option value="all">All branches</option> : null}
               {branches.map((branch) => (
                 <option key={branch.id} value={branch.id}>
                   {branch.name || branch.branch_name || "Unnamed branch"}
@@ -3136,15 +3586,15 @@ const MenuManagement = () => {
                     "";
                   const displayImage = primaryImage || dishPlaceholderImage;
                   const inventorySummary = product.inventory_summary || {};
-                  const branchInventory =
-                    selectedBranchId !== "all"
-                      ? inventorySummary.byBranch?.[selectedBranchId] || null
-                      : null;
-                  const branchQuantity = Number(branchInventory?.quantity || 0);
-                  const branchReserved = Number(branchInventory?.reserved_qty || 0);
-                  const showBranchInventory = selectedBranchId !== "all";
+                  const branchInventory = resolveBranchInventory(product, selectedBranchId);
+                  const totalQuantity = Number(inventorySummary.quantity || 0);
+                  const totalReserved = Number(inventorySummary.reserved_qty || 0);
+                  const totalAvailable = Math.max(totalQuantity - totalReserved, 0);
                   const manageDisabled =
-                    usingSampleData || isSampleRestaurant(restaurant) || isSampleId(product.id);
+                    usingSampleData ||
+                    isSampleRestaurant(restaurant) ||
+                    isSampleId(product.id) ||
+                    !canModifyMenu;
 
                   const hidden =
                     visibilityOverrides[product.id] ??
@@ -3238,30 +3688,14 @@ const MenuManagement = () => {
                           {formatCurrency(priceWithTax)}
                         </td>
                         <td className="px-4 py-3">
-                          <div className="flex flex-col gap-2 text-sm">
-                            {showBranchInventory ? (
-                              <>
-                                <span className="font-semibold text-slate-800">
-                                  {branchQuantity.toLocaleString("vi-VN")} in stock
-                                </span>
-                                <span className="text-xs text-slate-500">
-                                  Reserved: {branchReserved.toLocaleString("vi-VN")}
-                                </span>
-                              </>
-                            ) : (
-                              <span className="text-xs text-slate-500">
-                                Select a branch filter to view stock levels.
-                              </span>
-                            )}
-                            <button
-                              type="button"
-                              className="w-full rounded-lg border border-emerald-200 bg-emerald-50 py-2 text-xs font-semibold text-emerald-600 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
-                              onClick={() => openInventoryManager(product)}
-                              disabled={manageDisabled}
-                            >
-                              Manage
-                            </button>
-                          </div>
+                          <button
+                            type="button"
+                            className="w-full rounded-lg border border-emerald-200 bg-emerald-50 py-2 text-xs font-semibold text-emerald-600 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+                            onClick={() => openInventoryManager(product)}
+                            disabled={manageDisabled}
+                          >
+                            Manage
+                          </button>
                         </td>
                         <td className="px-4 py-3">
                           <span

@@ -106,6 +106,42 @@ class ForbiddenError extends ServiceError {
   }
 }
 
+const STAFF_ALLOWED_STATUS_SET = new Set(['confirmed', 'preparing', 'ready']);
+
+const ensureRoleArray = (value) => {
+  if (!value) return [];
+  if (Array.isArray(value)) {
+    return value.filter((entry) => typeof entry === 'string');
+  }
+  if (typeof value === 'string' && value.trim().length) {
+    return value
+      .split(',')
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length);
+  }
+  return [];
+};
+
+const resolvePrimaryRole = (user = {}) => {
+  const candidates = [
+    ...ensureRoleArray(user.role),
+    ...ensureRoleArray(user.roles),
+  ];
+  if (typeof user.sessionType === 'string') {
+    candidates.push(user.sessionType);
+  }
+  return (
+    candidates
+      .map((role) => role && role.toLowerCase())
+      .find((role) => role && role.length) || ''
+  );
+};
+
+const isStaffAccount = (user = {}) => resolvePrimaryRole(user) === 'staff';
+
+const isStaffStatusAllowed = (status) =>
+  STAFF_ALLOWED_STATUS_SET.has(typeof status === 'string' ? status.trim().toLowerCase() : '');
+
 const toNumber = (value, fallback = 0) => {
   if (value === null || value === undefined) return fallback;
   const numeric = Number(value);
@@ -1355,6 +1391,62 @@ async function enqueueOutbox(client, { aggregateType, aggregateId, eventType, pa
   );
 }
 
+async function syncInventoryAfterOrder(order) {
+  if (!order || !order.restaurant_id) {
+    return;
+  }
+  const items = Array.isArray(order.items) ? order.items : [];
+  if (!items.length) return;
+
+  const adjustments = items
+    .map((item) => {
+      if (!item) return null;
+      const quantity = Number(item.quantity || item.qty || 0);
+      if (!Number.isFinite(quantity) || quantity <= 0) {
+        return null;
+      }
+      const branchProductId = normaliseUuid(
+        item.branch_product_id || item.branchProductId || item.branch_product,
+      );
+      const branchIdCandidate =
+        normaliseUuid(item.branch_id || item.branchId) ||
+        normaliseUuid(order.branch_id) ||
+        normaliseUuid(item.product_snapshot?.branch_id);
+      const productId = normaliseUuid(item.product_id || item.productId);
+      if (!branchProductId && !(branchIdCandidate && productId)) {
+        return null;
+      }
+      return {
+        branch_product_id: branchProductId,
+        branch_id: branchIdCandidate,
+        product_id: productId,
+        quantity: Math.max(Math.round(quantity), 0),
+      };
+    })
+    .filter(Boolean);
+
+  if (!adjustments.length) {
+    return;
+  }
+
+  const payload = {
+    restaurant_id: normaliseUuid(order.restaurant_id),
+    branch_id: normaliseUuid(order.branch_id),
+    order_id: order.id,
+    items: adjustments,
+  };
+
+  try {
+    await productClient.adjustInventoryAfterPurchase(payload);
+  } catch (error) {
+    console.error(
+      '[order-service] Failed to update product inventory for order %s: %s',
+      order.id,
+      error?.message || error,
+    );
+  }
+}
+
 async function createCustomerOrder({ user, payload = {}, context = {} }) {
   const userId = resolveUserId(user);
   if (!userId) {
@@ -1471,6 +1563,7 @@ async function createCustomerOrder({ user, payload = {}, context = {} }) {
     await client.query('COMMIT');
 
     const finalOrder = await fetchOrderById(order.id);
+    await syncInventoryAfterOrder(finalOrder);
 
     dispatchOrderEvent(
       'order.created',
@@ -1894,6 +1987,7 @@ module.exports = {
   ValidationError,
   ForbiddenError,
   NotFoundError,
+  syncInventoryAfterOrder,
 };
 
 async function listCustomerOrders({ user, query = {} }) {
@@ -2186,52 +2280,81 @@ async function confirmCustomerOrderDelivery({ user, orderId, payload = {} }) {
 
 async function listOwnerOrders({ user, query = {} }) {
   const restaurantScope = await resolveOwnerRestaurantScope(user);
-  if (!restaurantScope.length) {
-    throw new ForbiddenError('owner does not manage any restaurants');
+  const branchScope = await resolveOwnerBranchScope(user);
+  const staffAccount = isStaffAccount(user);
+  if (!restaurantScope.length && !branchScope.length) {
+    throw new ForbiddenError('owner does not manage any restaurants or branches');
   }
 
   const limit = Math.min(Math.max(Number(query.limit) || 20, 1), 100);
   const offset = Math.max(Number(query.offset) || 0, 0);
 
+  const params = [];
+  const clauses = [];
+
+  const requestedRestaurantId =
+    query.restaurant_id && query.restaurant_id !== 'all'
+      ? normaliseUuid(query.restaurant_id)
+      : null;
+
+  if (requestedRestaurantId) {
+    if (restaurantScope.length && !restaurantScope.includes(requestedRestaurantId)) {
+      throw new ForbiddenError('owner does not manage this restaurant');
+    }
+    params.push(requestedRestaurantId);
+    clauses.push(`restaurant_id = $${params.length}`);
+  } else if (restaurantScope.length) {
+    params.push(restaurantScope);
+    clauses.push(`restaurant_id = ANY($${params.length}::uuid[])`);
+  }
+
+  const requestedBranchId =
+    query.branch_id && query.branch_id !== 'all' ? normaliseUuid(query.branch_id) : null;
+  let branchFilters = null;
+  if (requestedBranchId) {
+    if (branchScope.length && !branchScope.includes(requestedBranchId)) {
+      throw new ForbiddenError('owner does not manage this branch');
+    }
+    branchFilters = [requestedBranchId];
+  } else if (!restaurantScope.length && branchScope.length) {
+    branchFilters = branchScope;
+  }
+
+  if (staffAccount) {
+    if (!branchScope.length) {
+      throw new ForbiddenError('staff account is missing branch assignment');
+    }
+    branchFilters = requestedBranchId ? branchFilters : branchScope;
+  }
+
+  if (branchFilters?.length) {
+    params.push(branchFilters);
+    clauses.push(`branch_id = ANY($${params.length}::uuid[])`);
+  }
+
+  if (!restaurantScope.length && !branchFilters?.length) {
+    throw new ForbiddenError('owner does not manage any restaurants or branches');
+  }
+
+  if (query.status && query.status !== 'all') {
+    params.push(normaliseOrderStatus(query.status));
+    clauses.push(`status = $${params.length}`);
+  }
+
+  if (query.start_date) {
+    params.push(new Date(query.start_date));
+    clauses.push(`created_at >= $${params.length}`);
+  }
+
+  if (query.end_date) {
+    params.push(new Date(query.end_date));
+    clauses.push(`created_at <= $${params.length}`);
+  }
+
+  const whereClause = clauses.length ? `WHERE ${clauses.join(' AND ')}` : 'WHERE true';
+
   const client = await pool.connect();
   try {
-    const params = [restaurantScope];
-    let whereClause = 'WHERE restaurant_id = ANY($1::uuid[])';
-
-    if (query.status && query.status !== 'all') {
-      const status = normaliseOrderStatus(query.status);
-      params.push(status);
-      whereClause += ` AND status = $${params.length}`;
-    }
-
-    if (query.restaurant_id) {
-      const restaurantId = normaliseUuid(query.restaurant_id);
-      if (restaurantId && restaurantScope.includes(restaurantId)) {
-        params.push(restaurantId);
-        whereClause += ` AND restaurant_id = $${params.length}`;
-      }
-    }
-
-    const branchId = normaliseUuid(query.branch_id);
-    if (branchId && branchId !== 'all') {
-      const branchScope = await resolveOwnerBranchScope(user);
-      if (branchScope.length && !branchScope.includes(branchId)) {
-        throw new ForbiddenError('owner does not manage this branch');
-      }
-      params.push(branchId);
-      whereClause += ` AND branch_id = $${params.length}`;
-    }
-
-    if (query.start_date) {
-      params.push(new Date(query.start_date));
-      whereClause += ` AND created_at >= $${params.length}`;
-    }
-
-    if (query.end_date) {
-      params.push(new Date(query.end_date));
-      whereClause += ` AND created_at <= $${params.length}`;
-    }
-
     const ordersRes = await client.query(
       `
         SELECT *
@@ -2272,19 +2395,36 @@ async function listOwnerOrders({ user, query = {} }) {
 
 async function getOwnerOrder({ user, orderId }) {
   const restaurantScope = await resolveOwnerRestaurantScope(user);
-  if (!restaurantScope.length) {
-    throw new ForbiddenError('owner does not manage any restaurants');
+  const branchScope = await resolveOwnerBranchScope(user);
+  const staffAccount = isStaffAccount(user);
+  if (!restaurantScope.length && !branchScope.length) {
+    throw new ForbiddenError('owner does not manage any restaurants or branches');
   }
+
+  const enforceBranch = (!restaurantScope.length && branchScope.length) || staffAccount;
 
   const client = await pool.connect();
   try {
+    const params = [orderId];
+    const clauses = ['id = $1'];
+
+    if (restaurantScope.length) {
+      params.push(restaurantScope);
+      clauses.push(`restaurant_id = ANY($${params.length}::uuid[])`);
+    }
+
+    if (enforceBranch) {
+      params.push(branchScope);
+      clauses.push(`branch_id = ANY($${params.length}::uuid[])`);
+    }
+
     const orderRes = await client.query(
       `
         SELECT *
         FROM orders
-        WHERE id = $1 AND restaurant_id = ANY($2::uuid[])
+        WHERE ${clauses.join(' AND ')}
       `,
-      [orderId, restaurantScope],
+      params,
     );
 
     if (!orderRes.rows.length) {
@@ -2299,8 +2439,17 @@ async function getOwnerOrder({ user, orderId }) {
 
 async function updateOwnerOrderStatus({ user, orderId, payload = {} }) {
   const restaurantScope = await resolveOwnerRestaurantScope(user);
-  if (!restaurantScope.length) {
-    throw new ForbiddenError('owner does not manage any restaurants');
+  const branchScope = await resolveOwnerBranchScope(user);
+  const staffAccount = isStaffAccount(user);
+  if (!restaurantScope.length && !branchScope.length) {
+    throw new ForbiddenError('owner does not manage any restaurants or branches');
+  }
+
+  const branchScopeSet = new Set(branchScope.map((value) => String(value)));
+  const enforceBranch = (!restaurantScope.length && branchScope.length) || staffAccount;
+
+  if (staffAccount && !branchScopeSet.size) {
+    throw new ForbiddenError('staff account is missing branch assignment');
   }
 
   const nextStatus = normaliseOrderStatus(payload.status);
@@ -2312,19 +2461,45 @@ async function updateOwnerOrderStatus({ user, orderId, payload = {} }) {
   try {
     await client.query('BEGIN');
 
+    const params = [orderId];
+    const clauses = ['id = $1'];
+
+    if (restaurantScope.length) {
+      params.push(restaurantScope);
+      clauses.push(`restaurant_id = ANY($${params.length}::uuid[])`);
+    }
+
+    if (enforceBranch) {
+      params.push(branchScope);
+      clauses.push(`branch_id = ANY($${params.length}::uuid[])`);
+    }
+
     const orderRes = await client.query(
       `
         SELECT *
         FROM orders
-        WHERE id = $1 AND restaurant_id = ANY($2::uuid[])
+        WHERE ${clauses.join(' AND ')}
         FOR UPDATE
       `,
-      [orderId, restaurantScope],
+      params,
     );
 
     const order = orderRes.rows[0];
     if (!order) {
       throw new NotFoundError('order not found');
+    }
+
+    if (staffAccount) {
+      const branchId = order.branch_id ? String(order.branch_id) : null;
+      if (!branchId || !branchScopeSet.has(branchId)) {
+        throw new ForbiddenError('staff can only manage orders in their assigned branches');
+      }
+      const currentStatus = typeof order.status === 'string' ? order.status.toLowerCase() : '';
+      if (!isStaffStatusAllowed(currentStatus) || !isStaffStatusAllowed(nextStatus)) {
+        throw new ForbiddenError(
+          'Staff can only update orders while they are Confirmed, Preparing, or Ready.',
+        );
+      }
     }
 
     await client.query(
@@ -2385,22 +2560,39 @@ async function updateOwnerOrderStatus({ user, orderId, payload = {} }) {
 
 async function createOwnerOrderRevision({ user, orderId, payload = {} }) {
   const restaurantScope = await resolveOwnerRestaurantScope(user);
-  if (!restaurantScope.length) {
-    throw new ForbiddenError('owner does not manage any restaurants');
+  const branchScope = await resolveOwnerBranchScope(user);
+  const staffAccount = isStaffAccount(user);
+  if (!restaurantScope.length && !branchScope.length) {
+    throw new ForbiddenError('owner does not manage any restaurants or branches');
   }
+
+  const enforceBranch = (!restaurantScope.length && branchScope.length) || staffAccount;
 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
+    const params = [orderId];
+    const clauses = ['id = $1'];
+
+    if (restaurantScope.length) {
+      params.push(restaurantScope);
+      clauses.push(`restaurant_id = ANY($${params.length}::uuid[])`);
+    }
+
+    if (enforceBranch) {
+      params.push(branchScope);
+      clauses.push(`branch_id = ANY($${params.length}::uuid[])`);
+    }
+
     const orderRes = await client.query(
       `
         SELECT *
         FROM orders
-        WHERE id = $1 AND restaurant_id = ANY($2::uuid[])
+        WHERE ${clauses.join(' AND ')}
         FOR UPDATE
       `,
-      [orderId, restaurantScope],
+      params,
     );
 
     if (!orderRes.rows.length) {

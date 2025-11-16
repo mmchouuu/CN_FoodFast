@@ -135,9 +135,29 @@ async function listRestaurantsByOwner(ownerId) {
   throw error;
 }
 
+async function adjustInventoryAfterPurchase(payload) {
+  if (!payload || typeof payload !== 'object') {
+    throw new Error('payload is required to adjust inventory');
+  }
+  const { status, data } = await sendJsonRequest('/internal/orders/inventory', {
+    method: 'POST',
+    body: payload,
+  });
+  if (status >= 200 && status < 300) {
+    return data;
+  }
+  const error = new Error(
+    (data && (data.error || data.message)) || 'failed to update inventory in product-service',
+  );
+  error.status = status;
+  error.data = data;
+  throw error;
+}
+
 module.exports = {
   quoteOrderPricing,
   fetchBranchById,
   listRestaurantsByOwner,
+  adjustInventoryAfterPurchase,
 };
 

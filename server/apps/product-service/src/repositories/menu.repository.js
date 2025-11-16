@@ -361,6 +361,7 @@ async function updateProduct(productId, fields = {}, client) {
 
 async function deleteProduct(productId, client) {
   const executor = getExecutor(client);
+  await executor.query('DELETE FROM branch_products WHERE product_id = $1', [productId]);
   const result = await executor.query(
     `
       DELETE FROM products
@@ -397,6 +398,38 @@ async function listInventoryForBranchProducts(branchProductIds = [], client) {
     [branchProductIds],
   );
   return result.rows;
+}
+
+async function findBranchProductsByIds(branchProductIds = [], client) {
+  if (!Array.isArray(branchProductIds) || !branchProductIds.length) return [];
+  const executor = getExecutor(client);
+  const result = await executor.query(
+    `
+      SELECT bp.*, b.restaurant_id
+      FROM branch_products bp
+      JOIN restaurant_branches b ON b.id = bp.branch_id
+      WHERE bp.id = ANY($1::uuid[])
+    `,
+    [branchProductIds],
+  );
+  return result.rows;
+}
+
+async function findBranchProductByBranchAndProduct(branchId, productId, client) {
+  if (!branchId || !productId) return null;
+  const executor = getExecutor(client);
+  const result = await executor.query(
+    `
+      SELECT bp.*, b.restaurant_id
+      FROM branch_products bp
+      JOIN restaurant_branches b ON b.id = bp.branch_id
+      WHERE bp.branch_id = $1
+        AND bp.product_id = $2
+      LIMIT 1
+    `,
+    [branchId, productId],
+  );
+  return result.rows[0] || null;
 }
 
 async function upsertInventory(branchProductId, payload = {}, client) {
@@ -473,6 +506,38 @@ async function upsertInventory(branchProductId, payload = {}, client) {
   return result.rows[0] || null;
 }
 
+async function decrementInventoryQuantity(branchProductId, amount, client) {
+  if (!branchProductId || !Number.isFinite(amount) || amount <= 0) {
+    return null;
+  }
+  const executor = getExecutor(client);
+  const numericAmount = Number(amount);
+  const result = await executor.query(
+    `
+      INSERT INTO inventory (
+        branch_product_id,
+        quantity,
+        reserved_qty,
+        min_stock,
+        daily_limit,
+        daily_sold,
+        is_visible,
+        is_active,
+        last_restock_at
+      )
+      VALUES ($1, 0, 0, 10, NULL, $2, TRUE, TRUE, NULL)
+      ON CONFLICT (branch_product_id)
+      DO UPDATE SET
+        quantity = GREATEST(inventory.quantity - EXCLUDED.daily_sold, 0),
+        daily_sold = inventory.daily_sold + EXCLUDED.daily_sold,
+        updated_at = now()
+      RETURNING *
+    `,
+    [branchProductId, numericAmount],
+  );
+  return result.rows[0] || null;
+}
+
 module.exports = {
   ensureCategory,
   assignCategoryToBranch,
@@ -484,7 +549,10 @@ module.exports = {
   listBranchAssignmentsForProducts,
   listBranchAssignmentsForProduct,
   listInventoryForBranchProducts,
+  findBranchProductsByIds,
+  findBranchProductByBranchAndProduct,
   upsertInventory,
+  decrementInventoryQuantity,
   updateProduct,
   deleteProduct,
 };

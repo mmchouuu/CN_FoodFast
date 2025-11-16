@@ -388,14 +388,20 @@ async function loginRestaurantAccount({
   const role = selectedMembership.role || selectedMembership.role_in_restaurant;
   const permissions = normalisePermissions(selectedMembership, role);
 
+  const restaurantIdValue =
+    selectedMembership.restaurant_id || selectedMembership.restaurantId || null;
+  const branchIdValue = selectedMembership.branch_id || selectedMembership.branchId || null;
+
   const tokenPayload = {
     restaurantAccountId: account.id,
     userId: account.user_id,
     role,
-    restaurantId: selectedMembership.restaurant_id || selectedMembership.restaurantId,
-    branchId: selectedMembership.branch_id || selectedMembership.branchId,
+    restaurantId: restaurantIdValue,
+    branchId: branchIdValue,
     restaurantIds: scope.restaurantIds,
     branchIds: scope.branchIds,
+    restaurant_ids: scope.restaurantIds,
+    branch_ids: scope.branchIds,
     permissions,
     requiresPasswordReset,
   };
