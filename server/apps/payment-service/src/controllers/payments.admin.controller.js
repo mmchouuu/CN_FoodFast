@@ -1,5 +1,6 @@
 const paymentsService = require('../services/payments.service');
 const refundsService = require('../services/refunds.service');
+const payoutsAdminService = require('../services/payouts.admin.service');
 
 const mapError = (res, error) => {
   const status = error?.status || error?.statusCode || error?.httpStatus || 500;
@@ -28,6 +29,42 @@ exports.listPayments = async (req, res) => {
   }
 };
 
+exports.listPayoutRestaurants = async (req, res) => {
+  try {
+    const result = await payoutsAdminService.listRestaurantPayouts(req.query || {});
+    return res.json(result);
+  } catch (error) {
+    console.error('[payment-service] listPayoutRestaurants failed:', error);
+    return mapError(res, error);
+  }
+};
+
+exports.listPayoutBranches = async (req, res) => {
+  try {
+    const result = await payoutsAdminService.listRestaurantBranchSettlements(
+      req.params.restaurantId,
+      req.query || {},
+    );
+    return res.json(result);
+  } catch (error) {
+    console.error('[payment-service] listPayoutBranches failed:', error);
+    return mapError(res, error);
+  }
+};
+
+exports.listSettlementOrders = async (req, res) => {
+  try {
+    const result = await payoutsAdminService.listSettlementOrders(req.params.settlementId);
+    if (!result) {
+      return res.status(404).json({ error: 'Settlement not found' });
+    }
+    return res.json(result);
+  } catch (error) {
+    console.error('[payment-service] listSettlementOrders failed:', error);
+    return mapError(res, error);
+  }
+};
+
 exports.listRefunds = async (req, res) => {
   try {
     const result = await refundsService.listRefunds({
@@ -45,4 +82,3 @@ exports.listRefunds = async (req, res) => {
     return mapError(res, error);
   }
 };
-

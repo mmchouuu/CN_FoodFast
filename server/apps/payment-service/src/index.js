@@ -11,6 +11,7 @@ const requireRoles = require('./middlewares/authorize');
 const customerPaymentRoutes = require('./routes/payments.customer.routes');
 const adminPaymentRoutes = require('./routes/payments.admin.routes');
 const internalPaymentRoutes = require('./routes/payments.internal.routes');
+const ownerPayoutRoutes = require('./routes/payments.owner.routes');
 const { startOrderConsumer } = require('./consumers/order.consumer');
 
 const app = express();
@@ -74,6 +75,12 @@ app.use(
   customerPaymentRoutes,
 );
 app.use('/admin', auth, requireRoles(['admin', 'superadmin']), adminPaymentRoutes);
+app.use(
+  '/owner/payouts',
+  auth,
+  requireRoles(['owner', 'restaurant', 'restaurant_owner']),
+  ownerPayoutRoutes,
+);
 
 app.get('/health', (req, res) => res.json({ ok: true, service: 'payment-service' }));
 

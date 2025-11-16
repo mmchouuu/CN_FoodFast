@@ -412,6 +412,21 @@ async function recordOrderCompletion(orderId) {
     return;
   }
   const taxAmount = toAmount(order.tax_total ?? pricing.tax_total ?? 0);
+  const shippingSource =
+    order.shipping_fee ??
+    pricing.shipping_fee ??
+    pricing.shippingFee ??
+    (pricing.totals
+      ? pricing.totals.shipping_fee ?? pricing.totals.shippingFee ?? null
+      : null);
+  const shippingFee = toAmount(shippingSource ?? 0);
+  const orderCompletedAt =
+    order.completed_at ||
+    order.confirmed_at ||
+    order.updated_at ||
+    order.created_at ||
+    new Date();
+  const orderCode = order.order_code || order.code || order.short_id || null;
   const currency = order.currency || pricing.currency || 'VND';
   const completedAt = order.updated_at || new Date();
 
@@ -442,6 +457,9 @@ async function recordOrderCompletion(orderId) {
       meta: {
         currency,
         tax: taxAmount,
+        shipping_fee: shippingFee,
+        order_completed_at: orderCompletedAt,
+        order_code: orderCode,
         source: 'order_completed',
       },
     });

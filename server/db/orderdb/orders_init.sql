@@ -32,6 +32,8 @@ CREATE TABLE IF NOT EXISTS orders (
 
   promo_code        VARCHAR(50),
   note              TEXT,
+  metadata JSONB DEFAULT '{}'::jsonb,
+  timeline_metadata JSONB DEFAULT '[]'::jsonb,
 
   -- Địa chỉ: soft ref + snapshot text để không "trôi"
   shipping_address_id UUID,            -- soft ref: user-service.user_addresses.id

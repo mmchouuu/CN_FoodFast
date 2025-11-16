@@ -11,6 +11,11 @@ const catalogAdminClient = createAxiosInstance({
   timeout: config.requestTimeout,
 });
 
+const paymentAdminClient = createAxiosInstance({
+  baseURL: `${config.paymentServiceUrl}/admin`,
+  timeout: config.requestTimeout,
+});
+
 async function login(payload = {}, opts = {}) {
   const res = await userAdminClient.post('/login', payload, { headers: opts.headers });
   return res.data;
@@ -76,6 +81,29 @@ async function createGlobalPromotion(payload, opts = {}) {
   return res.data;
 }
 
+async function listPayoutRestaurants(params = {}, opts = {}) {
+  const res = await paymentAdminClient.get('/payouts/restaurants', {
+    params,
+    headers: opts.headers,
+  });
+  return res.data;
+}
+
+async function listPayoutBranches(restaurantId, params = {}, opts = {}) {
+  const res = await paymentAdminClient.get(`/payouts/restaurants/${restaurantId}/branches`, {
+    params,
+    headers: opts.headers,
+  });
+  return res.data;
+}
+
+async function listSettlementOrders(settlementId, opts = {}) {
+  const res = await paymentAdminClient.get(`/payouts/settlements/${settlementId}/orders`, {
+    headers: opts.headers,
+  });
+  return res.data;
+}
+
 module.exports = {
   listCustomers,
   customerDetails,
@@ -88,4 +116,7 @@ module.exports = {
   createCalendar,
   createGlobalPromotion,
   login,
+  listPayoutRestaurants,
+  listPayoutBranches,
+  listSettlementOrders,
 };

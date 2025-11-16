@@ -1,5 +1,10 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import toast from "react-hot-toast";
+import {
+  fetchPayoutOverview,
+  fetchRestaurantBranches,
+  fetchSettlementOrders,
+} from "../../services/adminPayouts";
 
 const PERIOD_FILTERS = [
   { value: "current-week", label: "This week" },
@@ -20,198 +25,6 @@ const PAYMENT_FILTERS = [
   { value: "stripe", label: "Stripe" },
   { value: "momo", label: "MoMo" },
   { value: "visa", label: "Visa" },
-];
-
-const RESTAURANT_DATA = [
-  {
-    id: "rest-queen",
-    name: "Tasty Queen Group",
-    totalOnlineSales: 192400000,
-    totalPendingPayout: 18450000,
-    lastPayoutDate: "2025-11-02",
-    overallStatus: "Pending",
-    branches: [
-      {
-        id: "branch-d1",
-        name: "District 1 Flagship",
-        location: "HCMC • District 1",
-        onlineOrders: 128,
-        totalSales: 89500000,
-        pendingPayout: 8250000,
-        netAmount: 74200000,
-        status: "Pending",
-        orders: [
-          {
-            id: "FF-10945",
-            orderDate: "2025-11-07T10:12:00+07:00",
-            totalSales: 1250000,
-            vat: 125000,
-            platformFee: 50000,
-            deliveryFee: 25000,
-            netPayout: 1050000,
-            paymentMethod: "MoMo",
-            status: "Pending",
-          },
-          {
-            id: "FF-10912",
-            orderDate: "2025-11-07T08:44:00+07:00",
-            totalSales: 980000,
-            vat: 98000,
-            platformFee: 40000,
-            deliveryFee: 0,
-            netPayout: 842000,
-            paymentMethod: "Stripe",
-            status: "Processing",
-          },
-          {
-            id: "FF-10888",
-            orderDate: "2025-11-06T20:12:00+07:00",
-            totalSales: 1450000,
-            vat: 145000,
-            platformFee: 60000,
-            deliveryFee: 30000,
-            netPayout: 1210000,
-            paymentMethod: "Visa",
-            status: "Paid",
-          },
-        ],
-      },
-      {
-        id: "branch-d7",
-        name: "District 7 Riverside",
-        location: "HCMC • District 7",
-        onlineOrders: 94,
-        totalSales: 64500000,
-        pendingPayout: 5300000,
-        netAmount: 55200000,
-        status: "Processing",
-        orders: [
-          {
-            id: "FF-10771",
-            orderDate: "2025-11-06T15:22:00+07:00",
-            totalSales: 890000,
-            vat: 89000,
-            platformFee: 35000,
-            deliveryFee: 15000,
-            netPayout: 751000,
-            paymentMethod: "Stripe",
-            status: "Processing",
-          },
-          {
-            id: "FF-10740",
-            orderDate: "2025-11-06T13:05:00+07:00",
-            totalSales: 770000,
-            vat: 77000,
-            platformFee: 32000,
-            deliveryFee: 0,
-            netPayout: 661000,
-            paymentMethod: "MoMo",
-            status: "Pending",
-          },
-        ],
-      },
-    ],
-  },
-  {
-    id: "rest-green",
-    name: "Green Kitchen Collective",
-    totalOnlineSales: 132800000,
-    totalPendingPayout: 2400000,
-    lastPayoutDate: "2025-10-29",
-    overallStatus: "Processing",
-    branches: [
-      {
-        id: "branch-q1",
-        name: "Hanoi Crescent",
-        location: "Hanoi • Ba Dinh",
-        onlineOrders: 71,
-        totalSales: 51200000,
-        pendingPayout: 2400000,
-        netAmount: 41100000,
-        status: "Processing",
-        orders: [
-          {
-            id: "FF-10601",
-            orderDate: "2025-11-05T18:32:00+07:00",
-            totalSales: 1150000,
-            vat: 115000,
-            platformFee: 45000,
-            deliveryFee: 25000,
-            netPayout: 970000,
-            paymentMethod: "MoMo",
-            status: "Pending",
-          },
-          {
-            id: "FF-10588",
-            orderDate: "2025-11-05T16:08:00+07:00",
-            totalSales: 760000,
-            vat: 76000,
-            platformFee: 30000,
-            deliveryFee: 0,
-            netPayout: 654000,
-            paymentMethod: "Visa",
-            status: "Paid",
-          },
-        ],
-      },
-      {
-        id: "branch-dx",
-        name: "Da Nang Beachfront",
-        location: "Da Nang • Son Tra",
-        onlineOrders: 67,
-        totalSales: 42400000,
-        pendingPayout: 0,
-        netAmount: 36600000,
-        status: "Paid",
-        orders: [
-          {
-            id: "FF-10510",
-            orderDate: "2025-11-04T12:00:00+07:00",
-            totalSales: 680000,
-            vat: 68000,
-            platformFee: 28000,
-            deliveryFee: 0,
-            netPayout: 584000,
-            paymentMethod: "Stripe",
-            status: "Paid",
-          },
-        ],
-      },
-    ],
-  },
-  {
-    id: "rest-street",
-    name: "Saigon Street Eats",
-    totalOnlineSales: 103400000,
-    totalPendingPayout: 0,
-    lastPayoutDate: "2025-11-03",
-    overallStatus: "All Paid",
-    branches: [
-      {
-        id: "branch-sg",
-        name: "Thu Duc Central",
-        location: "HCMC • Thu Duc",
-        onlineOrders: 58,
-        totalSales: 33200000,
-        pendingPayout: 0,
-        netAmount: 27900000,
-        status: "Paid",
-        orders: [
-          {
-            id: "FF-10501",
-            orderDate: "2025-11-04T08:55:00+07:00",
-            totalSales: 720000,
-            vat: 72000,
-            platformFee: 28000,
-            deliveryFee: 15000,
-            netPayout: 605000,
-            paymentMethod: "MoMo",
-            status: "Paid",
-          },
-        ],
-      },
-    ],
-  },
 ];
 
 const DEFAULT_AUDIT_LOGS = [
@@ -262,6 +75,15 @@ const formatDate = (value) => {
   }
 };
 
+const formatDateTime = (value) => {
+  if (!value) return "—";
+  try {
+    return new Date(value).toLocaleString("vi-VN");
+  } catch {
+    return value;
+  }
+};
+
 const StatusBadge = ({ status }) => {
   const normalized = (status || "").toLowerCase();
   const className = {
@@ -272,9 +94,10 @@ const StatusBadge = ({ status }) => {
     failed: "bg-rose-100 text-rose-800",
   }[normalized] || "bg-neutral-100 text-neutral-700";
 
+  const label = status ? status.charAt(0).toUpperCase() + status.slice(1) : "—";
   return (
     <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold capitalize ${className}`}>
-      {status}
+      {label}
     </span>
   );
 };
@@ -286,45 +109,118 @@ const PayoutManagement = () => {
     payment: "all",
     search: "",
   });
-  const [restaurants, setRestaurants] = useState(RESTAURANT_DATA);
+  const [restaurants, setRestaurants] = useState([]);
+  const [branches, setBranches] = useState([]);
+  const [orders, setOrders] = useState([]);
+  const [overview, setOverview] = useState({
+    totalOnlineSales: 0,
+    pendingPayout: 0,
+    restaurantsPending: 0,
+    pendingBranches: 0,
+  });
+  const [periodRange, setPeriodRange] = useState(null);
   const [selectedRestaurantId, setSelectedRestaurantId] = useState(null);
   const [selectedBranchId, setSelectedBranchId] = useState(null);
+  const [selectedSettlement, setSelectedSettlement] = useState(null);
   const [autoPayout, setAutoPayout] = useState({ enabled: true, cadence: "weekly" });
   const [auditTrail, setAuditTrail] = useState(DEFAULT_AUDIT_LOGS);
+  const [isLoadingRestaurants, setIsLoadingRestaurants] = useState(false);
+  const [isLoadingBranches, setIsLoadingBranches] = useState(false);
+  const [isLoadingOrders, setIsLoadingOrders] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadOverview() {
+      setIsLoadingRestaurants(true);
+      setSelectedRestaurantId(null);
+      setSelectedBranchId(null);
+      setSelectedSettlement(null);
+      setBranches([]);
+      setOrders([]);
+      try {
+        const data = await fetchPayoutOverview({
+          period: filters.period,
+          status: filters.status !== "all" ? filters.status : undefined,
+        });
+        if (cancelled) return;
+        setRestaurants(data.restaurants);
+        setOverview({
+          totalOnlineSales: data.summary?.totalOnlineSales ?? 0,
+          pendingPayout: data.summary?.pendingPayout ?? 0,
+          restaurantsPending: data.summary?.restaurantsPending ?? 0,
+          pendingBranches: data.summary?.pendingBranches ?? 0,
+        });
+        setPeriodRange(data.period || null);
+      } catch (error) {
+        if (!cancelled) {
+          console.error(error);
+          toast.error(error?.response?.data?.error || "Failed to load payouts overview");
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingRestaurants(false);
+        }
+      }
+    }
+    loadOverview();
+    return () => {
+      cancelled = true;
+    };
+  }, [filters.period, filters.status]);
+
+  const loadBranches = async (restaurantId) => {
+    if (!restaurantId) return;
+    setIsLoadingBranches(true);
+    setBranches([]);
+    setOrders([]);
+    setSelectedBranchId(null);
+    setSelectedSettlement(null);
+    try {
+      const data = await fetchRestaurantBranches(restaurantId, { period: filters.period });
+      setBranches(data.branches);
+    } catch (error) {
+      console.error(error);
+      toast.error(error?.response?.data?.error || "Failed to load branches");
+    } finally {
+      setIsLoadingBranches(false);
+    }
+  };
+
+  const loadOrders = async (branch, restaurantName) => {
+    if (!branch?.settlementId) return;
+    setIsLoadingOrders(true);
+    setOrders([]);
+    setSelectedSettlement(null);
+    try {
+      const data = await fetchSettlementOrders(branch.settlementId);
+      setOrders(data.orders);
+      setSelectedSettlement({
+        ...data.settlement,
+        branchName: branch.name,
+        branchLocation: branch.location,
+        restaurantName: restaurantName || data.settlement?.restaurantName || null,
+      });
+    } catch (error) {
+      console.error(error);
+      toast.error(error?.response?.data?.error || "Failed to load payout orders");
+    } finally {
+      setIsLoadingOrders(false);
+    }
+  };
 
   const selectedRestaurant = restaurants.find((restaurant) => restaurant.id === selectedRestaurantId) || null;
-  const selectedBranch = selectedRestaurant?.branches.find((branch) => branch.id === selectedBranchId) || null;
-  const view = selectedBranch ? "orders" : selectedRestaurant ? "branches" : "restaurants";
-
-  const overview = useMemo(() => {
-    const totals = restaurants.reduce(
-      (acc, restaurant) => {
-        acc.sales += restaurant.totalOnlineSales;
-        acc.pending += restaurant.totalPendingPayout;
-        if (restaurant.overallStatus !== "All Paid") {
-          acc.pendingRestaurants += 1;
-        }
-        restaurant.branches.forEach((branch) => {
-          if (branch.status !== "Paid") {
-            acc.pendingBranches += 1;
-          }
-        });
-        return acc;
-      },
-      { sales: 0, pending: 0, pendingRestaurants: 0, pendingBranches: 0 },
-    );
-    return totals;
-  }, [restaurants]);
+  const selectedBranch = branches.find((branch) => branch.id === selectedBranchId) || null;
+  const view = selectedSettlement ? "orders" : selectedRestaurant ? "branches" : "restaurants";
 
   const searchPlaceholder = useMemo(() => {
     if (view === "branches" && selectedRestaurant) {
       return `Search branches in ${selectedRestaurant.name}`;
     }
-    if (view === "orders" && selectedBranch) {
-      return `Search order ID or payment method (${selectedBranch.name})`;
+    if (view === "orders" && (selectedSettlement || selectedBranch)) {
+      return `Search order ID or payment method (${selectedSettlement?.branchName || selectedBranch?.name || "branch"})`;
     }
     return "Search restaurants or brands";
-  }, [view, selectedRestaurant, selectedBranch]);
+  }, [view, selectedRestaurant, selectedSettlement, selectedBranch]);
 
   const handleFilterChange = (key, value) => {
     setFilters((prev) => ({ ...prev, [key]: value }));
@@ -336,36 +232,36 @@ const PayoutManagement = () => {
       const matchesSearch = !keyword || restaurant.name.toLowerCase().includes(keyword);
       if (!matchesSearch) return false;
       if (filters.status === "all") return true;
-      const normalizedStatus = restaurant.overallStatus.toLowerCase();
-      return normalizedStatus.includes(filters.status);
+      return restaurant.overallStatus === filters.status;
     });
   }, [restaurants, filters.search, filters.status]);
 
   const filteredBranches = useMemo(() => {
-    if (!selectedRestaurant) return [];
     const keyword = filters.search.trim().toLowerCase();
-    return selectedRestaurant.branches.filter((branch) => {
-      const matchesSearch = !keyword || branch.name.toLowerCase().includes(keyword) || branch.location.toLowerCase().includes(keyword);
-      if (!matchesSearch) return false;
-      if (filters.status === "all") return true;
-      return branch.status.toLowerCase() === filters.status;
-    });
-  }, [selectedRestaurant, filters.search, filters.status]);
-
-  const filteredOrders = useMemo(() => {
-    if (!selectedBranch) return [];
-    const keyword = filters.search.trim().toLowerCase();
-    return selectedBranch.orders.filter((order) => {
+    return branches.filter((branch) => {
       const matchesSearch =
         !keyword ||
-        order.id.toLowerCase().includes(keyword) ||
-        order.paymentMethod.toLowerCase().includes(keyword);
+        branch.name?.toLowerCase().includes(keyword) ||
+        branch.location?.toLowerCase().includes(keyword);
       if (!matchesSearch) return false;
-      const statusMatch = filters.status === "all" || order.status.toLowerCase() === filters.status;
-      const paymentMatch = filters.payment === "all" || order.paymentMethod.toLowerCase() === filters.payment;
+      if (filters.status === "all") return true;
+      return branch.status === filters.status;
+    });
+  }, [branches, filters.search, filters.status]);
+
+  const filteredOrders = useMemo(() => {
+    const keyword = filters.search.trim().toLowerCase();
+    return orders.filter((order) => {
+      const matchesSearch =
+        !keyword ||
+        order.id?.toLowerCase().includes(keyword) ||
+        order.paymentMethod?.toLowerCase().includes(keyword);
+      if (!matchesSearch) return false;
+      const statusMatch = filters.status === "all" || order.status === filters.status;
+      const paymentMatch = filters.payment === "all" || order.paymentKey === filters.payment;
       return statusMatch && paymentMatch;
     });
-  }, [selectedBranch, filters.search, filters.status, filters.payment]);
+  }, [orders, filters.search, filters.status, filters.payment]);
 
   const addAuditEntry = (entry) => {
     setAuditTrail((prev) => [
@@ -381,73 +277,12 @@ const PayoutManagement = () => {
     ]);
   };
 
-  const updateRestaurantState = (restaurantId, updater) => {
-    setRestaurants((prev) =>
-      prev.map((restaurant) => {
-        if (restaurant.id !== restaurantId) return restaurant;
-        const updatedRestaurant = updater(restaurant);
-        const totalPendingPayout = updatedRestaurant.branches.reduce((sum, branch) => sum + branch.pendingPayout, 0);
-        const totalOnlineSales = updatedRestaurant.branches.reduce((sum, branch) => sum + branch.totalSales, 0);
-        const overallStatus = totalPendingPayout === 0 ? "All Paid" : "Pending";
-        return {
-          ...updatedRestaurant,
-          totalPendingPayout,
-          totalOnlineSales,
-          overallStatus,
-        };
-      }),
-    );
-  };
-
   const handleMarkBranchPaid = (branch) => {
-    if (!selectedRestaurant || !branch) return;
-    updateRestaurantState(selectedRestaurant.id, (restaurant) => {
-      const branches = restaurant.branches.map((item) => {
-        if (item.id !== branch.id) return item;
-        const clearedOrders = item.orders.map((order) => ({ ...order, status: "Paid" }));
-        return {
-          ...item,
-          orders: clearedOrders,
-          pendingPayout: 0,
-          status: "Paid",
-        };
-      });
-      return { ...restaurant, branches };
-    });
-    addAuditEntry({
-      action: "Branch marked as paid",
-      target: `${selectedRestaurant.name} • ${branch.name}`,
-      amount: branch.netAmount,
-    });
-    toast.success("Branch marked as paid");
+    toast.error(`Mark as paid is not available yet for ${branch?.name || "this branch"}`);
   };
 
   const handleMarkOrderPaid = (order) => {
-    if (!selectedRestaurant || !selectedBranch || !order) return;
-    updateRestaurantState(selectedRestaurant.id, (restaurant) => {
-      const branches = restaurant.branches.map((branch) => {
-        if (branch.id !== selectedBranch.id) return branch;
-        const orders = branch.orders.map((item) => (item.id === order.id ? { ...item, status: "Paid" } : item));
-        const pendingPayout = orders
-          .filter((item) => item.status !== "Paid")
-          .reduce((sum, item) => sum + item.netPayout, 0);
-        const branchStatus =
-          pendingPayout === 0 ? "Paid" : pendingPayout === branch.netAmount ? "Pending" : "Processing";
-        return {
-          ...branch,
-          orders,
-          pendingPayout,
-          status: branchStatus,
-        };
-      });
-      return { ...restaurant, branches };
-    });
-    addAuditEntry({
-      action: "Order marked as paid",
-      target: order.id,
-      amount: order.netPayout,
-    });
-    toast.success(`Order ${order.id} marked as paid`);
+    toast.error(`Mark as paid is not available yet for ${order?.id || "this order"}`);
   };
 
   const handleExport = (level) => {
@@ -455,8 +290,8 @@ const PayoutManagement = () => {
       level === "restaurants"
         ? "restaurant summary"
         : level === "branches"
-          ? `${selectedRestaurant?.name} branches`
-          : `${selectedBranch?.name} payout details`;
+          ? `${selectedRestaurant?.name || "restaurant"} branches`
+          : `${selectedSettlement?.branchName || selectedBranch?.name || "branch"} payout details`;
     toast.success(`Exported ${label} report`);
     addAuditEntry({
       action: "Exported payout report",
@@ -477,22 +312,30 @@ const PayoutManagement = () => {
   const handleSelectRestaurant = (restaurantId) => {
     setSelectedRestaurantId(restaurantId);
     setSelectedBranchId(null);
+    setSelectedSettlement(null);
     setFilters((prev) => ({ ...prev, search: "" }));
+    loadBranches(restaurantId);
   };
 
-  const handleSelectBranch = (branchId) => {
-    setSelectedBranchId(branchId);
+  const handleSelectBranch = (branch) => {
+    if (!branch) return;
+    setSelectedBranchId(branch.id);
     setFilters((prev) => ({ ...prev, search: "" }));
+    loadOrders(branch, selectedRestaurant?.name);
   };
 
   const handleBack = () => {
-    if (selectedBranchId) {
+    if (selectedSettlement) {
+      setSelectedSettlement(null);
       setSelectedBranchId(null);
+      setOrders([]);
       setFilters((prev) => ({ ...prev, search: "" }));
       return;
     }
     if (selectedRestaurantId) {
       setSelectedRestaurantId(null);
+      setBranches([]);
+      setSelectedBranchId(null);
       setFilters((prev) => ({ ...prev, search: "" }));
     }
   };
@@ -500,9 +343,16 @@ const PayoutManagement = () => {
   const breadcrumb = [
     { label: "Restaurants", isActive: view === "restaurants" },
     ...(selectedRestaurant
-      ? [{ label: selectedRestaurant.name, isActive: view === "branches" && !selectedBranch }]
+      ? [{ label: selectedRestaurant.name, isActive: view === "branches" && !selectedSettlement }]
       : []),
-    ...(selectedBranch ? [{ label: selectedBranch.name, isActive: true }] : []),
+    ...(view === "orders" && (selectedSettlement || selectedBranch)
+      ? [
+          {
+            label: selectedSettlement?.branchName || selectedBranch?.name || "Branch",
+            isActive: true,
+          },
+        ]
+      : []),
   ];
 
   return (
@@ -535,15 +385,23 @@ const PayoutManagement = () => {
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <SummaryCard title="Total online sales" value={formatCurrency(overview.sales)} subtitle="+12.5% vs last period" />
+        <SummaryCard
+          title="Total online sales"
+          value={formatCurrency(overview.totalOnlineSales)}
+          subtitle={
+            periodRange?.start && periodRange?.end
+              ? `${new Date(periodRange.start).toLocaleDateString("vi-VN")} – ${new Date(periodRange.end).toLocaleDateString("vi-VN")}`
+              : "Ledger balances"
+          }
+        />
         <SummaryCard
           title="Pending payout"
-          value={formatCurrency(overview.pending)}
+          value={formatCurrency(overview.pendingPayout)}
           subtitle={`${overview.pendingBranches} branches awaiting release`}
         />
         <SummaryCard
           title="Restaurants pending"
-          value={overview.pendingRestaurants}
+          value={overview.restaurantsPending}
           subtitle="Need reconciliation"
         />
         <SummaryCard
@@ -613,18 +471,28 @@ const PayoutManagement = () => {
 
         <div className="px-4 py-4">
           {view === "restaurants" && (
-            <RestaurantTable restaurants={filteredRestaurants} onSelect={handleSelectRestaurant} />
+            <RestaurantTable
+              restaurants={filteredRestaurants}
+              onSelect={handleSelectRestaurant}
+              loading={isLoadingRestaurants}
+            />
           )}
-          {view === "branches" && selectedRestaurant && (
+          {view === "branches" && (
             <BranchTable
-              restaurant={selectedRestaurant}
+              restaurantName={selectedRestaurant?.name}
               branches={filteredBranches}
               onSelect={handleSelectBranch}
               onMarkPaid={handleMarkBranchPaid}
+              loading={isLoadingBranches}
             />
           )}
-          {view === "orders" && selectedBranch && (
-            <OrderTable branch={selectedBranch} orders={filteredOrders} onMarkPaid={handleMarkOrderPaid} />
+          {view === "orders" && (
+            <OrderTable
+              settlement={selectedSettlement}
+              orders={filteredOrders}
+              onMarkPaid={handleMarkOrderPaid}
+              loading={isLoadingOrders}
+            />
           )}
         </div>
       </div>
@@ -746,7 +614,10 @@ const SelectControl = ({ value, onChange, options }) => (
   </select>
 );
 
-const RestaurantTable = ({ restaurants, onSelect }) => {
+const RestaurantTable = ({ restaurants, onSelect, loading }) => {
+  if (loading) {
+    return <EmptyState message="Loading restaurants..." isLoading />;
+  }
   if (!restaurants.length) {
     return <EmptyState message="No restaurants awaiting payout for the selected filters." />;
   }
@@ -768,7 +639,7 @@ const RestaurantTable = ({ restaurants, onSelect }) => {
             <tr key={restaurant.id} className="hover:bg-neutral-50">
               <td className="px-4 py-3">
                 <p className="font-semibold text-neutral-900">{restaurant.name}</p>
-                <p className="text-xs text-neutral-500">{restaurant.branches.length} branches</p>
+                <p className="text-xs text-neutral-500">{restaurant.branchCount} branches</p>
               </td>
               <td className="px-4 py-3 font-semibold text-neutral-900">{formatCurrency(restaurant.totalOnlineSales)}</td>
               <td className="px-4 py-3 text-amber-600">{formatCurrency(restaurant.totalPendingPayout)}</td>
@@ -793,14 +664,17 @@ const RestaurantTable = ({ restaurants, onSelect }) => {
   );
 };
 
-const BranchTable = ({ restaurant, branches, onSelect, onMarkPaid }) => {
+const BranchTable = ({ restaurantName, branches, onSelect, onMarkPaid, loading }) => {
+  if (loading) {
+    return <EmptyState message="Loading branches..." isLoading />;
+  }
   if (!branches.length) {
     return <EmptyState message="No branches matching the current filters." />;
   }
   return (
     <div className="overflow-x-auto">
       <div className="mb-4 flex flex-col gap-2">
-        <p className="text-sm font-semibold text-neutral-900">{restaurant.name}</p>
+        <p className="text-sm font-semibold text-neutral-900">{restaurantName || "Restaurant branches"}</p>
         <p className="text-xs text-neutral-500">
           Showing {branches.length} branch{branches.length > 1 ? "es" : ""} with online orders awaiting reconciliation.
         </p>
@@ -822,7 +696,7 @@ const BranchTable = ({ restaurant, branches, onSelect, onMarkPaid }) => {
             <tr key={branch.id} className="hover:bg-neutral-50">
               <td className="px-4 py-3">
                 <p className="font-semibold text-neutral-900">{branch.name}</p>
-                <p className="text-xs text-neutral-500">{branch.location}</p>
+                <p className="text-xs text-neutral-500">{branch.location || "Location unavailable"}</p>
               </td>
               <td className="px-4 py-3 font-semibold text-neutral-900">{branch.onlineOrders}</td>
               <td className="px-4 py-3 font-semibold text-neutral-900">{formatCurrency(branch.totalSales)}</td>
@@ -834,12 +708,12 @@ const BranchTable = ({ restaurant, branches, onSelect, onMarkPaid }) => {
               <td className="px-4 py-3 text-right space-y-2">
                 <button
                   type="button"
-                  onClick={() => onSelect(branch.id)}
+                  onClick={() => onSelect(branch)}
                   className="block w-full rounded-full border border-neutral-200 px-4 py-1.5 text-xs font-semibold text-neutral-600 hover:border-neutral-300 hover:text-neutral-900"
                 >
                   View payout details
                 </button>
-                {branch.status !== "Paid" && (
+                {branch.status !== "paid" && (
                   <button
                     type="button"
                     onClick={() => onMarkPaid(branch)}
@@ -857,16 +731,25 @@ const BranchTable = ({ restaurant, branches, onSelect, onMarkPaid }) => {
   );
 };
 
-const OrderTable = ({ branch, orders, onMarkPaid }) => {
+const OrderTable = ({ settlement, orders, onMarkPaid, loading }) => {
+  if (loading) {
+    return <EmptyState message="Loading payout details..." isLoading />;
+  }
   if (!orders.length) {
     return <EmptyState message="No payout detail for the selected filters." />;
   }
+  const periodLabel =
+    settlement?.periodStart && settlement?.periodEnd
+      ? `${formatDate(settlement.periodStart)} – ${formatDate(settlement.periodEnd)}`
+      : "Current payout window";
   return (
     <div className="overflow-x-auto">
       <div className="mb-4 flex flex-col gap-1">
-        <p className="text-sm font-semibold text-neutral-900">{branch.name}</p>
+        <p className="text-sm font-semibold text-neutral-900">
+          {settlement?.branchName || "Branch payout"}
+        </p>
         <p className="text-xs text-neutral-500">
-          Orders scheduled for the current payout window. Confirm fees and mark as paid.
+          Orders scheduled for {periodLabel}. Confirm fees and mark as paid.
         </p>
       </div>
       <table className="min-w-full divide-y divide-neutral-200 text-sm">
@@ -876,7 +759,6 @@ const OrderTable = ({ branch, orders, onMarkPaid }) => {
             <th className="px-4 py-3">Order date</th>
             <th className="px-4 py-3">Total sales</th>
             <th className="px-4 py-3">VAT</th>
-            <th className="px-4 py-3">Platform fee</th>
             <th className="px-4 py-3">Delivery fee</th>
             <th className="px-4 py-3">Net payout</th>
             <th className="px-4 py-3">Payment method</th>
@@ -888,12 +770,9 @@ const OrderTable = ({ branch, orders, onMarkPaid }) => {
           {orders.map((order) => (
             <tr key={order.id} className="hover:bg-neutral-50">
               <td className="px-4 py-3 font-semibold text-neutral-900">{order.id}</td>
-              <td className="px-4 py-3 text-neutral-600">
-                {new Date(order.orderDate).toLocaleString("vi-VN")}
-              </td>
+              <td className="px-4 py-3 text-neutral-600">{formatDateTime(order.orderDate)}</td>
               <td className="px-4 py-3">{formatCurrency(order.totalSales)}</td>
               <td className="px-4 py-3">{formatCurrency(order.vat)}</td>
-              <td className="px-4 py-3">{formatCurrency(order.platformFee)}</td>
               <td className="px-4 py-3">{formatCurrency(order.deliveryFee)}</td>
               <td className="px-4 py-3 font-semibold text-neutral-900">{formatCurrency(order.netPayout)}</td>
               <td className="px-4 py-3">{order.paymentMethod}</td>
@@ -901,7 +780,7 @@ const OrderTable = ({ branch, orders, onMarkPaid }) => {
                 <StatusBadge status={order.status} />
               </td>
               <td className="px-4 py-3 text-right space-y-2">
-                {order.status !== "Paid" && (
+                {order.status !== "paid" && (
                   <button
                     type="button"
                     onClick={() => onMarkPaid(order)}
@@ -933,9 +812,11 @@ const OrderTable = ({ branch, orders, onMarkPaid }) => {
   );
 };
 
-const EmptyState = ({ message }) => (
+const EmptyState = ({ message, isLoading = false }) => (
   <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-neutral-200 bg-neutral-50/50 px-4 py-10 text-center">
-    <p className="text-sm font-semibold text-neutral-900">Nothing to show</p>
+    <p className="text-sm font-semibold text-neutral-900">
+      {isLoading ? "Loading data" : "Nothing to show"}
+    </p>
     <p className="text-xs text-neutral-500">{message}</p>
   </div>
 );

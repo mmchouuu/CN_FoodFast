@@ -16,5 +16,8 @@ router.post('/catalog/taxes/templates', controller.createTaxTemplate);
 router.post('/catalog/taxes/assignments', controller.assignTax);
 router.post('/catalog/calendars', controller.createCalendar);
 router.post('/catalog/promotions/global', controller.createGlobalPromotion);
+router.get('/payouts', controller.listPayoutRestaurants);
+router.get('/payouts/restaurants/:restaurantId/branches', controller.listPayoutBranches);
+router.get('/payouts/settlements/:settlementId/orders', controller.listPayoutSettlementOrders);
 
 module.exports = router;

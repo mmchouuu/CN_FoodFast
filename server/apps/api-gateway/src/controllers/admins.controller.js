@@ -1,8 +1,23 @@
 const adminClient = require('../services/admin.client');
+const restaurantClient = require('../services/restaurant.client');
 
 function withRequestHeaders(req) {
-  return { headers: { 'x-request-id': req.id } };
+  const headers = { 'x-request-id': req.id };
+  if (req.headers?.authorization) {
+    headers.Authorization = req.headers.authorization;
+  }
+  return { headers };
 }
+
+const formatBranchLocation = (branch) => {
+  if (!branch) return null;
+  const city = branch.city || branch.branch_city || null;
+  const district = branch.district || branch.branch_district || null;
+  const street = branch.street || branch.branch_street || null;
+  const parts = [city, district, street].filter((value) => typeof value === 'string' && value.trim().length);
+  if (!parts.length) return null;
+  return parts.join(' • ');
+};
 
 async function login(req, res, next) {
   try {
@@ -122,6 +137,120 @@ async function createGlobalPromotion(req, res, next) {
   }
 }
 
+async function listPayoutRestaurants(req, res, next) {
+  try {
+    const headers = withRequestHeaders(req);
+    const payload = await adminClient.listPayoutRestaurants(req.query || {}, headers);
+    const restaurants = Array.isArray(payload.restaurants) ? payload.restaurants : [];
+    const ids = [...new Set(restaurants.map((item) => item.restaurantId).filter(Boolean))];
+
+    let metadataMap = new Map();
+    if (ids.length) {
+      const metadata = await Promise.all(
+        ids.map((id) =>
+          restaurantClient
+            .getRestaurant(id, headers)
+            .catch((error) => {
+              console.warn('[api-gateway] failed to fetch restaurant metadata', id, error?.message || error);
+              return null;
+            }),
+        ),
+      );
+      metadataMap = new Map(metadata.filter(Boolean).map((restaurant) => [restaurant.id, restaurant]));
+    }
+
+    const enriched = restaurants.map((item) => {
+      const meta = metadataMap.get(item.restaurantId);
+      return {
+        ...item,
+        restaurantName: meta?.name || item.restaurantName || 'Restaurant',
+        branchCount: meta?.branches?.length ?? item.branchCount ?? 0,
+      };
+    });
+
+    res.json({ ...payload, restaurants: enriched });
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function listPayoutBranches(req, res, next) {
+  try {
+    const headers = withRequestHeaders(req);
+    const payload = await adminClient.listPayoutBranches(
+      req.params.restaurantId,
+      req.query || {},
+      headers,
+    );
+
+    let restaurantMeta = null;
+    try {
+      restaurantMeta = await restaurantClient.getRestaurant(req.params.restaurantId, headers);
+    } catch (metaError) {
+      console.warn('[api-gateway] failed to load restaurant for branches', metaError?.message || metaError);
+    }
+
+    const branchMap = new Map();
+    if (restaurantMeta?.branches) {
+      restaurantMeta.branches.forEach((branch) => {
+        if (branch?.id) {
+          branchMap.set(branch.id, branch);
+        }
+      });
+    }
+
+    const enrichedBranches = (payload.branches || []).map((branch) => {
+      const meta = branchMap.get(branch.branchId) || null;
+      return {
+        ...branch,
+        branchName: meta?.name || meta?.branch_name || branch.branchName || 'Branch',
+        location: formatBranchLocation(meta),
+      };
+    });
+
+    res.json({
+      ...payload,
+      restaurantName: restaurantMeta?.name || payload.restaurantName || null,
+      branches: enrichedBranches,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function listPayoutSettlementOrders(req, res, next) {
+  try {
+    const headers = withRequestHeaders(req);
+    const payload = await adminClient.listSettlementOrders(req.params.settlementId, headers);
+
+    let restaurantMeta = null;
+    let branchMeta = null;
+    if (payload?.settlement?.restaurantId) {
+      try {
+        restaurantMeta = await restaurantClient.getRestaurant(payload.settlement.restaurantId, headers);
+        if (restaurantMeta?.branches?.length) {
+          branchMeta = restaurantMeta.branches.find(
+            (branch) => branch && branch.id === payload.settlement.branchId,
+          );
+        }
+      } catch (metaError) {
+        console.warn('[api-gateway] failed to load restaurant for orders', metaError?.message || metaError);
+      }
+    }
+
+    const enrichedSettlement = {
+      ...payload.settlement,
+      restaurantName: restaurantMeta?.name || payload.settlement?.restaurantName || null,
+      branchName: branchMeta?.name || branchMeta?.branch_name || payload.settlement?.branchName || null,
+      branchLocation: formatBranchLocation(branchMeta),
+    };
+
+    res.json({ ...payload, settlement: enrichedSettlement });
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
   listCustomers,
   customerDetails,
@@ -134,4 +263,7 @@ module.exports = {
   createCalendar,
   createGlobalPromotion,
   login,
+  listPayoutRestaurants,
+  listPayoutBranches,
+  listPayoutSettlementOrders,
 };
