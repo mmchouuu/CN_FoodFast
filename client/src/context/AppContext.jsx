@@ -78,6 +78,24 @@ const toNumberOr = (value, fallback = 0) => {
     return Number.isFinite(parsed) ? parsed : fallback;
 };
 
+const pickBooleanFlag = (...candidates) => {
+    for (const candidate of candidates) {
+        if (typeof candidate === 'boolean') {
+            return candidate;
+        }
+    }
+    return null;
+};
+
+const pickStatusText = (...candidates) => {
+    for (const candidate of candidates) {
+        if (typeof candidate === 'string' && candidate.trim().length) {
+            return candidate.trim().toLowerCase();
+        }
+    }
+    return '';
+};
+
 const normalizePaymentMethodForSubmit = (value) => {
     const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
     if (!normalized) return 'card';
@@ -279,13 +297,19 @@ const adaptRestaurantFromApi = (restaurant) => {
 
             const branchCombos = Array.isArray(branch.combos) ? branch.combos : [];
 
+            const statusText = typeof branch.status === 'string' ? branch.status.trim().toLowerCase() : '';
+            const branchIsOpen =
+                branch.isOpen ??
+                branch.is_open ??
+                (statusText ? statusText !== 'closed' && statusText !== 'inactive' : null);
+
             return {
                 id: branch.id,
                 name: branch.name || restaurant.name || 'Branch',
                 number: branch.branchNumber ?? branch.branch_number ?? null,
                 address: addressParts || branch.street || '',
                 isPrimary: branch.isPrimary ?? branch.is_primary ?? false,
-                isOpen: branch.isOpen ?? branch.is_open ?? false,
+                isOpen: branchIsOpen !== null ? branchIsOpen : true,
                 rating: branch.ratingSummary?.avgRating ?? branch.rating ?? null,
                 ratingCount: branch.ratingSummary?.totalRatings ?? branch.ratingCount ?? null,
                 phone: branch.branchPhone || branch.phone || null,
@@ -532,6 +556,12 @@ function buildBranchCatalog(brands = []) {
                         ? brand.logo
                         : [restaurantPlaceholderImage];
 
+            const statusText = typeof branch.status === 'string' ? branch.status.trim().toLowerCase() : '';
+            const branchIsOpen =
+                branch.isOpen ??
+                branch.is_open ??
+                (statusText ? statusText !== 'closed' && statusText !== 'inactive' : null);
+
             branches.push({
                 ...branch,
                 id: branch.id,
@@ -550,6 +580,7 @@ function buildBranchCatalog(brands = []) {
                 distanceKm: toNumberOr(branch.distanceKm, toNumberOr(brand.distanceKm, 0)),
                 rating: toNumberOr(branch.rating, brand.rating),
                 reviewCount: toNumberOr(branch.ratingCount, brand.reviewCount),
+                isOpen: branchIsOpen !== null ? branchIsOpen : true,
                 categories: branchCategories,
                 categoryAssignments: branch.categoryAssignments || [],
                 combos: Array.isArray(branch.combos) ? branch.combos : [],
@@ -1087,6 +1118,90 @@ export const AppContextProvider = ({ children }) => {
         [restaurants],
     );
 
+    const findBranchRecordById = useCallback(
+        (branchIdentifier) => {
+            if (!branchIdentifier) return null;
+            const normalized = String(branchIdentifier).trim();
+            if (!normalized) return null;
+            const flattened = restaurants.find((branch) => {
+                const candidate = branch?.branchId || branch?.id;
+                return candidate && String(candidate).trim() === normalized;
+            });
+            if (flattened) {
+                return flattened;
+            }
+            for (const brand of restaurantBrands) {
+                const branchList = Array.isArray(brand?.branches) ? brand.branches : [];
+                const matched = branchList.find(
+                    (branch) => branch && String(branch.id).trim() === normalized,
+                );
+                if (matched) {
+                    return matched;
+                }
+            }
+            return null;
+        },
+        [restaurants, restaurantBrands],
+    );
+
+    const resolveBranchAvailabilityForProduct = useCallback(
+        (product, detail = null, branchIdOverride = null) => {
+            if (!product && !detail) {
+                return { branchId: null, branch: null, branchName: null, isClosed: false };
+            }
+            const branchId =
+                branchIdOverride ||
+                detail?.branchId ||
+                detail?.branch_id ||
+                detail?.product_snapshot?.branch_id ||
+                detail?.product_snapshot?.branchId ||
+                product?.branchId ||
+                product?.branch_id ||
+                product?.branch?.id ||
+                product?.preferredBranchId ||
+                product?.lastBranchId ||
+                null;
+            const branchRecord =
+                findBranchRecordById(branchId) ||
+                detail?.branch ||
+                product?.branch ||
+                null;
+            const branchStatus = pickStatusText(
+                branchRecord?.status,
+                detail?.branch?.status,
+                product?.branch?.status,
+            );
+            const openFlag = pickBooleanFlag(
+                branchRecord?.isOpen,
+                branchRecord?.is_open,
+                branchRecord?.open,
+                detail?.branch?.isOpen,
+                detail?.branch?.is_open,
+                product?.branch?.isOpen,
+                product?.branch?.is_open,
+                product?.branchIsOpen,
+                product?.branch_is_open,
+                product?.isOpen,
+                product?.is_open,
+            );
+            const isClosed = openFlag === false || branchStatus === 'closed' || branchStatus === 'inactive';
+            const branchName =
+                branchRecord?.displayName ||
+                branchRecord?.name ||
+                detail?.branchName ||
+                product?.branchName ||
+                product?.brandName ||
+                null;
+            return {
+                branchId: branchId || branchRecord?.branchId || branchRecord?.id || null,
+                branch: branchRecord,
+                branchName,
+                isClosed,
+            };
+        },
+        [findBranchRecordById],
+    );
+
     const refreshCatalog = useCallback(async ({ signal } = {}) => {
         if (signal?.aborted) {
             return { cancelled: true };
@@ -1161,6 +1276,7 @@ export const AppContextProvider = ({ children }) => {
                         distanceKm: brand.distanceKm ?? 0,
                         rating: brand.rating ?? 0,
                         reviewCount: brand.reviewCount ?? 0,
+                        isOpen: true,
                         categories: Array.isArray(brand.categories) ? brand.categories : [],
                         categoryAssignments: [],
                         combos: [],
@@ -1506,26 +1622,27 @@ export const AppContextProvider = ({ children }) => {
         const hasWallets = momoWallets.length > 0;
         const hasCards = cardAccounts.length > 0;
 
-        if (method === 'wallet' && !hasWallets && hasCards) {
+        if (!hasCards) {
+            if (method !== 'card') {
+                setMethod('card');
+            }
+            if (selectedCardId !== null) {
+                setSelectedCardId(null);
+            }
+            return;
+        }
+
+        if (method === 'wallet' && !hasWallets) {
             setMethod('card');
-            return;
-        }
-
-        if (method === 'card' && !hasCards && hasWallets) {
-            setMethod('wallet');
-            setSelectedCardId(null);
-            return;
-        }
-
-        if (method === 'card' && !hasCards) {
-            setSelectedCardId(null);
             return;
         }
 
         if (method === 'card' && hasCards && !selectedCardId) {
             const preferred =
                 cardAccounts.find((card) => card.isDefault) || cardAccounts[0] || null;
-            setSelectedCardId(preferred ? preferred.id : null);
+            if (preferred && preferred.id !== selectedCardId) {
+                setSelectedCardId(preferred.id);
+            }
         }
     }, [method, momoWallets.length, cardAccounts, selectedCardId]);
 
@@ -1618,6 +1735,30 @@ export const AppContextProvider = ({ children }) => {
             return;
         }
 
+        const branchIdHint =
+            config.branchId ||
+            payload.branchId ||
+            product.branchId ||
+            product.branch_id ||
+            product.branch?.id ||
+            (Array.isArray(product.branchAssignments) && product.branchAssignments.length === 1
+                ? product.branchAssignments[0]?.branch_id || product.branchAssignments[0]?.branchId || null
+                : null) ||
+            (Array.isArray(product.branch_assignments) && product.branch_assignments.length === 1
+                ? product.branch_assignments[0]?.branch_id || product.branch_assignments[0]?.branchId || null
+                : null);
+
+        const branchAvailability = resolveBranchAvailabilityForProduct(
+            product,
+            branchIdHint ? { branchId: branchIdHint } : undefined,
+            branchIdHint,
+        );
+        if (branchAvailability.isClosed) {
+            const branchLabel = branchAvailability.branchName || 'Chi nhánh này';
+            toast.error(`${branchLabel} hiện đang đóng cửa. Vui lòng chọn chi nhánh khác.`);
+            return;
+        }
+
         if (product.sizes?.length && !size && !payload.sizeOptional) {
             toast.error('Please choose a size before adding this dish.');
             return;
@@ -1685,6 +1826,8 @@ export const AppContextProvider = ({ children }) => {
                 taxRate,
                 taxAmount,
                 unitPrice,
+                branchId: branchAvailability.branchId || branchIdHint || null,
+                branchName: branchAvailability.branchName || null,
             },
         }));
 
@@ -1794,6 +1937,9 @@ export const AppContextProvider = ({ children }) => {
         if (!user?.id) {
             throw new Error('Unable to verify your account. Please sign in again.');
         }
+        if (!Array.isArray(cardAccounts) || cardAccounts.length === 0) {
+            throw new Error('Bạn cần thêm thẻ thanh toán trước khi tiếp tục.');
+        }
 
         const orderItems = [];
         const restaurantStats = new Map();
@@ -1855,6 +2001,12 @@ export const AppContextProvider = ({ children }) => {
                     detail?.product_snapshot?.restaurant_id ||
                     detail?.product_snapshot?.restaurantId ||
                     null;
+
+                const branchAvailability = resolveBranchAvailabilityForProduct(product, detail);
+                if (branchAvailability.isClosed) {
+                    const branchLabel = branchAvailability.branchName || 'Chi nhánh này';
+                    throw new Error(`${branchLabel} hiện đang đóng cửa. Vui lòng chọn chi nhánh khác.`);
+                }
 
                 if (!restaurantId) {
                     throw new Error('One or more dishes are missing restaurant information. Please try again.');
@@ -2140,6 +2292,16 @@ export const AppContextProvider = ({ children }) => {
             authProfile?.phone ||
             null;
 
+        if (deliveryContactName) {
+            metadata.customer_name = deliveryContactName;
+        }
+        if (deliveryContactPhone) {
+            metadata.customer_phone = deliveryContactPhone;
+        }
+        if (user?.email) {
+            metadata.customer_email = user.email;
+        }
+
         const payload = {
             order_items: orderItems,
             items: orderItems,
@@ -2285,6 +2447,7 @@ export const AppContextProvider = ({ children }) => {
         momoWallets,
         selectedCardId,
         resolveRestaurantIdByBranch,
+        resolveBranchAvailabilityForProduct,
     ]);
 
     // Persist owner flag

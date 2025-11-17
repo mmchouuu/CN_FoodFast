@@ -370,21 +370,34 @@ async function getProfile(userId) {
   if (!userId) {
     throw createError('userId is required');
   }
-  const profile = await userRepository.getCustomerProfile(userId);
-  if (!profile) {
+
+  // Load both sources: base user row (has phone/email) and customer profile
+  const [user, profile] = await Promise.all([
+    userRepository.findById(userId),
+    userRepository.getCustomerProfile(userId),
+  ]);
+
+  if (!user && !profile) {
     return null;
   }
+
+  const firstName = profile?.first_name ?? user?.first_name ?? null;
+  const lastName = profile?.last_name ?? user?.last_name ?? null;
+  const fullName =
+    profile?.full_name ||
+    [firstName, lastName].filter(Boolean).join(' ').trim() ||
+    null;
+  const phone = profile?.phone ?? user?.phone ?? null;
+  const email = profile?.email ?? user?.email ?? null;
+
   return {
-    id: profile.id,
-    user_id: profile.user_id,
-    first_name: profile.first_name || null,
-    last_name: profile.last_name || null,
-    full_name:
-      profile.full_name ||
-      [profile.first_name, profile.last_name].filter(Boolean).join(' ').trim() ||
-      null,
-    phone: profile.phone || null,
-    email: profile.email || null,
+    id: profile?.id || null,
+    user_id: user?.id || profile?.user_id || userId,
+    first_name: firstName,
+    last_name: lastName,
+    full_name: fullName,
+    phone,
+    email,
   };
 }
 

@@ -1890,6 +1890,8 @@ const MenuManagement = () => {
   }, [categoryNames, selectedCategory]);
 
   const filteredProducts = useMemo(() => {
+    const normalizedBranchFilter =
+      selectedBranchId && selectedBranchId !== "all" ? selectedBranchId : null;
     const min = Number(priceRange.min);
     const max = Number(priceRange.max);
     return products.filter((product) => {
@@ -1905,13 +1907,27 @@ const MenuManagement = () => {
         !selectedCategory ||
         product.category === selectedCategory;
 
+      const branchAssignments = Array.isArray(product.branch_assignments)
+        ? product.branch_assignments
+        : [];
+      const matchesBranch =
+        !normalizedBranchFilter ||
+        branchAssignments.some((assignment) => {
+          const branchId = normalizeBranchId(assignment);
+          if (!branchId) return false;
+          if (branchId !== normalizedBranchFilter) return false;
+          if (assignment.is_visible === false) return false;
+          if (assignment.is_available === false) return false;
+          return true;
+        });
+
       const base = Number(product.base_price || 0);
       const matchesMin = !Number.isFinite(min) || min <= 0 || base >= min;
       const matchesMax = !Number.isFinite(max) || max <= 0 || base <= max;
 
-      return matchesSearch && matchesCategory && matchesMin && matchesMax;
+      return matchesSearch && matchesCategory && matchesBranch && matchesMin && matchesMax;
     });
-  }, [products, searchTerm, selectedCategory, priceRange]);
+  }, [products, searchTerm, selectedCategory, priceRange, selectedBranchId]);
 
   /** Hoisted function declaration � OK d�ng tru?c khi d?nh nghia */
   function buildInventoryDraftForProduct(branchList, records) {

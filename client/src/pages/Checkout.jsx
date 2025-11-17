@@ -95,13 +95,21 @@ const Checkout = () => {
   const isCartEmpty = useMemo(() => subtotal === 0, [subtotal]);
   const hasMomoWallet = momoWallets.length > 0;
   const hasCardAccount = cardAccounts.length > 0;
-  const hasSavedPaymentMethod = hasMomoWallet || hasCardAccount;
   const methodRequiresWallet = method === "wallet";
   const methodRequiresCard = method === "card";
-  const paymentSelectionInvalid =
-    !hasSavedPaymentMethod ||
-    (methodRequiresWallet && !hasMomoWallet) ||
-    (methodRequiresCard && !hasCardAccount);
+  const paymentRestrictionMessage = useMemo(() => {
+    if (!hasCardAccount) {
+      return "Add a debit/credit card in your profile before completing payment.";
+    }
+    if (methodRequiresWallet && !hasMomoWallet) {
+      return "Link a MoMo wallet to use this payment method.";
+    }
+    if (methodRequiresCard && !hasCardAccount) {
+      return "Add a debit/credit card to use this payment method.";
+    }
+    return "";
+  }, [hasCardAccount, hasMomoWallet, methodRequiresWallet, methodRequiresCard]);
+  const paymentSelectionInvalid = Boolean(paymentRestrictionMessage);
 
   const paymentMethods = useMemo(
     () => [
@@ -148,18 +156,13 @@ const Checkout = () => {
       openCustomerProfilePanel();
       return;
     }
-    if (!hasSavedPaymentMethod) {
-      toast.error("Link a MoMo wallet or add a card before paying.");
+    if (!hasCardAccount) {
+      toast.error("Add a debit/credit card before placing an order.");
       openCustomerProfilePanel();
       return;
     }
     if (methodRequiresWallet && !hasMomoWallet) {
       toast.error("Link a MoMo wallet to use this payment method.");
-      openCustomerProfilePanel();
-      return;
-    }
-    if (methodRequiresCard && !hasCardAccount) {
-      toast.error("Add a debit/credit card to use this payment method.");
       openCustomerProfilePanel();
       return;
     }
@@ -712,7 +715,7 @@ const Checkout = () => {
           ) : null}
           {paymentSelectionInvalid ? (
             <p className="mt-1 text-center text-xs text-amber-600">
-              Link a MoMo wallet or card in your profile before completing payment.
+              {paymentRestrictionMessage}
             </p>
           ) : null}
           <p className="mt-3 text-center text-xs text-gray-400">

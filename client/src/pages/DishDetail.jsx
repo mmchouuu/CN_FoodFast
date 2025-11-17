@@ -1040,6 +1040,19 @@ const DishDetail = () => {
       taxRate,
       taxAmount: taxPerUnit,
       unitPrice: totalPerUnit,
+      branchId:
+        dish.branchId ||
+        dish.branch_id ||
+        dish.branch?.id ||
+        restaurant?.branchId ||
+        restaurant?.id ||
+        null,
+      branchName:
+        restaurant?.displayName ||
+        restaurant?.name ||
+        dish.branchName ||
+        dish.branch?.name ||
+        null,
     });
   };
 

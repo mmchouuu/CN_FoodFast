@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import toast from "react-hot-toast";
 import { Link, useParams } from "react-router-dom";
 import RatingStars from "../components/RatingStars";
 import { useAppContext } from "../context/AppContext";
@@ -37,7 +38,7 @@ const sortOptions = [
   { id: "price-high", label: "Price: High to Low" },
 ];
 
-const DishCard = ({ dish, restaurantId, currency, onAdd }) => {
+const DishCard = ({ dish, restaurantId, currency, onAdd, isDisabled = false }) => {
   const defaultSize = dish.sizes?.[0];
   const basePrice = getBasePrice(dish);
   const dishImage = pickFirstImageUrl(
@@ -88,9 +89,14 @@ const DishCard = ({ dish, restaurantId, currency, onAdd }) => {
           </p>
           <button
             onClick={() => onAdd(dish._id, defaultSize || dish.sizes?.[0])}
-            className="rounded-full bg-orange-500 px-5 py-2 text-sm font-semibold text-white transition hover:bg-orange-600"
+            disabled={isDisabled}
+            className={`rounded-full px-5 py-2 text-sm font-semibold transition ${
+              isDisabled
+                ? 'cursor-not-allowed bg-gray-200 text-gray-400'
+                : 'bg-orange-500 text-white hover:bg-orange-600'
+            }`}
           >
-            Add to cart
+            {isDisabled ? 'Closed' : 'Add to cart'}
           </button>
         </div>
         <Link
@@ -557,7 +563,17 @@ const RestaurantDetail = () => {
                   dish={dish}
                   restaurantId={restaurant?.id || branchId}
                   currency={currency}
-                  onAdd={(id, size) => addToCart(id, size)}
+                  onAdd={(id, size) => {
+                    if (isBranchOpen === false) {
+                      toast.error('This branch is currently closed. Please try again later.');
+                      return;
+                    }
+                    addToCart(id, size, 1, {
+                      branchId: restaurant?.branchId || restaurant?.id || branchId,
+                      branchName: restaurant?.displayName || restaurant?.name || null,
+                    });
+                  }}
+                  isDisabled={isBranchOpen === false}
                 />
               ))}
               {!paginatedDishes.length && (

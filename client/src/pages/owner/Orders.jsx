@@ -204,15 +204,29 @@ const adaptOwnerOrder = (order, lookups) => {
     paymentStatusSource || paymentStatus || "pending"
   );
 
-  const customerProfile = order.customer_profile || {};
+  // Try to resolve customer profile from multiple possible shapes
+  const customerProfile =
+    order.customer_profile ||
+    order.user_profile ||
+    order.profile ||
+    order.customer ||
+    order.user ||
+    {};
   const profileFullName =
     customerProfile.full_name ||
     customerProfile.fullName ||
-    [customerProfile.first_name || customerProfile.firstName || '', customerProfile.last_name || customerProfile.lastName || '']
+    [
+      customerProfile.first_name || customerProfile.firstName || '',
+      customerProfile.last_name || customerProfile.lastName || '',
+    ]
       .filter(Boolean)
       .join(' ')
       .trim();
-  const profilePhone = customerProfile.phone || customerProfile.phone_number || null;
+  const profilePhone =
+    customerProfile.phone ||
+    customerProfile.phone_number ||
+    customerProfile.phoneNumber ||
+    null;
 
   const customerName =
     metadata.customer_name ||

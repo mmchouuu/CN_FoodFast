@@ -552,8 +552,23 @@ const resolveProfileFullName = (profile) => {
 const applyCustomerProfileToOrder = (order, profile) => {
   if (!order || !profile) return order;
   const fullName = resolveProfileFullName(profile);
-  const phone = profile.phone || null;
-  order.customer_profile = profile;
+  const phone = profile.phone || profile.phone_number || profile.phoneNumber || null;
+  const email = profile.email || profile.email_address || profile.emailAddress || null;
+
+  // Canonical, normalized snapshot for downstream consumers
+  order.customer_profile = {
+    id: profile.id || profile.user_id || null,
+    user_id: profile.user_id || profile.id || null,
+    first_name: profile.first_name || profile.firstName || null,
+    last_name: profile.last_name || profile.lastName || null,
+    full_name: fullName || null,
+    phone: phone || null,
+    email: email || null,
+  };
+  // Back-compat alias some clients expect
+  if (!order.user_profile) {
+    order.user_profile = order.customer_profile;
+  }
   if (!order.metadata || typeof order.metadata !== 'object') {
     order.metadata = {};
   }

@@ -118,7 +118,18 @@ const Item = ({ product }) => {
             </div>
           </div>
           <button
-            onClick={() => addToCart(product._id, size)}
+            onClick={() =>
+              addToCart(product._id, size, 1, {
+                branchId:
+                  product.branchId ||
+                  product.branch_id ||
+                  product.branch?.id ||
+                  product.branchAssignments?.[0]?.branch_id ||
+                  product.branch_assignments?.[0]?.branch_id ||
+                  null,
+                branchName: product.branch?.name || product.branchName || null,
+              })
+            }
             className="rounded-full bg-orange-500 px-4 py-2 text-xs font-semibold text-white transition hover:bg-orange-600"
           >
             Add to cart

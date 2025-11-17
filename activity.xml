@@ -1,0 +1,84 @@
+<mxfile>
+  <diagram id="customer-flow" name="Customer Activity">
+    <mxGraphModel dx="1422" dy="777" grid="1" gridSize="10" guides="1" tooltips="1" connect="1">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <!-- START -->
+        <mxCell id="start" value="" style="ellipse;shape=ellipse;fillColor=#000000;strokeColor=#000000;resizable=0;aspect=fixed;" vertex="1" parent="1">
+          <mxGeometry x="80" y="80" width="30" height="30" as="geometry"/>
+        </mxCell>
+
+        <!-- Activity: Xem menu -->
+        <mxCell id="act1" value="Duyệt menu" style="rounded=1;whiteSpace=wrap;labelBackgroundColor=none;" vertex="1" parent="1">
+          <mxGeometry x="150" y="70" width="140" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- Activity: Shopping cart -->
+        <mxCell id="act2" value="Thêm vào giỏ hàng" style="rounded=1;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="350" y="70" width="160" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- Activity: Checkout -->
+        <mxCell id="act3" value="Checkout" style="rounded=1;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="550" y="70" width="140" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- Decision: Thanh toán? -->
+        <mxCell id="dec1" value="Thanh toán" style="rhombus;whiteSpace=wrap;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="750" y="75" width="90" height="50" as="geometry"/>
+        </mxCell>
+
+        <!-- Failed branch -->
+        <mxCell id="fail" value="Thất bại → Quay lại Checkout" style="rounded=1;whiteSpace=wrap;fillColor=#ffe6e6;" vertex="1" parent="1">
+          <mxGeometry x="900" y="20" width="200" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- Success: Tạo đơn -->
+        <mxCell id="act4" value="Tạo đơn hàng" style="rounded=1;whiteSpace=wrap;fillColor=#e6ffe6;" vertex="1" parent="1">
+          <mxGeometry x="900" y="120" width="160" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- END -->
+        <mxCell id="end" value="" style="ellipse;shape=doubleEllipse;fillColor=#000000;strokeColor=#000000;resizable=0;aspect=fixed;" vertex="1" parent="1">
+          <mxGeometry x="1100" y="130" width="40" height="40" as="geometry"/>
+        </mxCell>
+
+        <!-- CONNECTORS -->
+        <mxCell id="e1" edge="1" parent="1" source="start" target="act1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e2" edge="1" parent="1" source="act1" target="act2">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e3" edge="1" parent="1" source="act2" target="act3">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e4" edge="1" parent="1" source="act3" target="dec1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Payment FAILED -->
+        <mxCell id="e5" edge="1" parent="1" source="dec1" target="fail">
+          <mxGeometry relative="1">
+            <mxPoint x="900" y="45" as="targetPoint"/>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- Payment SUCCESS -->
+        <mxCell id="e6" edge="1" parent="1" source="dec1" target="act4">
+          <mxGeometry relative="1"/>
+        </mxCell>
+
+        <mxCell id="e7" edge="1" parent="1" source="act4" target="end">
+          <mxGeometry relative="1"/>
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
