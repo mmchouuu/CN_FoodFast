@@ -15,6 +15,17 @@ const matchesAdminRoute = (rawUrl = '') => {
   }
 };
 
+const matchesOwnerRoute = (rawUrl = '') => {
+  if (typeof rawUrl !== 'string' || rawUrl.length === 0) return false;
+  if (rawUrl.startsWith('/owner/') || rawUrl.startsWith('owner/')) return true;
+  try {
+    const parsed = new URL(rawUrl, baseURL);
+    return parsed.pathname.startsWith('/owner/');
+  } catch (error) {
+    return rawUrl.includes('/owner/');
+  }
+};
+
 export const api = axios.create({
   baseURL,
   withCredentials: false,
@@ -39,9 +50,12 @@ api.interceptors.request.use((config) => {
 
     const targetUrl = config.url || '';
     const isAdminRequest = matchesAdminRoute(targetUrl);
+    const isOwnerRequest = matchesOwnerRoute(targetUrl);
 
     if (isAdminRequest && adminToken) {
       config.headers.Authorization = `Bearer ${adminToken}`;
+    } else if (isOwnerRequest && ownerToken) {
+      config.headers.Authorization = `Bearer ${ownerToken}`;
     } else {
       const token = customerToken || ownerToken;
       if (token) {

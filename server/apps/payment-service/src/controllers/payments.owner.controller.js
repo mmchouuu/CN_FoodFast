@@ -1,5 +1,14 @@
 const payoutsService = require('../services/payouts.admin.service');
 
+const normaliseUuid = (value) => {
+  if (!value) return null;
+  const trimmed = String(value).trim();
+  if (!trimmed.length || trimmed.toLowerCase() === 'all') {
+    return null;
+  }
+  return trimmed;
+};
+
 const mapError = (res, error) => {
   const status = error?.status || error?.statusCode || error?.httpStatus || 500;
   return res.status(status).json({
@@ -14,16 +23,19 @@ exports.listSettlements = async (req, res) => {
     if (!restaurantId) {
       return res.status(400).json({ error: 'restaurant_id is required' });
     }
-    const result = await payoutsService.listRestaurantSettlements({
-      restaurantId,
-      branchId: req.query.branch_id,
-      status: req.query.status,
-      search: req.query.search,
-      period: req.query.period,
-      range: req.query.range,
-      startDate: req.query.start_date,
-      endDate: req.query.end_date,
-    });
+    const result = await payoutsService.listRestaurantSettlements(
+      {
+        restaurantId,
+        branchId: normaliseUuid(req.query.branch_id),
+        status: req.query.status,
+        search: req.query.search,
+        period: req.query.period,
+        range: req.query.range,
+        startDate: req.query.start_date,
+        endDate: req.query.end_date,
+      },
+      { includeAdminOnly: false },
+    );
     return res.json(result);
   } catch (error) {
     console.error('[payment-service] owner listSettlements failed:', error);
@@ -37,9 +49,13 @@ exports.listSettlementOrders = async (req, res) => {
     if (!restaurantId) {
       return res.status(400).json({ error: 'restaurant_id is required' });
     }
-    const result = await payoutsService.listSettlementOrders(req.params.settlementId, {
-      restaurantId,
-    });
+    const result = await payoutsService.listSettlementOrders(
+      req.params.settlementId,
+      {
+        restaurantId,
+      },
+      { includeAdminOnly: false },
+    );
     if (!result) {
       return res.status(404).json({ error: 'Settlement not found' });
     }

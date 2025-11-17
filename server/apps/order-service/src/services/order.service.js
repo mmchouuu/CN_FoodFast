@@ -1,5 +1,6 @@
 const { pool } = require('../db');
 const advancedOrdersService = require('./orders.service');
+const paymentClient = require('../clients/payment.client');
 
 class OrderValidationError extends Error {
   constructor(message) {
@@ -624,16 +625,39 @@ const attachOrderRelations = async (orderRows) => {
   });
 };
 
+const attachPaymentDetails = async (orders) => {
+  if (!orders.length) {
+    return orders;
+  }
+  const orderIds = orders.map((order) => order.id).filter(Boolean);
+  if (!orderIds.length) {
+    return orders;
+  }
+  let payments = [];
+  try {
+    payments = await paymentClient.lookupPayments(orderIds);
+  } catch (error) {
+    console.warn('[order-service] failed to lookup payments for orders:', error.message || error);
+    payments = [];
+  }
+  const paymentMap = new Map(payments.map((payment) => [payment.order_id, payment]));
+  return orders.map((order) => ({
+    ...order,
+    payment_details: paymentMap.get(order.id) || null,
+  }));
+};
+
 const getAllOrders = async () => {
   const result = await pool.query('SELECT * FROM orders ORDER BY created_at DESC');
-  return attachOrderRelations(result.rows);
+  const baseOrders = await attachOrderRelations(result.rows);
+  return attachPaymentDetails(baseOrders);
 };
 
 const getOrderById = async (id) => {
   const result = await pool.query('SELECT * FROM orders WHERE id = $1', [id]);
   if (!result.rows.length) return null;
-  const [order] = await attachOrderRelations(result.rows);
-  return order || null;
+  const enriched = await attachPaymentDetails(await attachOrderRelations(result.rows));
+  return enriched[0] || null;
 };
 
 const deriveRestaurantId = (payload, items) => {
@@ -1063,7 +1087,9 @@ const updateOrderStatus = async (id, statusRaw) => {
     [id, 'STATUS_UPDATED', JSON.stringify({ new_status: status })],
   );
 
-  return attachOrderRelations(result.rows).then((rows) => rows[0] || null);
+  const baseOrders = await attachOrderRelations(result.rows);
+  const enriched = await attachPaymentDetails(baseOrders);
+  return enriched[0] || null;
 };
 
 const deleteOrder = async (id) => {
@@ -1078,7 +1104,8 @@ const getOrdersByUserId = async (userId) => {
      ORDER BY created_at DESC`,
     [userId],
   );
-  return attachOrderRelations(result.rows);
+  const baseOrders = await attachOrderRelations(result.rows);
+  return attachPaymentDetails(baseOrders);
 };
 
 const confirmCustomerOrder = async (orderId, userId, payload = {}) => {

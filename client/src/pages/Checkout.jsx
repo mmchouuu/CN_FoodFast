@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import toast from "react-hot-toast";
 import { useNavigate } from "react-router-dom";
 import { useAppContext } from "../context/AppContext";
@@ -55,6 +55,7 @@ const Checkout = () => {
     placeOrder,
     addNewAddress,
     openCustomerProfilePanel,
+    isAuthenticated,
   } = useAppContext();
 
   const [discountCode, setDiscountCode] = useState(
@@ -92,6 +93,15 @@ const Checkout = () => {
   const total = Math.max(subtotal + shippingFee - discount, 0);
 
   const isCartEmpty = useMemo(() => subtotal === 0, [subtotal]);
+  const hasMomoWallet = momoWallets.length > 0;
+  const hasCardAccount = cardAccounts.length > 0;
+  const hasSavedPaymentMethod = hasMomoWallet || hasCardAccount;
+  const methodRequiresWallet = method === "wallet";
+  const methodRequiresCard = method === "card";
+  const paymentSelectionInvalid =
+    !hasSavedPaymentMethod ||
+    (methodRequiresWallet && !hasMomoWallet) ||
+    (methodRequiresCard && !hasCardAccount);
 
   const paymentMethods = useMemo(
     () => [
@@ -124,26 +134,6 @@ const Checkout = () => {
     return `${paddedMonth}/${shortYear}`;
   };
 
-  useEffect(() => {
-    // const normalized = typeof method === "string" ? method.trim().toLowerCase() : "";
-    // if (normalized === "bank" || normalized === "bank_transfer") {
-    //   if (momoWallets.length === 0) {
-    //     setMethod("wallet");
-    //     return;
-    //   }
-    // }
-    // if (normalized === "card" && cardAccounts.length === 0) {
-    //   setMethod("wallet");
-    const fallbackMethod = paymentMethods[0]?.id || "cod";
-    if (method === "wallet" && momoWallets.length === 0) {
-      setMethod(fallbackMethod);
-      return;
-    }
-    if (method === "card" && cardAccounts.length === 0) {
-      setMethod(fallbackMethod);
-    }
-  }, [method, momoWallets.length, cardAccounts.length, setMethod, paymentMethods]);
-
   const handleApplyDiscount = () => {
     applyDiscountCode(discountCode);
   };
@@ -153,20 +143,35 @@ const Checkout = () => {
       toast.error("Your cart is currently empty.");
       return;
     }
+    if (!isAuthenticated) {
+      toast.error("Please sign in before placing an order.");
+      openCustomerProfilePanel();
+      return;
+    }
+    if (!hasSavedPaymentMethod) {
+      toast.error("Link a MoMo wallet or add a card before paying.");
+      openCustomerProfilePanel();
+      return;
+    }
+    if (methodRequiresWallet && !hasMomoWallet) {
+      toast.error("Link a MoMo wallet to use this payment method.");
+      openCustomerProfilePanel();
+      return;
+    }
+    if (methodRequiresCard && !hasCardAccount) {
+      toast.error("Add a debit/credit card to use this payment method.");
+      openCustomerProfilePanel();
+      return;
+    }
     if (!selectedAddress) {
       toast.error("Please choose a delivery address first.");
       return;
     }
-    setIsPlacingOrder(true);
     const paymentMethodForSubmit = normalizePaymentMethodForSubmit(method);
     try {
-
-      // await placeOrder({ paymentMethod: paymentMethodForSubmit, address: selectedAddress });
-      // toast.success("Order confirmed! We're preparing your meal.");
-      // navigate("/orders/current");
-
+      setIsPlacingOrder(true);
       const createdOrder = await placeOrder({
-        paymentMethod: method,
+        paymentMethod: paymentMethodForSubmit,
         address: selectedAddress,
       });
       const firstOrder = Array.isArray(createdOrder)
@@ -683,15 +688,33 @@ const Checkout = () => {
 
           <button
             onClick={handlePlaceOrder}
-            disabled={isCartEmpty || isPlacingOrder}
+            disabled={
+              isCartEmpty ||
+              isPlacingOrder ||
+              !isAuthenticated ||
+              paymentSelectionInvalid
+            }
             className={`mt-8 w-full rounded-full px-6 py-3 text-sm font-semibold text-white transition ${
-              isCartEmpty || isPlacingOrder
+              isCartEmpty ||
+              isPlacingOrder ||
+              !isAuthenticated ||
+              paymentSelectionInvalid
                 ? "cursor-not-allowed bg-gray-300"
                 : "bg-orange-500 hover:bg-orange-600"
             }`}
           >
             {isPlacingOrder ? "Processing..." : "Proceed to Payment"}
           </button>
+          {!isAuthenticated ? (
+            <p className="mt-3 text-center text-xs text-amber-600">
+              Please sign in to continue checkout.
+            </p>
+          ) : null}
+          {paymentSelectionInvalid ? (
+            <p className="mt-1 text-center text-xs text-amber-600">
+              Link a MoMo wallet or card in your profile before completing payment.
+            </p>
+          ) : null}
           <p className="mt-3 text-center text-xs text-gray-400">
             By placing an order you agree to FoodFast's terms of use.
           </p>

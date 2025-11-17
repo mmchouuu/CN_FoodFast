@@ -366,6 +366,28 @@ async function resendVerificationOtp(email) {
   };
 }
 
+async function getProfile(userId) {
+  if (!userId) {
+    throw createError('userId is required');
+  }
+  const profile = await userRepository.getCustomerProfile(userId);
+  if (!profile) {
+    return null;
+  }
+  return {
+    id: profile.id,
+    user_id: profile.user_id,
+    first_name: profile.first_name || null,
+    last_name: profile.last_name || null,
+    full_name:
+      profile.full_name ||
+      [profile.first_name, profile.last_name].filter(Boolean).join(' ').trim() ||
+      null,
+    phone: profile.phone || null,
+    email: profile.email || null,
+  };
+}
+
 module.exports = {
   registerCustomer,
   verifyCustomer,
@@ -377,4 +399,5 @@ module.exports = {
   requestPasswordReset,
   resetPassword,
   resendVerificationOtp,
+  getProfile,
 };

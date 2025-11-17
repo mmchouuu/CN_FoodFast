@@ -84,6 +84,60 @@ async function lookupPayments(orderIds = []) {
   }
 }
 
+async function createRefund({
+  paymentId,
+  amount,
+  reason,
+  idempotencyKey = null,
+  userId = null,
+}) {
+  if (!paymentId || amount === undefined || amount === null) {
+    throw new Error('paymentId and amount are required to create a refund');
+  }
+
+  const payload = {
+    payment_id: paymentId,
+    amount,
+    reason: reason || null,
+  };
+
+  if (idempotencyKey) {
+    payload.idempotency_key = idempotencyKey;
+  }
+
+  const headers = {};
+  if (userId) {
+    headers['x-user-id'] = userId;
+  }
+
+  const invoke = async (path) =>
+    sendJsonRequest(path, {
+      method: 'POST',
+      body: payload,
+      headers,
+    });
+
+  let response = await invoke('/api/payments/refunds');
+
+  // Fallback for older routing (without /api/payments prefix)
+  if (response.status === 404) {
+    response = await invoke('/refunds');
+  }
+
+  const { status, data } = response;
+
+  if (status >= 200 && status < 300) {
+    return data;
+  }
+
+  const errorMessage =
+    (data && (data.error || data.message)) ||
+    `payment-service responded with ${status}`;
+  const error = new Error(errorMessage);
+  error.status = status;
+  throw error;
+}
+
 async function confirmCashPayment({ orderId, userId }) {
   if (!orderId) {
     throw new Error('orderId is required to confirm cash payment');
@@ -113,5 +167,6 @@ async function confirmCashPayment({ orderId, userId }) {
 
 module.exports = {
   lookupPayments,
+  createRefund,
   confirmCashPayment,
 };

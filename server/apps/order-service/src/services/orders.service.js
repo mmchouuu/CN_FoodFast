@@ -3,6 +3,7 @@
 const { pool } = require('../db');
 const productClient = require('../clients/product.client');
 const paymentClient = require('../clients/payment.client');
+const userClient = require('../clients/user.client');
 const { publishOrderEvent } = require('../utils/rabbitmq');
 
 const ALLOW_CLIENT_PRICING_FALLBACK = process.env.ALLOW_CLIENT_PRICING_FALLBACK === 'true';
@@ -195,6 +196,172 @@ const normalisePaymentStatus = (statusRaw) => {
   return status;
 };
 
+const normaliseReasonText = (value, fallback = '') =>
+  typeof value === 'string' && value.trim().length ? value.trim() : fallback;
+
+const pickPrimaryPaymentForOrder = (payments = []) => {
+  if (!Array.isArray(payments) || !payments.length) {
+    return null;
+  }
+
+  const sorted = [...payments].sort((a, b) => {
+    const createdA = a.created_at || a.createdAt || 0;
+    const createdB = b.created_at || b.createdAt || 0;
+    return new Date(createdB).getTime() - new Date(createdA).getTime();
+  });
+
+  const preferred = sorted.find((payment) => {
+    const status = (payment.status || '').toLowerCase();
+    return status === 'succeeded' || status === 'paid' || status === 'paid_out';
+  });
+
+  return preferred || sorted[0];
+};
+
+async function createFullRefundArtifacts({
+  client,
+  order,
+  reason,
+  adminId = null,
+  actorId = null,
+  refundRequestOverrides = {},
+}) {
+  if (!client) {
+    throw new Error('db client is required to create refund artifacts');
+  }
+  if (!order?.id) {
+    throw new Error('order is required to create refund artifacts');
+  }
+
+  const refundAmount = toNumber(order.total_amount, 0);
+  let refundStatus = 'succeeded';
+  let refundRecord = null;
+  let paymentRecord = null;
+
+  if (refundAmount > 0) {
+    const payments = await paymentClient.lookupPayments([order.id]);
+    paymentRecord = pickPrimaryPaymentForOrder(payments);
+  }
+
+  if (paymentRecord && refundAmount > 0) {
+    try {
+      const refund = await paymentClient.createRefund({
+        paymentId: paymentRecord.id || paymentRecord.payment_id,
+        amount: refundAmount,
+        reason,
+        idempotencyKey: `order-cancel-${order.id}`,
+        userId: order.user_id || actorId || null,
+      });
+      refundRecord = refund?.data || refund || null;
+      const refundStatusRaw =
+        (refundRecord?.status || refund?.status || refund?.data?.status || '').toLowerCase();
+      refundStatus = refundStatusRaw || 'succeeded';
+    } catch (error) {
+      console.error('[order-service] Failed to create payment refund:', error.message || error);
+      refundStatus = 'failed';
+    }
+  }
+
+  const effectiveRefundStatus = refundStatus === 'failed' ? 'processing' : refundStatus;
+  const refundStatusForRequest =
+    effectiveRefundStatus === 'succeeded' ? 'succeeded' : effectiveRefundStatus || 'processing';
+
+  const overrides = refundRequestOverrides || {};
+  const overriddenOrderId = overrides.order_id ?? overrides.orderId ?? order.id;
+  const overriddenUserId = overrides.user_id ?? overrides.userId ?? order.user_id;
+  const overriddenRestaurantId =
+    overrides.restaurant_id ?? overrides.restaurantId ?? order.restaurant_id;
+  const overriddenBranchId = overrides.branch_id ?? overrides.branchId ?? order.branch_id;
+  const overriddenStatus = overrides.status ?? refundStatusForRequest;
+  const overriddenAmount =
+    overrides.refund_amount ?? overrides.refundAmount ?? refundAmount;
+  const overriddenReason = overrides.reason ?? reason;
+  const overriddenImages = overrides.images ?? null;
+  const overriddenAdminId =
+    overrides.admin_id ?? overrides.adminId ?? (adminId ?? null);
+  const overriddenAdminComment = overrides.admin_comment ?? overrides.adminComment ?? null;
+
+  const refundRequestRes = await client.query(
+    `
+      INSERT INTO order_refund_requests (
+        order_id,
+        user_id,
+        restaurant_id,
+        branch_id,
+        status,
+        refund_amount,
+        reason,
+        images,
+        admin_id,
+        admin_comment
+      )
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+      RETURNING *
+    `,
+    [
+      overriddenOrderId,
+      overriddenUserId,
+      overriddenRestaurantId,
+      overriddenBranchId,
+      overriddenStatus,
+      overriddenAmount,
+      overriddenReason,
+      overriddenImages,
+      overriddenAdminId,
+      overriddenAdminComment,
+    ],
+  );
+
+  return {
+    refundRequest: refundRequestRes.rows[0],
+    refundRecord,
+    refundStatus: refundStatusForRequest,
+    paymentRecord,
+    actorId,
+  };
+}
+
+async function attemptRefundAfterCancellation({
+  order,
+  reason,
+  adminId = null,
+  actorId = null,
+  refundRequestOverrides = {},
+}) {
+  // Perform refund in a separate transaction so order cancellation is not blocked.
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const refundOutcome = await createFullRefundArtifacts({
+      client,
+      order,
+      reason,
+      adminId,
+      actorId,
+      refundRequestOverrides,
+    });
+
+    if (refundOutcome.refundStatus === 'succeeded') {
+      await client.query(
+        `
+          UPDATE orders
+          SET payment_status = 'refunded',
+              updated_at = now()
+          WHERE id = $1
+        `,
+        [order.id],
+      );
+    }
+
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('[order-service] refund post-cancel failed:', error.message || error);
+  } finally {
+    client.release();
+  }
+}
+
 const ORDER_TIMELINE_STATUSES = [
   'pending',
   'confirmed',
@@ -371,6 +538,73 @@ const ensureJson = (value) => {
     }
   }
   return {};
+};
+
+const resolveProfileFullName = (profile) => {
+  if (!profile) return null;
+  if (profile.full_name) return profile.full_name;
+  const first = profile.first_name || profile.firstName || '';
+  const last = profile.last_name || profile.lastName || '';
+  const joined = [first, last].filter(Boolean).join(' ').trim();
+  return joined || null;
+};
+
+const applyCustomerProfileToOrder = (order, profile) => {
+  if (!order || !profile) return order;
+  const fullName = resolveProfileFullName(profile);
+  const phone = profile.phone || null;
+  order.customer_profile = profile;
+  if (!order.metadata || typeof order.metadata !== 'object') {
+    order.metadata = {};
+  }
+  if (fullName && !order.metadata.customer_name) {
+    order.metadata.customer_name = fullName;
+  }
+  if (phone && !order.metadata.customer_phone) {
+    order.metadata.customer_phone = phone;
+  }
+  if (!order.delivery || typeof order.delivery !== 'object') {
+    order.delivery = order.delivery ? { ...order.delivery } : {};
+  }
+  if (fullName && !order.delivery.contact_name) {
+    order.delivery.contact_name = fullName;
+  }
+  if (phone && !order.delivery.contact_phone) {
+    order.delivery.contact_phone = phone;
+  }
+  return order;
+};
+
+const enrichOrdersWithCustomerProfiles = async (orders = []) => {
+  const list = Array.isArray(orders) ? orders : [];
+  const userIds = Array.from(new Set(list.map((order) => order.user_id).filter(Boolean)));
+  if (!userIds.length) {
+    return list;
+  }
+  const cache = new Map();
+  await Promise.all(
+    userIds.map(async (userId) => {
+      const profile = await userClient.getCustomerProfile(userId);
+      if (profile) {
+        cache.set(userId, profile);
+      }
+    }),
+  );
+  return list.map((order) => {
+    const profile = cache.get(order.user_id);
+    return profile ? applyCustomerProfileToOrder(order, profile) : order;
+  });
+};
+
+const enrichOrderWithCustomerProfile = async (order) => {
+  if (!order) return order;
+  const [enriched] = await enrichOrdersWithCustomerProfiles([order]);
+  return enriched || order;
+};
+
+const fetchOrderWithProfile = async (orderId, options = {}) => {
+  const order = await fetchOrderById(orderId, options);
+  return enrichOrderWithCustomerProfile(order);
 };
 
 function computePricingTotals(items, overrides = {}) {
@@ -1654,7 +1888,7 @@ async function listAdminOrders({ query = {} }) {
 }
 
 async function getAdminOrder({ orderId }) {
-  return fetchOrderById(orderId);
+  return fetchOrderWithProfile(orderId);
 }
 
 async function patchAdminOrder({ user, orderId, payload = {} }) {
@@ -1758,7 +1992,7 @@ async function patchAdminOrder({ user, orderId, payload = {} }) {
 
     await client.query('COMMIT');
 
-    return fetchOrderById(orderId);
+    return fetchOrderWithProfile(orderId);
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;
@@ -1809,7 +2043,7 @@ async function deleteAdminOrder({ user, orderId, payload = {} }) {
 
     await client.query('COMMIT');
 
-    return fetchOrderById(orderId);
+    return fetchOrderWithProfile(orderId);
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;
@@ -2047,11 +2281,12 @@ async function getCustomerOrder({ user, orderId }) {
       `,
       [orderId, userId],
     );
-    const order = orderRes.rows[0];
-    if (!order) {
+    const existing = orderRes.rows[0];
+    if (!existing) {
       return null;
     }
-    return fetchOrderById(orderId, { client });
+    const order = await fetchOrderById(orderId, { client });
+    return enrichOrderWithCustomerProfile(order);
   } finally {
     client.release();
   }
@@ -2081,15 +2316,17 @@ async function cancelCustomerOrder({ user, orderId, payload = {} }) {
       throw new NotFoundError('order not found');
     }
 
-    if (!['pending', 'confirmed'].includes(order.status) || order.payment_status === 'paid') {
+    if (!['pending', 'confirmed'].includes(order.status)) {
       throw new ValidationError('order cannot be cancelled at this stage');
     }
+
+    const reason = normaliseReasonText(payload.reason, 'customer_request');
 
     const updatedMetadata = appendTimelineMetadata(
       order.metadata,
       'cancelled',
       userId,
-      payload.reason || 'customer_request',
+      reason,
     );
 
     await client.query(
@@ -2100,7 +2337,10 @@ async function cancelCustomerOrder({ user, orderId, payload = {} }) {
             updated_at = now()
         WHERE id = $1
       `,
-      [orderId, updatedMetadata],
+      [
+        orderId,
+        updatedMetadata,
+      ],
     );
 
     await logOrderEvent(client, {
@@ -2108,7 +2348,7 @@ async function cancelCustomerOrder({ user, orderId, payload = {} }) {
       eventType: 'OrderCancelled',
       actorId: userId,
       payload: {
-        reason: payload.reason || 'customer_request',
+        reason,
       },
     });
 
@@ -2120,6 +2360,7 @@ async function cancelCustomerOrder({ user, orderId, payload = {} }) {
         order_id: orderId,
         status: 'cancelled',
         actor: userId,
+        reason,
       },
     });
 
@@ -2137,12 +2378,32 @@ async function cancelCustomerOrder({ user, orderId, payload = {} }) {
       'customer-cancel',
     );
 
+    // Trigger refund after order status is updated to avoid blocking the cancellation.
+    attemptRefundAfterCancellation({
+      order,
+      reason,
+      actorId: userId,
+    }).catch((error) =>
+      console.error('[order-service] async refund trigger failed:', error?.message || error),
+    );
+
     return updated;
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;
   } finally {
     client.release();
+  }
+
+  if (nextStatus === 'cancelled') {
+    attemptRefundAfterCancellation({
+      order,
+      reason: note,
+      adminId: order.branch_id,
+      actorId,
+    }).catch((error) =>
+      console.error('[order-service] async refund trigger failed:', error?.message || error),
+    );
   }
 }
 
@@ -2176,7 +2437,7 @@ async function confirmCustomerOrderDelivery({ user, orderId, payload = {} }) {
 
     if (order.status === 'completed') {
       await client.query('ROLLBACK');
-      return fetchOrderById(orderId, { includePayments: false });
+      return fetchOrderWithProfile(orderId, { includePayments: false });
     }
 
     if (!['delivering', 'ready'].includes(order.status)) {
@@ -2357,9 +2618,10 @@ async function listOwnerOrders({ user, query = {} }) {
       ordersRes.rows.map((row) => row.id),
       { client },
     );
+    const enrichedOrders = await enrichOrdersWithCustomerProfiles(hydrated);
 
     return {
-      data: hydrated,
+      data: enrichedOrders,
       pagination: {
         limit,
         offset,
@@ -2392,7 +2654,8 @@ async function getOwnerOrder({ user, orderId }) {
       return null;
     }
 
-    return fetchOrderById(orderId, { client });
+    const order = await fetchOrderById(orderId, { client });
+    return enrichOrderWithCustomerProfile(order);
   } finally {
     client.release();
   }
@@ -2429,46 +2692,103 @@ async function updateOwnerOrderStatus({ user, orderId, payload = {} }) {
     }
 
     const actorId = resolveUserId(user);
-    const metadataWithTimeline = appendTimelineMetadata(
-      order.metadata,
-      nextStatus,
-      actorId,
-      payload.note || null,
-    );
+    const note = normaliseReasonText(payload.note || payload.reason, null);
 
-    await client.query(
-      `
-        UPDATE orders
-        SET status = $1,
-            metadata = $3,
-            updated_at = now()
-        WHERE id = $2
-      `,
-      [nextStatus, orderId, metadataWithTimeline],
-    );
+    if (nextStatus === 'cancelled') {
+      if (!['pending', 'confirmed'].includes(order.status)) {
+        throw new ValidationError('only pending or confirmed orders can be cancelled');
+      }
+      if (!note) {
+        throw new ValidationError('reason is required to cancel this order');
+      }
 
-    await logOrderEvent(client, {
-      orderId,
-      eventType: 'OrderStatusUpdated',
-      actorId: resolveUserId(user),
-      payload: {
-        previous: order.status,
-        next: nextStatus,
-        note: payload.note || null,
-      },
-    });
+      const metadataWithTimeline = appendTimelineMetadata(
+        order.metadata,
+        nextStatus,
+        actorId,
+        note,
+      );
 
-    await enqueueOutbox(client, {
-      aggregateType: 'Order',
-      aggregateId: orderId,
-      eventType: 'order.status_updated',
-      payload: {
-        order_id: orderId,
-        previous: order.status,
-        next: nextStatus,
-        actor: resolveUserId(user),
-      },
-    });
+      await client.query(
+        `
+          UPDATE orders
+          SET status = $1,
+              metadata = $3,
+              updated_at = now()
+          WHERE id = $2
+        `,
+        [
+          nextStatus,
+          orderId,
+          metadataWithTimeline,
+        ],
+      );
+
+      await logOrderEvent(client, {
+        orderId,
+        eventType: 'OrderCancelled',
+        actorId,
+        payload: {
+          previous: order.status,
+          next: nextStatus,
+          note,
+        },
+      });
+
+      await enqueueOutbox(client, {
+        aggregateType: 'Order',
+        aggregateId: orderId,
+        eventType: 'order.status_updated',
+        payload: {
+          order_id: orderId,
+          previous: order.status,
+          next: nextStatus,
+          actor: actorId,
+          note,
+        },
+      });
+    } else {
+      const metadataWithTimeline = appendTimelineMetadata(
+        order.metadata,
+        nextStatus,
+        actorId,
+        note,
+      );
+
+      await client.query(
+        `
+          UPDATE orders
+          SET status = $1,
+              metadata = $3,
+              updated_at = now()
+          WHERE id = $2
+        `,
+        [nextStatus, orderId, metadataWithTimeline],
+      );
+
+      await logOrderEvent(client, {
+        orderId,
+        eventType: 'OrderStatusUpdated',
+        actorId: resolveUserId(user),
+        payload: {
+          previous: order.status,
+          next: nextStatus,
+          note,
+        },
+      });
+
+      await enqueueOutbox(client, {
+        aggregateType: 'Order',
+        aggregateId: orderId,
+        eventType: 'order.status_updated',
+        payload: {
+          order_id: orderId,
+          previous: order.status,
+          next: nextStatus,
+          actor: resolveUserId(user),
+        },
+      });
+    }
 
     await client.query('COMMIT');
 
@@ -2484,6 +2804,20 @@ async function updateOwnerOrderStatus({ user, orderId, payload = {} }) {
       },
       'owner-status-update',
     );
+
+    if (nextStatus === 'cancelled') {
+      attemptRefundAfterCancellation({
+        order,
+        reason: note,
+        actorId,
+        refundRequestOverrides: {
+          user_id: null,
+          admin_id: null,
+        },
+      }).catch((error) =>
+        console.error('[order-service] async refund trigger failed:', error?.message || error),
+      );
+    }
 
     return updated;
   } catch (error) {

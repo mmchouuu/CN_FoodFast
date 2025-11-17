@@ -43,6 +43,7 @@ router.get('/me/addresses', authMiddleware, customerController.listAddresses);
 router.post('/me/addresses', authMiddleware, customerController.createAddress);
 router.put('/me/addresses/:id', authMiddleware, customerController.updateAddress);
 router.delete('/me/addresses/:id', authMiddleware, customerController.deleteAddress);
+router.get('/me/profile', authMiddleware, customerController.getProfile);
 
 router.get('/addresses', authMiddleware, customerController.listAddresses);
 router.post('/addresses', authMiddleware, customerController.createAddress);

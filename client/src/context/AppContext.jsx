@@ -62,7 +62,15 @@ const DEFAULT_PAYMENT_METHOD =
     'card';
 const ORDER_HISTORY_STATUSES = new Set(['delivered', 'completed', 'cancelled']);
 const ORDER_REVIEWABLE_STATUSES = new Set(['delivered', 'completed']);
-const ORDER_STATUS_SEQUENCE = ['pending', 'confirmed', 'preparing', 'ready', 'delivering', 'completed'];
+const ORDER_STATUS_SEQUENCE = [
+    'pending',
+    'confirmed',
+    'cancelled',
+    'preparing',
+    'ready',
+    'delivering',
+    'completed',
+];
 const ACTIVE_ORDER_REFRESH_INTERVAL = 15000;
 
 const toNumberOr = (value, fallback = 0) => {
@@ -608,14 +616,23 @@ const normaliseStatusKey = (value) => {
     return ORDER_STATUS_SEQUENCE.includes(key) ? key : null;
 };
 
+const resolveTimelineSequence = (status) => {
+    const normalised = typeof status === 'string' ? status.toLowerCase() : '';
+    if (normalised === 'cancelled') {
+        return ['pending', 'confirmed', 'cancelled'];
+    }
+    return ORDER_STATUS_SEQUENCE;
+};
+
 const buildDefaultTimeline = (status, placedAt) => {
     const normalizedStatus = typeof status === 'string' ? status.toLowerCase() : '';
-    const statusIndex = ORDER_STATUS_SEQUENCE.indexOf(normalizedStatus);
+    const sequence = resolveTimelineSequence(normalizedStatus);
+    const statusIndex = sequence.indexOf(normalizedStatus);
     const placedTime = placedAt
         ? new Date(placedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         : null;
 
-    return ORDER_STATUS_SEQUENCE.map((key, index) => {
+    return sequence.map((key, index) => {
         const label = key.charAt(0).toUpperCase() + key.slice(1);
         const isKnownStatus = statusIndex !== -1;
         const completed = isKnownStatus ? index <= statusIndex : index === 0;
@@ -699,9 +716,10 @@ const buildTimelineFromEvents = (rawOrder, status, placedAt) => {
     }
 
     const normalizedStatus = typeof status === 'string' ? status.toLowerCase() : '';
-    const statusIndex = ORDER_STATUS_SEQUENCE.indexOf(normalizedStatus);
+    const sequence = resolveTimelineSequence(normalizedStatus || 'pending');
+    const statusIndex = sequence.indexOf(normalizedStatus);
 
-    return ORDER_STATUS_SEQUENCE.map((key, index) => {
+    return sequence.map((key, index) => {
         const label = key.charAt(0).toUpperCase() + key.slice(1);
         const rawTimestamp = timestamps.get(key);
         const formattedTimestamp = formatTimelineTimestamp(rawTimestamp);
@@ -1485,25 +1503,31 @@ export const AppContextProvider = ({ children }) => {
     }, [authToken, authProfileId, refreshMomoWallets]);
 
     useEffect(() => {
-        if (method === 'wallet' && momoWallets.length === 0) {
-            setMethod(DEFAULT_PAYMENT_METHOD);
+        const hasWallets = momoWallets.length > 0;
+        const hasCards = cardAccounts.length > 0;
+
+        if (method === 'wallet' && !hasWallets && hasCards) {
+            setMethod('card');
             return;
         }
-        if (method === 'card' && cardAccounts.length === 0) {
-            setMethod(DEFAULT_PAYMENT_METHOD);
+
+        if (method === 'card' && !hasCards && hasWallets) {
+            setMethod('wallet');
             setSelectedCardId(null);
             return;
         }
-        if (
-            method === 'card' &&
-            cardAccounts.length > 0 &&
-            !selectedCardId
-        ) {
+
+        if (method === 'card' && !hasCards) {
+            setSelectedCardId(null);
+            return;
+        }
+
+        if (method === 'card' && hasCards && !selectedCardId) {
             const preferred =
                 cardAccounts.find((card) => card.isDefault) || cardAccounts[0] || null;
             setSelectedCardId(preferred ? preferred.id : null);
         }
-    }, [method, momoWallets.length, cardAccounts, setMethod, selectedCardId]);
+    }, [method, momoWallets.length, cardAccounts, selectedCardId]);
 
     // --- Unified user object ---
 
@@ -1777,6 +1801,12 @@ export const AppContextProvider = ({ children }) => {
         const paymentMethodCanonical = normalizePaymentMethodForSubmit(
             paymentMethodOverride || method || 'cod',
         );
+        if (
+            paymentMethodCanonical === 'wallet' &&
+            !(Array.isArray(momoWallets) && momoWallets.length > 0)
+        ) {
+            throw new Error('Vui lòng liên kết ví MoMo trước khi thanh toán.');
+        }
         const resolvePreferredCard = () => {
             if (paymentMethodCanonical !== 'card') return null;
             if (!Array.isArray(cardAccounts) || !cardAccounts.length) return null;
@@ -1787,6 +1817,9 @@ export const AppContextProvider = ({ children }) => {
             return cardAccounts.find((card) => card?.isDefault) || cardAccounts[0] || null;
         };
         const preferredCardAccount = resolvePreferredCard();
+        if (paymentMethodCanonical === 'card' && !preferredCardAccount) {
+            throw new Error('Vui lòng thêm thẻ thanh toán trước khi chọn phương thức này.');
+        }
         const paymentMethodId =
             paymentMethodCanonical === 'card'
                 ? preferredCardAccount?.id || null
@@ -2249,6 +2282,7 @@ export const AppContextProvider = ({ children }) => {
         clearCart,
         refreshOrders,
         cardAccounts,
+        momoWallets,
         selectedCardId,
         resolveRestaurantIdByBranch,
     ]);

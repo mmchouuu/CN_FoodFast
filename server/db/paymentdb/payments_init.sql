@@ -256,6 +256,7 @@ CREATE TABLE restaurant_settlements (
   gross NUMERIC(12,2) NOT NULL DEFAULT 0,
   refunds NUMERIC(12,2) NOT NULL DEFAULT 0,
   tax_withheld NUMERIC(12,2) NOT NULL DEFAULT 0,
+  shipping_fees NUMERIC(12,2) NOT NULL DEFAULT 0,
   net_result NUMERIC(12,2) NOT NULL DEFAULT 0,
 
   status VARCHAR(20) NOT NULL DEFAULT 'open'
@@ -279,6 +280,7 @@ CREATE TABLE IF NOT EXISTS restaurant_settlement_items (
   order_id UUID,
   amount NUMERIC(12,2) NOT NULL,                 -- dương/âm
   meta JSONB,
+  is_admin_only BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_rsi_settlement ON restaurant_settlement_items(settlement_id, item_type);

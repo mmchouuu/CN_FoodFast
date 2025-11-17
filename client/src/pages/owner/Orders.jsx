@@ -204,11 +204,28 @@ const adaptOwnerOrder = (order, lookups) => {
     paymentStatusSource || paymentStatus || "pending"
   );
 
+  const customerProfile = order.customer_profile || {};
+  const profileFullName =
+    customerProfile.full_name ||
+    customerProfile.fullName ||
+    [customerProfile.first_name || customerProfile.firstName || '', customerProfile.last_name || customerProfile.lastName || '']
+      .filter(Boolean)
+      .join(' ')
+      .trim();
+  const profilePhone = customerProfile.phone || customerProfile.phone_number || null;
+
   const customerName =
     metadata.customer_name ||
+    profileFullName ||
     order.delivery?.contact_name ||
     address.fullName ||
     [address.firstName, address.lastName].filter(Boolean).join(" ").trim() ||
+    null;
+  const customerPhone =
+    metadata.customer_phone ||
+    profilePhone ||
+    order.delivery?.contact_phone ||
+    address.phone ||
     null;
 
   return {
@@ -235,6 +252,7 @@ const adaptOwnerOrder = (order, lookups) => {
     deliveryWindow: order.delivery?.estimated_at || null,
     address,
     customerName,
+    customerPhone,
     items,
   };
 };
@@ -356,10 +374,30 @@ const Orders = () => {
         .map((chunk) => chunk.charAt(0).toUpperCase() + chunk.slice(1))
         .join(" ");
 
+      const currentStatus = (order.status || "").toLowerCase();
+      let payload = { status: nextStatus };
+      if (nextStatus === "cancelled") {
+        const isPendingOrConfirmed = ["pending", "confirmed"].includes(currentStatus);
+        if (!isPendingOrConfirmed) {
+          toast.error("Chỉ có thể huỷ đơn ở trạng thái Pending hoặc Confirmed.");
+          return;
+        }
+        const reasonInput =
+          typeof window !== "undefined"
+            ? window.prompt("Enter reason for cancellation", "Enter reason")
+            : "";
+        const trimmedReason = reasonInput ? reasonInput.trim() : "";
+        if (!trimmedReason) {
+          toast.error("Please enter reason for cancellation.");
+          return;
+        }
+        payload = { status: nextStatus, note: trimmedReason };
+      }
+
       setStatusUpdatingMap((prev) => ({ ...prev, [order.id]: true }));
 
       try {
-        const updated = await ownerOrdersService.updateStatus(order.id, { status: nextStatus });
+        const updated = await ownerOrdersService.updateStatus(order.id, payload);
         setRawOrders((prev) => {
           if (!Array.isArray(prev) || !prev.length) return prev;
           return prev.map((item) => {
@@ -715,7 +753,7 @@ const Orders = () => {
                       {order.customerName || "Customer"}
                     </p>
                     <p className="text-xs text-slate-500">
-                      Phone: {order.address.phone || "N/A"}
+                      Phone: {order.customerPhone || order.address.phone || "N/A"}
                     </p>
                     <p className="text-xs text-slate-500 mt-2 leading-5">
                       {[order.address.street, order.address.district, order.address.city]

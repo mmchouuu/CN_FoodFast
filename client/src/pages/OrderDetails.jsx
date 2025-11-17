@@ -8,17 +8,20 @@ import {
 import { buildRestaurantLink } from "../utils/orderHelpers";
 import resolvePaymentSummary from "../utils/paymentSummary";
 
-const StatusDot = ({ completed }) => (
-  <span
-    className={`inline-block h-3 w-3 rounded-full ${
-      completed ? "bg-green-500" : "bg-gray-300"
-    }`}
-  />
-);
+const StatusDot = ({ completed, variant = "default" }) => {
+  const colorClass =
+    variant === "cancelled"
+      ? "bg-red-500"
+      : completed
+        ? "bg-green-500"
+        : "bg-gray-300";
+  return <span className={`inline-block h-3 w-3 rounded-full ${colorClass}`} />;
+};
 
 const ORDER_STATUS_STEPS = [
   { key: "pending", label: "Pending" },
   { key: "confirmed", label: "Confirmed" },
+  { key: "cancelled", label: "Cancelled" },
   { key: "preparing", label: "Preparing" },
   { key: "ready", label: "Ready" },
   { key: "delivering", label: "Delivering" },
@@ -28,12 +31,25 @@ const ORDER_STATUS_STEPS = [
 const CANCELLABLE_STATUSES = new Set(["pending", "confirmed"]);
 const CONFIRMABLE_STATUSES = new Set(["ready", "delivering"]);
 
+const SUGGESTED_CANCEL_REASONS = [
+  "Changed my mind, want to cancel this order",
+  "Order confirmation time is too long",
+  "Ordered wrong item/address, want to reorder",
+];
+
 const normaliseStatus = (value) =>
   typeof value === "string" ? value.trim().toLowerCase() : "";
 
-const buildTrackingSteps = (status, placedAt) => {
+const buildTrackingSteps = (status, placedAt, updatedAt) => {
   const normalisedStatus = normaliseStatus(status);
-  const activeIndex = ORDER_STATUS_STEPS.findIndex(
+  const sequence =
+    normalisedStatus === "cancelled"
+      ? ORDER_STATUS_STEPS.filter((step) =>
+          ["pending", "confirmed", "cancelled"].includes(step.key),
+        )
+      : ORDER_STATUS_STEPS.filter((step) => step.key !== "cancelled");
+
+  const activeIndex = sequence.findIndex(
     (step) => step.key === normalisedStatus,
   );
   const placedTime = placedAt
@@ -42,8 +58,12 @@ const buildTrackingSteps = (status, placedAt) => {
         minute: "2-digit",
       })
     : null;
+  const cancelledTime =
+    updatedAt && normalisedStatus === "cancelled"
+      ? new Date(updatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+      : null;
 
-  return ORDER_STATUS_STEPS.map((step, index) => {
+  return sequence.map((step, index) => {
     const completed =
       activeIndex >= 0 ? index <= activeIndex : index === 0;
 
@@ -51,7 +71,7 @@ const buildTrackingSteps = (status, placedAt) => {
     if (index === 0) {
       timestamp = placedTime || "Pending";
     } else if (activeIndex === index) {
-      timestamp = "In progress";
+      timestamp = step.key === "cancelled" ? cancelledTime || "Cancelled" : "In progress";
     } else if (index < activeIndex) {
       timestamp = "Completed";
     }
@@ -59,7 +79,9 @@ const buildTrackingSteps = (status, placedAt) => {
     return {
       id: `step-${step.key}`,
       label: step.label,
+      status: step.key,
       completed,
+      variant: step.key === "cancelled" ? "cancelled" : "default",
       timestamp,
     };
   });
@@ -115,6 +137,7 @@ const OrderDetails = () => {
     currency,
     cancelOrder,
     confirmOrderDelivered,
+    refreshOrders,
   } = useAppContext();
 
   const [order, setOrder] = useState(() => getOrderById(orderId));
@@ -124,6 +147,9 @@ const OrderDetails = () => {
     cancel: false,
     confirm: false,
   });
+  const [showCancelDialog, setShowCancelDialog] = useState(false);
+  const [cancelReason, setCancelReason] = useState("");
+  const [cancelError, setCancelError] = useState("");
 
   useEffect(() => {
     if (!orderId) {
@@ -230,33 +256,77 @@ const OrderDetails = () => {
     .join(", ");
 
   const timeline = useMemo(() => {
+    const normalised = normaliseStatus(order.status);
+    const fallbackSteps = buildTrackingSteps(order.status, order.placedAt, order.updatedAt);
+    let steps = [];
     if (Array.isArray(order.timeline) && order.timeline.length) {
-      return order.timeline;
+      steps = order.timeline;
+    } else {
+      steps = fallbackSteps;
     }
-    return buildTrackingSteps(order.status, order.placedAt);
-  }, [order.timeline, order.status, order.placedAt]);
+
+    if (normalised === "cancelled") {
+      const cancelIndex = steps.findIndex(
+        (step) => normaliseStatus(step.status || step.label) === "cancelled",
+      );
+      const sliced = cancelIndex >= 0 ? steps.slice(0, cancelIndex + 1) : fallbackSteps;
+      return sliced.map((step) => ({
+        ...step,
+        completed: true,
+        variant:
+          normaliseStatus(step.status || step.label) === "cancelled"
+            ? "cancelled"
+            : "default",
+      }));
+    }
+
+    return steps.map((step) => ({
+      ...step,
+      variant: step.variant || "default",
+    }));
+  }, [order.timeline, order.status, order.placedAt, order.updatedAt]);
   const totals = useMemo(() => resolveTotals(order), [order]);
   const paymentSummary = useMemo(
     () => resolvePaymentSummary(order),
     [order],
   );
   const normalisedStatus = normaliseStatus(order?.status);
-  const canCancel =
-    Boolean(order) &&
-    CANCELLABLE_STATUSES.has(normalisedStatus) &&
-    (order.paymentStatus || "").toLowerCase() !== "paid";
+  const canCancel = Boolean(order) && CANCELLABLE_STATUSES.has(normalisedStatus);
   const canConfirm = Boolean(order) && CONFIRMABLE_STATUSES.has(normalisedStatus);
+
+  useEffect(() => {
+    if (!canCancel && showCancelDialog) {
+      setShowCancelDialog(false);
+    }
+  }, [canCancel, showCancelDialog]);
+
+  const openCancelDialog = () => {
+    if (!order || !canCancel) return;
+    setCancelReason("");
+    setCancelError("");
+    setShowCancelDialog(true);
+  };
 
   const handleCancelOrder = async () => {
     if (!order || !canCancel) return;
+    if (!cancelReason.trim()) {
+      setCancelError("Please enter reason for cancellation.");
+      return;
+    }
     setActionLoading((prev) => ({ ...prev, cancel: true }));
+    setCancelError("");
     try {
-      const updated = await cancelOrder(order.id);
+      const updated = await cancelOrder(order.id, { reason: cancelReason.trim() });
       if (updated) {
         setOrder(updated);
       }
+      setShowCancelDialog(false);
+      if (typeof refreshOrders === "function") {
+        refreshOrders().catch(() => {});
+      }
     } catch (err) {
       console.error("Failed to cancel order", err);
+      setCancelError(err?.message || "Order cannot be canceled. Please try again.");
     } finally {
       setActionLoading((prev) => ({ ...prev, cancel: false }));
     }
@@ -279,6 +349,83 @@ const OrderDetails = () => {
 
   return (
     <div className="max-padd-container space-y-8 py-24">
+      {showCancelDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase text-orange-500">
+                  Cancel order
+                </p>
+                <h3 className="text-lg font-bold text-gray-900">
+                  Confirm cancellation of this order?
+                </h3>
+                <p className="mt-1 text-sm text-gray-500">
+                  The order is in uncooked state. When canceled, the money will be refunded 
+                  100% to the customer's payment method.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => !actionLoading.cancel && setShowCancelDialog(false)}
+                className="text-gray-400 transition hover:text-gray-600"
+                aria-label="Close"
+              >
+                x
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-3">
+              <p className="text-sm font-semibold text-gray-700">Select or enter a reason</p>
+              <div className="flex flex-wrap gap-2">
+                {SUGGESTED_CANCEL_REASONS.map((reason) => (
+                  <button
+                    key={reason}
+                    type="button"
+                    onClick={() => setCancelReason(reason)}
+                    className="rounded-full border border-gray-200 px-3 py-1 text-xs font-semibold text-gray-600 transition hover:border-orange-300 hover:text-orange-500"
+                  >
+                    {reason}
+                  </button>
+                ))}
+              </div>
+              <textarea
+                className="w-full rounded-xl border border-gray-200 p-3 text-sm text-gray-700 focus:border-orange-400 focus:outline-none focus:ring-2 focus:ring-orange-50"
+                placeholder="Enter reason for cancellation..."
+                rows={3}
+                value={cancelReason}
+                onChange={(event) => setCancelReason(event.target.value)}
+                disabled={actionLoading.cancel}
+              />
+              {cancelError ? (
+                <p className="text-sm text-red-500">{cancelError}</p>
+              ) : null}
+            </div>
+
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setShowCancelDialog(false)}
+                disabled={actionLoading.cancel}
+                className="rounded-full border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-600 transition hover:border-gray-300 hover:text-gray-800 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleCancelOrder}
+                disabled={actionLoading.cancel}
+                className={`rounded-full px-5 py-2 text-sm font-semibold text-white transition ${
+                  actionLoading.cancel ? "bg-gray-400" : "bg-red-500 hover:bg-red-600"
+                }`}
+              >
+                {actionLoading.cancel ? "Cancelling..." : "Cancel order"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-start gap-4">
           <img
@@ -332,7 +479,7 @@ const OrderDetails = () => {
           {canCancel && (
             <button
               type="button"
-              onClick={handleCancelOrder}
+              onClick={openCancelDialog}
               disabled={actionLoading.cancel}
               className={`rounded-full border px-4 py-2 text-sm font-semibold transition ${
                 actionLoading.cancel
@@ -361,7 +508,7 @@ const OrderDetails = () => {
             <div className="mt-6 space-y-4">
               {timeline.map((step) => (
                 <div key={step.id} className="flex items-start gap-4">
-                  <StatusDot completed={Boolean(step.completed)} />
+                  <StatusDot completed={Boolean(step.completed)} variant={step.variant} />
                   <div>
                     <p
                       className={`text-sm font-semibold ${

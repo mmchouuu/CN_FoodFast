@@ -99,4 +99,29 @@ async function getAddressById(addressId, authorization) {
   throw error;
 }
 
-module.exports = { getAddressById };
+async function getCustomerProfile(userId) {
+  if (!userId) {
+    return null;
+  }
+  try {
+    const { status, data } = await requestJson('/api/customers/me/profile', {
+      method: 'GET',
+      headers: {
+        'x-user-id': userId,
+        'x-internal-service': 'order-service',
+      },
+    });
+    if (status === 404) {
+      return null;
+    }
+    if (status >= 200 && status < 300) {
+      return data?.profile || data || null;
+    }
+    throw new Error(data?.error || `user-service responded with ${status}`);
+  } catch (error) {
+    console.warn('[order-service] failed to load customer profile:', error.message || error);
+    return null;
+  }
+}
+
+module.exports = { getAddressById, getCustomerProfile };

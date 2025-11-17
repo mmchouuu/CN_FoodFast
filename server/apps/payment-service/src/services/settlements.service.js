@@ -47,6 +47,83 @@ const resolveRestaurantContext = (order = {}) => {
   return { restaurantId, branchId };
 };
 
+let settlementSchemaReady = false;
+let settlementSchemaPromise = null;
+const ensureSettlementSchema = async () => {
+  if (settlementSchemaReady) {
+    return;
+  }
+  if (!settlementSchemaPromise) {
+    settlementSchemaPromise = (async () => {
+      const [shippingColumnCheck, adminColumnCheck] = await Promise.all([
+        pool.query(
+          `
+            SELECT 1
+              FROM information_schema.columns
+             WHERE table_schema = current_schema()
+               AND table_name = 'restaurant_settlements'
+               AND column_name = 'shipping_fees'
+             LIMIT 1
+          `,
+        ),
+        pool.query(
+          `
+            SELECT 1
+              FROM information_schema.columns
+             WHERE table_schema = current_schema()
+               AND table_name = 'restaurant_settlement_items'
+               AND column_name = 'is_admin_only'
+             LIMIT 1
+          `,
+        ),
+      ]);
+      const shippingColumnMissing = shippingColumnCheck.rowCount === 0;
+      if (shippingColumnMissing) {
+        await pool.query(
+          `
+            ALTER TABLE restaurant_settlements
+              ADD COLUMN IF NOT EXISTS shipping_fees NUMERIC(12,2) NOT NULL DEFAULT 0
+          `,
+        );
+        await pool.query(
+          `
+            WITH shipping AS (
+              SELECT
+                settlement_id,
+                COALESCE(SUM(COALESCE((meta->>'shipping_fee')::numeric, 0)), 0) AS shipping_total
+              FROM restaurant_settlement_items
+              WHERE item_type = 'payment'
+              GROUP BY settlement_id
+            )
+            UPDATE restaurant_settlements rs
+               SET shipping_fees = shipping.shipping_total,
+                   net_result = rs.gross - rs.refunds - rs.tax_withheld - shipping.shipping_total,
+                   updated_at = now()
+              FROM shipping
+             WHERE rs.id = shipping.settlement_id
+          `,
+        );
+      }
+
+      const adminColumnMissing = adminColumnCheck.rowCount === 0;
+      if (adminColumnMissing) {
+        await pool.query(
+          `
+            ALTER TABLE restaurant_settlement_items
+              ADD COLUMN IF NOT EXISTS is_admin_only BOOLEAN NOT NULL DEFAULT FALSE
+          `,
+        );
+      }
+
+      settlementSchemaReady = true;
+    })().catch((error) => {
+      settlementSchemaPromise = null;
+      throw error;
+    });
+  }
+  await settlementSchemaPromise;
+};
+
 const selectSettlementForDate = async (client, branchId, targetDate) => {
   const queryDate = toDateOnly(targetDate);
   const res = await client.query(
@@ -243,7 +320,17 @@ const ensurePayoutForSettlement = async (client, settlement) => {
 
 const insertSettlementItem = async (
   client,
-  { settlementId, type, paymentId = null, refundId = null, branchId, orderId, amount, meta },
+  {
+    settlementId,
+    type,
+    paymentId = null,
+    refundId = null,
+    branchId,
+    orderId,
+    amount,
+    meta,
+    isAdminOnly = false,
+  },
 ) => {
   await client.query(
     `
@@ -255,11 +342,97 @@ const insertSettlementItem = async (
         branch_id,
         order_id,
         amount,
-        meta
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+        meta,
+        is_admin_only
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
     `,
-    [settlementId, type, paymentId, refundId, branchId, orderId, amount, meta ? JSON.stringify(meta) : null],
+    [
+      settlementId,
+      type,
+      paymentId,
+      refundId,
+      branchId,
+      orderId,
+      amount,
+      meta ? JSON.stringify(meta) : null,
+      Boolean(isAdminOnly),
+    ],
   );
+};
+
+const hasPaymentSettlementItem = async (client, orderId) => {
+  if (!orderId) return false;
+  const res = await client.query(
+    `
+      SELECT 1
+        FROM restaurant_settlement_items
+       WHERE order_id = $1
+         AND item_type = 'payment'
+       LIMIT 1
+    `,
+    [orderId],
+  );
+  return Boolean(res.rows[0]);
+};
+
+const findPaymentSettlementItem = async (client, orderId) => {
+  if (!orderId) return null;
+  const res = await client.query(
+    `
+      SELECT *
+        FROM restaurant_settlement_items
+       WHERE order_id = $1
+         AND item_type = 'payment'
+       ORDER BY created_at DESC
+       LIMIT 1
+    `,
+    [orderId],
+  );
+  return res.rows[0] || null;
+};
+
+const updateSettlementItem = async (client, itemId, { isAdminOnly, amount, meta } = {}) => {
+  if (!itemId) return null;
+  const res = await client.query(
+    `
+      UPDATE restaurant_settlement_items
+         SET is_admin_only = COALESCE($2, is_admin_only),
+             amount = COALESCE($3, amount),
+             meta = COALESCE($4, meta)
+       WHERE id = $1
+       RETURNING *
+    `,
+    [
+      itemId,
+      typeof isAdminOnly === 'boolean' ? isAdminOnly : null,
+      amount !== undefined ? amount : null,
+      meta ? JSON.stringify(meta) : null,
+    ],
+  );
+  return res.rows[0] || null;
+};
+
+const extractOrderFinancials = (order = {}) => {
+  const metadata = parseMetadata(order.metadata);
+  const pricing = metadata.pricing && typeof metadata.pricing === 'object' ? metadata.pricing : {};
+  const amount = toAmount(order.total_amount ?? pricing.total_amount ?? pricing.total ?? 0);
+  const taxAmount = toAmount(order.tax_total ?? pricing.tax_total ?? 0);
+  const shippingFee = toAmount(
+    order.shipping_fee ??
+      pricing.shipping_fee ??
+      pricing.shippingFee ??
+      (pricing.totals ? pricing.totals.shipping_fee ?? pricing.totals.shippingFee : 0) ??
+      0,
+  );
+  const currency = order.currency || pricing.currency || 'VND';
+  const completedAt =
+    order.completed_at ||
+    order.confirmed_at ||
+    order.updated_at ||
+    order.created_at ||
+    new Date();
+  const placedAt = order.created_at || order.createdAt || completedAt;
+  return { metadata, pricing, amount, taxAmount, shippingFee, currency, completedAt, placedAt };
 };
 
 const updateLedgerBalance = async (client, platformBankAccountId, amount, currency) => {
@@ -363,12 +536,15 @@ const finalisePayoutIfDue = async (client, settlement, payout) => {
 const applySettlementDelta = async (
   client,
   settlement,
-  { grossDelta = 0, refundDelta = 0, taxDelta = 0 },
+  { grossDelta = 0, refundDelta = 0, taxDelta = 0, shippingDelta = 0 },
 ) => {
+  await ensureSettlementSchema();
   const nextGross = toAmount(settlement.gross) + grossDelta;
   const nextRefunds = toAmount(settlement.refunds) + refundDelta;
   const nextTax = toAmount(settlement.tax_withheld) + taxDelta;
-  const nextNet = nextGross - nextRefunds - nextTax;
+  const currentShipping = 'shipping_fees' in settlement ? toAmount(settlement.shipping_fees) : 0;
+  const nextShipping = currentShipping + shippingDelta;
+  const nextNet = nextGross - nextRefunds - nextTax - nextShipping;
   const status = resolveSettlementStatus(settlement);
 
   const res = await client.query(
@@ -377,19 +553,21 @@ const applySettlementDelta = async (
          SET gross = $1,
              refunds = $2,
              tax_withheld = $3,
-             net_result = $4,
-             status = $5,
+             shipping_fees = $4,
+             net_result = $5,
+             status = $6,
              updated_at = now()
-       WHERE id = $6
+       WHERE id = $7
        RETURNING *
     `,
-    [nextGross, nextRefunds, nextTax, nextNet, status, settlement.id],
+    [nextGross, nextRefunds, nextTax, nextShipping, nextNet, status, settlement.id],
   );
   return res.rows[0];
 };
 
 async function recordOrderCompletion(orderId) {
   if (!orderId) return;
+  await ensureSettlementSchema();
   let order;
   try {
     order = await fetchOrderById(orderId);
@@ -405,21 +583,10 @@ async function recordOrderCompletion(orderId) {
     return;
   }
 
-  const metadata = parseMetadata(order.metadata);
-  const pricing = metadata.pricing && typeof metadata.pricing === 'object' ? metadata.pricing : {};
-  const amount = toAmount(order.total_amount ?? pricing.total_amount ?? pricing.total ?? 0);
+  const { amount, taxAmount, shippingFee, currency, completedAt } = extractOrderFinancials(order);
   if (!amount) {
     return;
   }
-  const taxAmount = toAmount(order.tax_total ?? pricing.tax_total ?? 0);
-  const shippingSource =
-    order.shipping_fee ??
-    pricing.shipping_fee ??
-    pricing.shippingFee ??
-    (pricing.totals
-      ? pricing.totals.shipping_fee ?? pricing.totals.shippingFee ?? null
-      : null);
-  const shippingFee = toAmount(shippingSource ?? 0);
   const orderCompletedAt =
     order.completed_at ||
     order.confirmed_at ||
@@ -427,8 +594,6 @@ async function recordOrderCompletion(orderId) {
     order.created_at ||
     new Date();
   const orderCode = order.order_code || order.code || order.short_id || null;
-  const currency = order.currency || pricing.currency || 'VND';
-  const completedAt = order.updated_at || new Date();
 
   const client = await pool.connect();
   try {
@@ -440,29 +605,63 @@ async function recordOrderCompletion(orderId) {
       currency,
     });
 
-    settlement = await applySettlementDelta(client, settlement, {
-      grossDelta: amount,
-      taxDelta: taxAmount,
-    });
+    const existingItem = await findPaymentSettlementItem(client, order.id);
+    if (existingItem) {
+      const existingMeta = parseMetadata(existingItem.meta);
+      const existingAmount = toAmount(existingItem.amount);
+      const existingTax = toAmount(existingMeta?.tax);
+      const existingShipping = toAmount(
+        existingMeta?.shipping_fee ?? existingMeta?.delivery_fee ?? 0,
+      );
+      const amountDelta = toAmount(amount - existingAmount);
+      const taxDelta = toAmount(taxAmount - existingTax);
+      const shippingDelta = toAmount(shippingFee - existingShipping);
+      if (amountDelta || taxDelta || shippingDelta) {
+        settlement = await applySettlementDelta(client, settlement, {
+          grossDelta: amountDelta,
+          taxDelta,
+          shippingDelta,
+        });
+      }
+      await updateSettlementItem(client, existingItem.id, {
+        isAdminOnly: false,
+        amount,
+        meta: {
+          currency,
+          tax: taxAmount,
+          shipping_fee: shippingFee,
+          order_completed_at: orderCompletedAt,
+          order_code: orderCode,
+          source: 'order_completed',
+        },
+      });
+    } else {
+      settlement = await applySettlementDelta(client, settlement, {
+        grossDelta: amount,
+        taxDelta: taxAmount,
+        shippingDelta: shippingFee,
+      });
 
-    const payment = await findLatestPaymentForOrder(client, order.id);
-    await insertSettlementItem(client, {
-      settlementId: settlement.id,
-      type: 'payment',
-      paymentId: payment?.id || null,
-      refundId: null,
-      branchId,
-      orderId: order.id,
-      amount,
-      meta: {
-        currency,
-        tax: taxAmount,
-        shipping_fee: shippingFee,
-        order_completed_at: orderCompletedAt,
-        order_code: orderCode,
-        source: 'order_completed',
-      },
-    });
+      const payment = await findLatestPaymentForOrder(client, order.id);
+      await insertSettlementItem(client, {
+        settlementId: settlement.id,
+        type: 'payment',
+        paymentId: payment?.id || null,
+        refundId: null,
+        branchId,
+        orderId: order.id,
+        amount,
+        meta: {
+          currency,
+          tax: taxAmount,
+          shipping_fee: shippingFee,
+          order_completed_at: orderCompletedAt,
+          order_code: orderCode,
+          source: 'order_completed',
+        },
+        isAdminOnly: false,
+      });
+    }
 
     const payout = await ensurePayoutForSettlement(client, settlement);
     await finalisePayoutIfDue(client, settlement, payout);
@@ -475,8 +674,82 @@ async function recordOrderCompletion(orderId) {
   }
 }
 
+async function recordOrderPlacement(orderId) {
+  if (!orderId) return;
+  await ensureSettlementSchema();
+  let order;
+  try {
+    order = await fetchOrderById(orderId);
+  } catch (error) {
+    console.warn('[payment-service] Unable to fetch order for provisional settlement', error.message || error);
+    return;
+  }
+  if (!order) return;
+
+  const { restaurantId, branchId } = resolveRestaurantContext(order);
+  if (!branchId || !restaurantId) {
+    console.warn('[payment-service] Missing branch/restaurant context for provisional order', orderId);
+    return;
+  }
+
+  const { amount, taxAmount, shippingFee, currency, placedAt } = extractOrderFinancials(order);
+  if (!amount) {
+    return;
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    let settlement = await ensureSettlement(client, {
+      restaurantId,
+      branchId,
+      completedAt: placedAt,
+      currency,
+    });
+
+    const existingItem = await findPaymentSettlementItem(client, order.id);
+    if (existingItem) {
+      await client.query('ROLLBACK');
+      return;
+    }
+
+    settlement = await applySettlementDelta(client, settlement, {
+      grossDelta: amount,
+      taxDelta: taxAmount,
+      shippingDelta: shippingFee,
+    });
+
+    await insertSettlementItem(client, {
+      settlementId: settlement.id,
+      type: 'payment',
+      paymentId: null,
+      refundId: null,
+      branchId,
+      orderId: order.id,
+      amount,
+      meta: {
+        currency,
+        tax: taxAmount,
+        shipping_fee: shippingFee,
+        stage: 'order_placed',
+      },
+      isAdminOnly: true,
+    });
+
+    const payout = await ensurePayoutForSettlement(client, settlement);
+    await finalisePayoutIfDue(client, settlement, payout);
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('[payment-service] Failed to record order placement into settlement:', error);
+  } finally {
+    client.release();
+  }
+}
+
 async function recordRefund(refund, payment) {
   if (!refund || !payment) return;
+  await ensureSettlementSchema();
   const branchId = payment.branch_id;
   const restaurantId = payment.restaurant_id;
   if (!branchId || !restaurantId) {
@@ -500,26 +773,47 @@ async function recordRefund(refund, payment) {
       currency,
     });
 
-    settlement = await applySettlementDelta(client, settlement, {
-      refundDelta: amount,
-    });
+    const orderHadPaymentItem = await hasPaymentSettlementItem(client, payment.order_id);
 
-    await insertSettlementItem(client, {
-      settlementId: settlement.id,
-      type: 'refund',
-      paymentId: payment.id,
-      refundId: refund.id,
-      branchId,
-      orderId: payment.order_id,
-      amount: -amount,
-      meta: {
-        currency,
-        source: 'refund',
-      },
-    });
+    if (orderHadPaymentItem) {
+      settlement = await applySettlementDelta(client, settlement, {
+        refundDelta: amount,
+      });
 
-    const payout = await ensurePayoutForSettlement(client, settlement);
-    await finalisePayoutIfDue(client, settlement, payout);
+      await insertSettlementItem(client, {
+        settlementId: settlement.id,
+        type: 'refund',
+        paymentId: payment.id,
+        refundId: refund.id,
+        branchId,
+        orderId: payment.order_id,
+        amount: -amount,
+        meta: {
+          currency,
+          source: 'refund',
+        },
+        isAdminOnly: false,
+      });
+
+      const payout = await ensurePayoutForSettlement(client, settlement);
+      await finalisePayoutIfDue(client, settlement, payout);
+    } else {
+      await insertSettlementItem(client, {
+        settlementId: settlement.id,
+        type: 'adjustment',
+        paymentId: payment.id,
+        refundId: refund.id,
+        branchId,
+        orderId: payment.order_id,
+        amount: -amount,
+        meta: {
+          currency,
+          source: 'cancelled_before_completion',
+        },
+        isAdminOnly: true,
+      });
+    }
+
     await client.query('COMMIT');
   } catch (error) {
     await client.query('ROLLBACK');
@@ -531,6 +825,7 @@ async function recordRefund(refund, payment) {
 
 module.exports = {
   recordOrderCompletion,
+  recordOrderPlacement,
   recordRefund,
   runSettlementJob: async () => {},
 };

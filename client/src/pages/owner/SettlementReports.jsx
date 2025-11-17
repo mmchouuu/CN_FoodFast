@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import toast from "react-hot-toast";
 import ownerSettlementsService from "../../services/ownerSettlements";
+import restaurantManagerService from "../../services/restaurantManager";
+import { useAppContext } from "../../context/AppContext";
 
 const DATE_FILTERS = [
   { value: "this-month", label: "This month" },
@@ -66,6 +68,7 @@ const resolveDateRangeLabel = (settlement) => {
 };
 
 const SettlementReports = () => {
+  const { restaurantProfile } = useAppContext();
   const [filters, setFilters] = useState({
     branchId: "all",
     dateRange: "this-month",
@@ -77,6 +80,7 @@ const SettlementReports = () => {
   const [settlements, setSettlements] = useState([]);
   const [branches, setBranches] = useState([]);
   const [restaurantContext, setRestaurantContext] = useState({ id: null, name: null });
+  const [ownerRestaurants, setOwnerRestaurants] = useState([]);
   const [period, setPeriod] = useState({ start: null, end: null });
   const [isLoading, setIsLoading] = useState(false);
   const [ordersModal, setOrdersModal] = useState({ isOpen: false, isLoading: false, settlement: null, orders: [] });
@@ -88,7 +92,101 @@ const SettlementReports = () => {
     ];
   }, [branches]);
 
+  useEffect(() => {
+    const ownerId = restaurantProfile?.id;
+    if (!ownerId) {
+      setOwnerRestaurants([]);
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await restaurantManagerService.listByOwner(ownerId);
+        if (cancelled) return;
+        const items = Array.isArray(response?.items)
+          ? response.items
+          : Array.isArray(response)
+            ? response
+            : [];
+        setOwnerRestaurants(items);
+        if (!restaurantContext.id && items.length) {
+          const primaryRestaurant = items[0];
+          setRestaurantContext({
+            id: primaryRestaurant.id,
+            name:
+              primaryRestaurant.name ||
+              primaryRestaurant.legalName ||
+              primaryRestaurant.displayName ||
+              restaurantProfile?.restaurantName ||
+              restaurantProfile?.profile?.legal_name ||
+              "Restaurant",
+          });
+        }
+      } catch (error) {
+        console.error("[owner-settlements] failed to load restaurants", error);
+        if (!restaurantContext.id) {
+          toast.error("Unable to resolve restaurant scope.");
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [restaurantProfile, restaurantContext.id, setRestaurantContext]);
+
+  useEffect(() => {
+    const currentRestaurant =
+      ownerRestaurants.find(
+        (restaurant) => String(restaurant.id) === String(restaurantContext.id),
+      ) || null;
+    const branchList = Array.isArray(currentRestaurant?.branches)
+      ? currentRestaurant.branches
+      : [];
+    setBranches(
+      branchList.map((branch) => ({
+        id: branch.id,
+        name: branch.name || branch.branch_name || "Branch",
+        location:
+          branch.location ||
+          branch.address ||
+          branch.fullAddress ||
+          branch.address_line ||
+          "",
+      })),
+    );
+    if (
+      filters.branchId !== "all" &&
+      !branchList.some((branch) => String(branch.id) === String(filters.branchId))
+    ) {
+      setFilters((prev) => ({ ...prev, branchId: "all" }));
+    }
+  }, [ownerRestaurants, restaurantContext.id, filters.branchId]);
+
+  useEffect(() => {
+    const derivedId =
+      restaurantProfile?.profile?.restaurant_id ||
+      restaurantProfile?.profile?.restaurantId ||
+      restaurantProfile?.restaurant_id ||
+      restaurantProfile?.restaurantId ||
+      null;
+    if (derivedId && restaurantContext.id !== derivedId && !ownerRestaurants.length) {
+      setRestaurantContext((prev) => ({
+        id: derivedId,
+        name:
+          restaurantProfile?.restaurantName ||
+          restaurantProfile?.restaurant_name ||
+          restaurantProfile?.profile?.legal_name ||
+          prev.name,
+      }));
+    }
+  }, [restaurantProfile, restaurantContext.id, ownerRestaurants.length]);
+
   const fetchSettlements = async () => {
+    if (!restaurantContext.id) {
+      return;
+    }
     setIsLoading(true);
     try {
       const params = {
@@ -122,7 +220,6 @@ const SettlementReports = () => {
         totalOrders: data.summary?.totalOrders || 0,
       });
       setSettlements(data.settlements || []);
-      setBranches(data.branches || []);
       setPeriod(data.period || { start: null, end: null });
     } catch (error) {
       console.error(error);
@@ -133,6 +230,9 @@ const SettlementReports = () => {
   };
 
   useEffect(() => {
+    if (!restaurantContext.id) {
+      return;
+    }
     fetchSettlements();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters.branchId, filters.dateRange, filters.status, filters.search, customRange.start, customRange.end, restaurantContext.id]);

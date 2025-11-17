@@ -1,11 +1,7 @@
 const customerService = require('../services/customer.service');
 
 function getUserId(req) {
-  return req.user?.userId || req.headers['x-user-id'] || null;
-}
-
-function getUserId(req) {
-  return req.headers['x-user-id'] || (req.body && req.body.user_id) || null;
+  return req.user?.userId || req.headers['x-user-id'] || req.body?.user_id || null;
 }
 
 async function register(req, res, next) {
@@ -125,6 +121,22 @@ async function resendOtp(req, res, next) {
   }
 }
 
+async function getProfile(req, res, next) {
+  try {
+    const userId = getUserId(req) || req.params?.id;
+    if (!userId) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
+    const profile = await customerService.getProfile(userId);
+    if (!profile) {
+      return res.status(404).json({ message: 'Profile not found' });
+    }
+    res.json({ profile });
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
   register,
   verify,
@@ -136,4 +148,5 @@ module.exports = {
   forgotPassword,
   resetPassword,
   resendOtp,
+  getProfile,
 };

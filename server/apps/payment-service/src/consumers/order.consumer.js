@@ -11,6 +11,11 @@ async function startOrderConsumer() {
         case 'PaymentPending':
           await paymentsService.handlePaymentPending(payload);
           break;
+        case 'order.created':
+          if (payload?.order_id) {
+            await settlementsService.recordOrderPlacement(payload.order_id);
+          }
+          break;
         case 'order.status_updated':
           if (payload?.next === 'completed' && payload?.order_id) {
             await settlementsService.recordOrderCompletion(payload.order_id);

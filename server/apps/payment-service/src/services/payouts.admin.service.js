@@ -176,7 +176,11 @@ const resolveShippingFeeForOrder = async (orderId, cache = new Map()) => {
   return normalized;
 };
 
-const buildFallbackShippingTotals = async (rows, cache = new Map()) => {
+const buildFallbackShippingTotals = async (
+  rows,
+  cache = new Map(),
+  { includeAdminOnly = true } = {},
+) => {
   const missing = rows.filter((row) => toNumber(row.shipping_total) <= 0).map((row) => row.id);
   if (!missing.length) {
     return new Map();
@@ -188,8 +192,9 @@ const buildFallbackShippingTotals = async (rows, cache = new Map()) => {
        WHERE settlement_id = ANY($1::uuid[])
          AND item_type = 'payment'
          AND order_id IS NOT NULL
+         AND ($2::boolean = TRUE OR COALESCE(is_admin_only, FALSE) = FALSE)
     `,
-    [missing],
+    [missing, includeAdminOnly],
   );
   const grouped = itemsRes.rows.reduce((acc, row) => {
     if (!row.order_id) return acc;
@@ -252,17 +257,38 @@ async function listRestaurantPayouts(filters = {}) {
     ORDER BY total_gross DESC
   `;
 
-  const [rowsRes, ledgerRes] = await Promise.all([
+  const [rowsRes, ledgerRes, adjustmentsRes] = await Promise.all([
     pool.query(query, params),
     pool.query('SELECT COALESCE(SUM(current_balance), 0) AS total_sales FROM platform_ledger_balances'),
+    pool.query(
+      `
+        SELECT
+          rs.restaurant_id,
+          COALESCE(SUM(rsi.amount), 0) AS adjustment_total
+        FROM restaurant_settlements rs
+        JOIN restaurant_settlement_items rsi ON rsi.settlement_id = rs.id
+        WHERE rsi.item_type = 'adjustment'
+          AND ($1::timestamptz IS NULL OR rs.period_end > $1)
+          AND ($2::timestamptz IS NULL OR rs.period_start < $2)
+        GROUP BY rs.restaurant_id
+      `,
+      params,
+    ),
   ]);
+
+  const adjustmentMap = adjustmentsRes.rows.reduce((map, row) => {
+    map.set(row.restaurant_id, toNumber(row.adjustment_total));
+    return map;
+  }, new Map());
 
   const restaurants = rowsRes.rows.map((row) => {
     const pendingNet = toNumber(row.pending_net);
+    const adjustmentTotal = adjustmentMap.get(row.restaurant_id) || 0;
+    const totalOnlineSales = toNumber(row.total_gross) + adjustmentTotal;
     return {
       restaurantId: row.restaurant_id,
       branchCount: Number(row.branch_count || 0),
-      totalOnlineSales: toNumber(row.total_gross),
+      totalOnlineSales,
       totalNetAmount: toNumber(row.total_net),
       totalPendingPayout: pendingNet,
       lastPayoutDate: row.last_paid_at,
@@ -310,7 +336,8 @@ async function listRestaurantBranchSettlements(restaurantId, filters = {}) {
       SELECT
         rs.*,
         COALESCE(SUM(CASE WHEN rsi.item_type = 'payment' THEN 1 ELSE 0 END), 0) AS order_count,
-        COALESCE(SUM(CASE WHEN rsi.item_type = 'payment' THEN rsi.amount ELSE 0 END), 0) AS payment_total
+        COALESCE(SUM(CASE WHEN rsi.item_type = 'payment' THEN rsi.amount ELSE 0 END), 0) AS payment_total,
+        COALESCE(SUM(CASE WHEN rsi.item_type = 'adjustment' THEN rsi.amount ELSE 0 END), 0) AS adjustment_total
       FROM restaurant_settlements rs
       LEFT JOIN restaurant_settlement_items rsi ON rsi.settlement_id = rs.id
       WHERE rs.restaurant_id = $1
@@ -342,13 +369,14 @@ async function listRestaurantBranchSettlements(restaurantId, filters = {}) {
       : row.payout_status !== 'paid'
       ? toNumber(row.payout_amount)
       : 0;
+    const totalSales = toNumber(row.payment_total) + toNumber(row.adjustment_total || 0);
     return {
       branchId: row.branch_id,
       settlementId: row.id,
       periodStart: row.period_start,
       periodEnd: row.period_end,
       onlineOrders: Number(row.order_count || 0),
-      totalSales: toNumber(row.payment_total),
+      totalSales,
       netAmount: toNumber(row.net_result),
       pendingPayout,
       grossAmount: toNumber(row.gross),
@@ -376,27 +404,33 @@ async function listRestaurantBranchSettlements(restaurantId, filters = {}) {
   };
 }
 
-async function listRestaurantSettlements({
-  restaurantId,
-  branchId = null,
-  status = null,
-  search = null,
-  period = null,
-  range = null,
-  startDate,
+async function listRestaurantSettlements(
+  {
+    restaurantId,
+    branchId = null,
+    status = null,
+    search = null,
+    period = null,
+    range = null,
+    startDate,
   endDate,
-} = {}) {
+} = {},
+  { includeAdminOnly = true } = {},
+) {
   if (!restaurantId) {
     throw new Error('restaurantId is required');
   }
+  const branchFilter =
+    branchId && String(branchId).trim().toLowerCase() !== 'all' ? branchId : null;
   const { start, end } = resolvePeriodRange({ period: period || range, startDate, endDate });
   const params = [
     restaurantId,
-    branchId || null,
+    branchFilter,
     start ? start.toISOString().slice(0, 10) : null,
     end ? end.toISOString().slice(0, 10) : null,
     status && status !== 'all' ? status : null,
     search ? search.trim().toLowerCase() : null,
+    includeAdminOnly,
   ];
 
   const query = `
@@ -406,11 +440,25 @@ async function listRestaurantSettlements({
       p.status       AS payout_status,
       p.paid_at,
       COUNT(DISTINCT CASE WHEN rsi.item_type = 'payment' THEN rsi.order_id END) AS order_count,
+      COALESCE(SUM(CASE WHEN rsi.item_type = 'payment' THEN rsi.amount ELSE 0 END), 0) AS visible_payment_total,
+      COALESCE(
+        SUM(
+          CASE
+            WHEN rsi.item_type = 'payment'
+            THEN COALESCE((rsi.meta->>'tax')::numeric, 0)
+            ELSE 0
+          END
+        ),
+        0
+      ) AS visible_tax_total,
+      COALESCE(SUM(CASE WHEN rsi.item_type = 'refund' THEN rsi.amount ELSE 0 END), 0) AS visible_refund_total,
       COALESCE(SUM(CASE WHEN rsi.item_type = 'payment'
         THEN COALESCE((rsi.meta->>'shipping_fee')::numeric, 0)
         ELSE 0 END), 0) AS shipping_total
     FROM restaurant_settlements rs
-    LEFT JOIN restaurant_settlement_items rsi ON rsi.settlement_id = rs.id
+    LEFT JOIN restaurant_settlement_items rsi
+      ON rsi.settlement_id = rs.id
+     AND ($7::boolean = TRUE OR COALESCE(rsi.is_admin_only, FALSE) = FALSE)
     LEFT JOIN payouts p ON p.settlement_id = rs.id
     WHERE rs.restaurant_id = $1
       AND ($2::uuid IS NULL OR rs.branch_id = $2)
@@ -428,15 +476,29 @@ async function listRestaurantSettlements({
 
   const { rows } = await pool.query(query, params);
   const shippingCache = new Map();
-  const fallbackShippingMap = await buildFallbackShippingTotals(rows, shippingCache);
+  const fallbackShippingMap = await buildFallbackShippingTotals(rows, shippingCache, {
+    includeAdminOnly,
+  });
+
+  const useVisibleMetrics = !includeAdminOnly;
 
   const summary = rows.reduce(
     (acc, row) => {
-      const gross = toNumber(row.gross);
-      const vat = toNumber(row.tax_withheld);
-      const refunds = toNumber(row.refunds);
-      const shipping =
-        toNumber(row.shipping_total) || toNumber(fallbackShippingMap.get(row.id)) || 0;
+      const shippingFallback = toNumber(fallbackShippingMap.get(row.id)) || 0;
+      const shippingAggregate = toNumber(row.shipping_total);
+      const shippingFees = toNumber(row.shipping_fees || 0);
+      const shipping = useVisibleMetrics
+        ? shippingAggregate || shippingFallback
+        : shippingAggregate || shippingFees || shippingFallback;
+      const gross = useVisibleMetrics
+        ? toNumber(row.visible_payment_total)
+        : toNumber(row.gross);
+      const vat = useVisibleMetrics
+        ? toNumber(row.visible_tax_total)
+        : toNumber(row.tax_withheld);
+      const refunds = useVisibleMetrics
+        ? Math.abs(toNumber(row.visible_refund_total))
+        : toNumber(row.refunds);
       acc.totalOnlineSales += gross;
       acc.totalVat += vat;
       acc.totalRefunds += refunds;
@@ -448,12 +510,22 @@ async function listRestaurantSettlements({
   );
 
   const settlements = rows.map((row) => {
-    const shippingTotal =
-      toNumber(row.shipping_total) || toNumber(fallbackShippingMap.get(row.id)) || 0;
-    const grossSales = toNumber(row.gross);
-    const vat = toNumber(row.tax_withheld);
-    const refunds = toNumber(row.refunds);
-    const netBase = toNumber(row.net_result);
+    const shippingFallback = toNumber(fallbackShippingMap.get(row.id)) || 0;
+    const shippingAggregate = toNumber(row.shipping_total);
+    const shippingFees = toNumber(row.shipping_fees || 0);
+    const shippingTotal = useVisibleMetrics
+      ? shippingAggregate || shippingFallback
+      : shippingAggregate || shippingFees || shippingFallback;
+    const grossSales = useVisibleMetrics
+      ? toNumber(row.visible_payment_total)
+      : toNumber(row.gross);
+    const vat = useVisibleMetrics
+      ? toNumber(row.visible_tax_total)
+      : toNumber(row.tax_withheld);
+    const refunds = useVisibleMetrics
+      ? Math.abs(toNumber(row.visible_refund_total))
+      : toNumber(row.refunds);
+    const netBase = grossSales - vat - shippingTotal - refunds;
     const cycleLabel = buildCycleLabel(row.period_start, row.period_end);
     const payoutCode = row.payout_id
       ? row.payout_id
@@ -500,7 +572,11 @@ async function listRestaurantSettlements({
   };
 }
 
-async function listSettlementOrders(settlementId, { restaurantId = null } = {}) {
+async function listSettlementOrders(
+  settlementId,
+  { restaurantId = null } = {},
+  { includeAdminOnly = true } = {},
+) {
   if (!settlementId) {
     throw new Error('settlementId is required');
   }
@@ -543,10 +619,12 @@ async function listSettlementOrders(settlementId, { restaurantId = null } = {}) 
         WHERE f.payment_id = item.payment_id
           AND f.component_type = 'tax_withheld'
       ) tax ON TRUE
-      WHERE item.settlement_id = $1 AND item.item_type = 'payment'
+      WHERE item.settlement_id = $1
+        AND item.item_type = 'payment'
+        AND ($2::boolean = TRUE OR COALESCE(item.is_admin_only, FALSE) = FALSE)
       ORDER BY item.created_at DESC
     `,
-    [settlementId],
+    [settlementId, includeAdminOnly],
   );
 
   const payoutStatusRes = await pool.query(

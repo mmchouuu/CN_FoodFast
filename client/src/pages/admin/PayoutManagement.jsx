@@ -780,15 +780,7 @@ const OrderTable = ({ settlement, orders, onMarkPaid, loading }) => {
                 <StatusBadge status={order.status} />
               </td>
               <td className="px-4 py-3 text-right space-y-2">
-                {order.status !== "paid" && (
-                  <button
-                    type="button"
-                    onClick={() => onMarkPaid(order)}
-                    className="block w-full rounded-full border border-emerald-500 px-4 py-1.5 text-xs font-semibold text-emerald-600 hover:bg-emerald-50"
-                  >
-                    Mark as paid
-                  </button>
-                )}
+              
                 <button
                   type="button"
                   onClick={() => toast.success(`Exported detail for ${order.id}`)}
