@@ -10,6 +10,9 @@ async function startOrderConsumer() {
       switch (event) {
         case 'PaymentPending':
           await paymentsService.handlePaymentPending(payload);
+          if (payload?.order_id) {
+            await settlementsService.recordOrderPlacement(payload.order_id);
+          }
           break;
         case 'order.created':
           if (payload?.order_id) {

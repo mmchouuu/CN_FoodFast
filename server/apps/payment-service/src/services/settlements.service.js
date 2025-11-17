@@ -1,5 +1,6 @@
 const { pool } = require('../models/payment.model');
 const { fetchOrderById } = require('../clients/order.client');
+const orderStatusModel = require('../models/orderStatus.model');
 
 const PERIOD_DAYS = 7;
 const DAY_MS = 86400000;
@@ -24,6 +25,71 @@ const parseMetadata = (metadata) => {
   } catch (err) {
     return {};
   }
+};
+
+const fetchOrderFromDatabase = async (orderId, stage = 'settlement') => {
+  if (!orderId) return null;
+  try {
+    return await orderStatusModel.fetchOrderSnapshot(orderId);
+  } catch (error) {
+    console.warn(
+      `[payment-service] Unable to fetch order from DB for ${stage}:`,
+      error?.message || error,
+    );
+    return null;
+  }
+};
+
+const loadOrderForSettlement = async (orderId, stage = 'settlement') => {
+  if (!orderId) return null;
+  let order = null;
+  try {
+    order = await fetchOrderById(orderId);
+  } catch (error) {
+    console.warn(
+      `[payment-service] Unable to fetch order via API for ${stage}:`,
+      error?.message || error,
+    );
+  }
+
+  if (order && order.restaurant_id && order.branch_id) {
+    return order;
+  }
+
+  const fallback = await fetchOrderFromDatabase(orderId, stage);
+  if (!fallback && !order) {
+    return null;
+  }
+  if (!order) {
+    return fallback;
+  }
+  if (!fallback) {
+    return order;
+  }
+
+  const merged = { ...order };
+  if (!merged.restaurant_id && fallback.restaurant_id) {
+    merged.restaurant_id = fallback.restaurant_id;
+  }
+  if (!merged.branch_id && fallback.branch_id) {
+    merged.branch_id = fallback.branch_id;
+  }
+  if (merged.total_amount === undefined && fallback.total_amount !== undefined) {
+    merged.total_amount = fallback.total_amount;
+  }
+  if (merged.tax_total === undefined && fallback.tax_total !== undefined) {
+    merged.tax_total = fallback.tax_total;
+  }
+  if (merged.shipping_fee === undefined && fallback.shipping_fee !== undefined) {
+    merged.shipping_fee = fallback.shipping_fee;
+  }
+  if (!merged.currency && fallback.currency) {
+    merged.currency = fallback.currency;
+  }
+  if (!merged.metadata && fallback.metadata) {
+    merged.metadata = fallback.metadata;
+  }
+  return merged;
 };
 
 const resolveRestaurantContext = (order = {}) => {
@@ -568,14 +634,11 @@ const applySettlementDelta = async (
 async function recordOrderCompletion(orderId) {
   if (!orderId) return;
   await ensureSettlementSchema();
-  let order;
-  try {
-    order = await fetchOrderById(orderId);
-  } catch (error) {
-    console.warn('[payment-service] Unable to fetch order for settlement', error.message || error);
+  const order = await loadOrderForSettlement(orderId, 'settlement-completion');
+  if (!order) {
+    console.warn('[payment-service] Missing order context for completion settlement', orderId);
     return;
   }
-  if (!order) return;
 
   const { restaurantId, branchId } = resolveRestaurantContext(order);
   if (!branchId || !restaurantId) {
@@ -636,6 +699,8 @@ async function recordOrderCompletion(orderId) {
         },
       });
     } else {
+      // Fallback: if provisional item was not created at pending stage,
+      // create a proper item now so admin/restaurant can reconcile orders.
       settlement = await applySettlementDelta(client, settlement, {
         grossDelta: amount,
         taxDelta: taxAmount,
@@ -657,7 +722,7 @@ async function recordOrderCompletion(orderId) {
           shipping_fee: shippingFee,
           order_completed_at: orderCompletedAt,
           order_code: orderCode,
-          source: 'order_completed',
+          source: 'order_completed_fallback',
         },
         isAdminOnly: false,
       });
@@ -677,14 +742,11 @@ async function recordOrderCompletion(orderId) {
 async function recordOrderPlacement(orderId) {
   if (!orderId) return;
   await ensureSettlementSchema();
-  let order;
-  try {
-    order = await fetchOrderById(orderId);
-  } catch (error) {
-    console.warn('[payment-service] Unable to fetch order for provisional settlement', error.message || error);
+  const order = await loadOrderForSettlement(orderId, 'settlement-placement');
+  if (!order) {
+    console.warn('[payment-service] Missing order context for provisional settlement', orderId);
     return;
   }
-  if (!order) return;
 
   const { restaurantId, branchId } = resolveRestaurantContext(order);
   if (!branchId || !restaurantId) {
