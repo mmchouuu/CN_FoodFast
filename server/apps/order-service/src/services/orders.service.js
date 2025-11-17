@@ -3,7 +3,6 @@
 const { pool } = require('../db');
 const productClient = require('../clients/product.client');
 const paymentClient = require('../clients/payment.client');
-const userClient = require('../clients/user.client');
 const { publishOrderEvent } = require('../utils/rabbitmq');
 
 const ALLOW_CLIENT_PRICING_FALLBACK = process.env.ALLOW_CLIENT_PRICING_FALLBACK === 'true';
@@ -107,12 +106,41 @@ class ForbiddenError extends ServiceError {
   }
 }
 
-class ConflictError extends ServiceError {
-  constructor(message, details) {
-    super(message, 409, details);
-    this.name = 'ConflictError';
+const STAFF_ALLOWED_STATUS_SET = new Set(['confirmed', 'preparing', 'ready']);
+
+const ensureRoleArray = (value) => {
+  if (!value) return [];
+  if (Array.isArray(value)) {
+    return value.filter((entry) => typeof entry === 'string');
   }
-}
+  if (typeof value === 'string' && value.trim().length) {
+    return value
+      .split(',')
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length);
+  }
+  return [];
+};
+
+const resolvePrimaryRole = (user = {}) => {
+  const candidates = [
+    ...ensureRoleArray(user.role),
+    ...ensureRoleArray(user.roles),
+  ];
+  if (typeof user.sessionType === 'string') {
+    candidates.push(user.sessionType);
+  }
+  return (
+    candidates
+      .map((role) => role && role.toLowerCase())
+      .find((role) => role && role.length) || ''
+  );
+};
+
+const isStaffAccount = (user = {}) => resolvePrimaryRole(user) === 'staff';
+
+const isStaffStatusAllowed = (status) =>
+  STAFF_ALLOWED_STATUS_SET.has(typeof status === 'string' ? status.trim().toLowerCase() : '');
 
 const toNumber = (value, fallback = 0) => {
   if (value === null || value === undefined) return fallback;
@@ -194,207 +222,6 @@ const normalisePaymentStatus = (statusRaw) => {
     );
   }
   return status;
-};
-
-const normaliseReasonText = (value, fallback = '') =>
-  typeof value === 'string' && value.trim().length ? value.trim() : fallback;
-
-const pickPrimaryPaymentForOrder = (payments = []) => {
-  if (!Array.isArray(payments) || !payments.length) {
-    return null;
-  }
-
-  const sorted = [...payments].sort((a, b) => {
-    const createdA = a.created_at || a.createdAt || 0;
-    const createdB = b.created_at || b.createdAt || 0;
-    return new Date(createdB).getTime() - new Date(createdA).getTime();
-  });
-
-  const preferred = sorted.find((payment) => {
-    const status = (payment.status || '').toLowerCase();
-    return status === 'succeeded' || status === 'paid' || status === 'paid_out';
-  });
-
-  return preferred || sorted[0];
-};
-
-async function createFullRefundArtifacts({
-  client,
-  order,
-  reason,
-  adminId = null,
-  actorId = null,
-  refundRequestOverrides = {},
-}) {
-  if (!client) {
-    throw new Error('db client is required to create refund artifacts');
-  }
-  if (!order?.id) {
-    throw new Error('order is required to create refund artifacts');
-  }
-
-  const refundAmount = toNumber(order.total_amount, 0);
-  let refundStatus = 'succeeded';
-  let refundRecord = null;
-  let paymentRecord = null;
-
-  if (refundAmount > 0) {
-    const payments = await paymentClient.lookupPayments([order.id]);
-    paymentRecord = pickPrimaryPaymentForOrder(payments);
-  }
-
-  if (paymentRecord && refundAmount > 0) {
-    try {
-      const refund = await paymentClient.createRefund({
-        paymentId: paymentRecord.id || paymentRecord.payment_id,
-        amount: refundAmount,
-        reason,
-        idempotencyKey: `order-cancel-${order.id}`,
-        userId: order.user_id || actorId || null,
-      });
-      refundRecord = refund?.data || refund || null;
-      const refundStatusRaw =
-        (refundRecord?.status || refund?.status || refund?.data?.status || '').toLowerCase();
-      refundStatus = refundStatusRaw || 'succeeded';
-    } catch (error) {
-      console.error('[order-service] Failed to create payment refund:', error.message || error);
-      refundStatus = 'failed';
-    }
-  }
-
-  const effectiveRefundStatus = refundStatus === 'failed' ? 'processing' : refundStatus;
-  const refundStatusForRequest =
-    effectiveRefundStatus === 'succeeded' ? 'succeeded' : effectiveRefundStatus || 'processing';
-
-  const overrides = refundRequestOverrides || {};
-  const overriddenOrderId = overrides.order_id ?? overrides.orderId ?? order.id;
-  const overriddenUserId = overrides.user_id ?? overrides.userId ?? order.user_id;
-  const overriddenRestaurantId =
-    overrides.restaurant_id ?? overrides.restaurantId ?? order.restaurant_id;
-  const overriddenBranchId = overrides.branch_id ?? overrides.branchId ?? order.branch_id;
-  const overriddenStatus = overrides.status ?? refundStatusForRequest;
-  const overriddenAmount =
-    overrides.refund_amount ?? overrides.refundAmount ?? refundAmount;
-  const overriddenReason = overrides.reason ?? reason;
-  const overriddenImages = overrides.images ?? null;
-  const overriddenAdminId =
-    overrides.admin_id ?? overrides.adminId ?? (adminId ?? null);
-  const overriddenAdminComment = overrides.admin_comment ?? overrides.adminComment ?? null;
-
-  const refundRequestRes = await client.query(
-    `
-      INSERT INTO order_refund_requests (
-        order_id,
-        user_id,
-        restaurant_id,
-        branch_id,
-        status,
-        refund_amount,
-        reason,
-        images,
-        admin_id,
-        admin_comment
-      )
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-      RETURNING *
-    `,
-    [
-      overriddenOrderId,
-      overriddenUserId,
-      overriddenRestaurantId,
-      overriddenBranchId,
-      overriddenStatus,
-      overriddenAmount,
-      overriddenReason,
-      overriddenImages,
-      overriddenAdminId,
-      overriddenAdminComment,
-    ],
-  );
-
-  return {
-    refundRequest: refundRequestRes.rows[0],
-    refundRecord,
-    refundStatus: refundStatusForRequest,
-    paymentRecord,
-    actorId,
-  };
-}
-
-async function attemptRefundAfterCancellation({
-  order,
-  reason,
-  adminId = null,
-  actorId = null,
-  refundRequestOverrides = {},
-}) {
-  // Perform refund in a separate transaction so order cancellation is not blocked.
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    const refundOutcome = await createFullRefundArtifacts({
-      client,
-      order,
-      reason,
-      adminId,
-      actorId,
-      refundRequestOverrides,
-    });
-
-    if (refundOutcome.refundStatus === 'succeeded') {
-      await client.query(
-        `
-          UPDATE orders
-          SET payment_status = 'refunded',
-              updated_at = now()
-          WHERE id = $1
-        `,
-        [order.id],
-      );
-    }
-
-    await client.query('COMMIT');
-  } catch (error) {
-    await client.query('ROLLBACK');
-    console.error('[order-service] refund post-cancel failed:', error.message || error);
-  } finally {
-    client.release();
-  }
-}
-
-const ORDER_TIMELINE_STATUSES = [
-  'pending',
-  'confirmed',
-  'preparing',
-  'ready',
-  'delivering',
-  'completed',
-  'cancelled',
-];
-
-const normaliseTimelineMetadata = (metadata) => {
-  if (!metadata || typeof metadata !== 'object') {
-    return {};
-  }
-  return { ...metadata };
-};
-
-const appendTimelineMetadata = (metadata, status, actorId = null, note = null, at = null) => {
-  const normalizedStatus = typeof status === 'string' ? status.toLowerCase() : null;
-  if (!normalizedStatus || !ORDER_TIMELINE_STATUSES.includes(normalizedStatus)) {
-    return normaliseTimelineMetadata(metadata);
-  }
-
-  const next = normaliseTimelineMetadata(metadata);
-  const timeline = Array.isArray(next.timeline) ? [...next.timeline] : [];
-  timeline.push({
-    status: normalizedStatus,
-    at: at || new Date().toISOString(),
-    actor_id: actorId || null,
-    note: note || null,
-  });
-  next.timeline = timeline;
-  return next;
 };
 
 const extractRestaurantScope = (user = {}) => {
@@ -538,88 +365,6 @@ const ensureJson = (value) => {
     }
   }
   return {};
-};
-
-const resolveProfileFullName = (profile) => {
-  if (!profile) return null;
-  if (profile.full_name) return profile.full_name;
-  const first = profile.first_name || profile.firstName || '';
-  const last = profile.last_name || profile.lastName || '';
-  const joined = [first, last].filter(Boolean).join(' ').trim();
-  return joined || null;
-};
-
-const applyCustomerProfileToOrder = (order, profile) => {
-  if (!order || !profile) return order;
-  const fullName = resolveProfileFullName(profile);
-  const phone = profile.phone || profile.phone_number || profile.phoneNumber || null;
-  const email = profile.email || profile.email_address || profile.emailAddress || null;
-
-  // Canonical, normalized snapshot for downstream consumers
-  order.customer_profile = {
-    id: profile.id || profile.user_id || null,
-    user_id: profile.user_id || profile.id || null,
-    first_name: profile.first_name || profile.firstName || null,
-    last_name: profile.last_name || profile.lastName || null,
-    full_name: fullName || null,
-    phone: phone || null,
-    email: email || null,
-  };
-  // Back-compat alias some clients expect
-  if (!order.user_profile) {
-    order.user_profile = order.customer_profile;
-  }
-  if (!order.metadata || typeof order.metadata !== 'object') {
-    order.metadata = {};
-  }
-  if (fullName && !order.metadata.customer_name) {
-    order.metadata.customer_name = fullName;
-  }
-  if (phone && !order.metadata.customer_phone) {
-    order.metadata.customer_phone = phone;
-  }
-  if (!order.delivery || typeof order.delivery !== 'object') {
-    order.delivery = order.delivery ? { ...order.delivery } : {};
-  }
-  if (fullName && !order.delivery.contact_name) {
-    order.delivery.contact_name = fullName;
-  }
-  if (phone && !order.delivery.contact_phone) {
-    order.delivery.contact_phone = phone;
-  }
-  return order;
-};
-
-const enrichOrdersWithCustomerProfiles = async (orders = []) => {
-  const list = Array.isArray(orders) ? orders : [];
-  const userIds = Array.from(new Set(list.map((order) => order.user_id).filter(Boolean)));
-  if (!userIds.length) {
-    return list;
-  }
-  const cache = new Map();
-  await Promise.all(
-    userIds.map(async (userId) => {
-      const profile = await userClient.getCustomerProfile(userId);
-      if (profile) {
-        cache.set(userId, profile);
-      }
-    }),
-  );
-  return list.map((order) => {
-    const profile = cache.get(order.user_id);
-    return profile ? applyCustomerProfileToOrder(order, profile) : order;
-  });
-};
-
-const enrichOrderWithCustomerProfile = async (order) => {
-  if (!order) return order;
-  const [enriched] = await enrichOrdersWithCustomerProfiles([order]);
-  return enriched || order;
-};
-
-const fetchOrderWithProfile = async (orderId, options = {}) => {
-  const order = await fetchOrderById(orderId, options);
-  return enrichOrderWithCustomerProfile(order);
 };
 
 function computePricingTotals(items, overrides = {}) {
@@ -1019,18 +764,13 @@ const enrichMetadata = ({ payload, pricing, payment, user }) => {
   pricingMeta.tip_amount = pricing.totals.tip_amount;
   pricingMeta.total_amount = pricing.totals.total_amount;
 
-  const timeline = Array.isArray(base.timeline)
-    ? base.timeline.filter(
-        (entry) => entry && ORDER_TIMELINE_STATUSES.includes(entry.status || entry.code),
-      )
-    : [];
-  const hasPending = timeline.some((entry) => entry.status === 'pending');
-  if (!hasPending) {
+  const timeline = Array.isArray(base.timeline) ? base.timeline.slice() : [];
+  if (!timeline.length) {
     timeline.push({
-      status: 'pending',
+      code: 'order.created',
+      label: 'Order created',
       at: placedAt,
-      actor_id: user ? resolveUserId(user) : null,
-      note: 'order_created',
+      actor: user ? resolveUserId(user) : null,
     });
   }
 
@@ -1294,15 +1034,7 @@ async function insertOrderGraph({
   return order;
 }
 
-async function fetchOrdersByIds(
-  orderIds,
-  {
-    client,
-    includeEvents = false,
-    includeRevisions = false,
-    includePayments = true,
-  } = {},
-) {
+async function fetchOrdersByIds(orderIds, { client, includeEvents = false, includeRevisions = false } = {}) {
   if (!orderIds.length) return [];
 
   const orderRes = await client.query(
@@ -1544,16 +1276,15 @@ async function fetchOrdersByIds(
   }
 
   const hydratedOrders = [];
-  let paymentsByOrder = new Map();
-  if (includePayments) {
-    let paymentSummaries = [];
-    try {
-      paymentSummaries = await paymentClient.lookupPayments(orderIds);
-    } catch (error) {
-      paymentSummaries = [];
-    }
-    paymentsByOrder = new Map(paymentSummaries.map((summary) => [summary.order_id, summary]));
+  let paymentSummaries = [];
+  try {
+    paymentSummaries = await paymentClient.lookupPayments(orderIds);
+  } catch (error) {
+    paymentSummaries = [];
   }
+  const paymentsByOrder = new Map(
+    paymentSummaries.map((summary) => [summary.order_id, summary]),
+  );
   for (const orderId of orderIds) {
     const orderRow = ordersById.get(orderId);
     if (!orderRow) continue;
@@ -1586,7 +1317,7 @@ async function fetchOrdersByIds(
       order.revisions = revisionsByOrder.get(orderId) || [];
     }
 
-    if (includePayments && paymentsByOrder.has(orderId)) {
+    if (paymentsByOrder.has(orderId)) {
       order.payment_details = paymentsByOrder.get(orderId);
     } else {
       order.payment_details = null;
@@ -1598,19 +1329,8 @@ async function fetchOrdersByIds(
   return hydratedOrders;
 }
 
-async function fetchOrderById(
-  orderId,
-  {
-    client = pool,
-    includeEvents = true,
-    includeRevisions = true,
-    includePayments = true,
-  } = {},
-) {
-  const orders = await fetchOrdersByIds(
-    [orderId],
-    { client, includeEvents, includeRevisions, includePayments },
-  );
+async function fetchOrderById(orderId, { client = pool, includeEvents = true, includeRevisions = true } = {}) {
+  const orders = await fetchOrdersByIds([orderId], { client, includeEvents, includeRevisions });
   return orders.length ? orders[0] : null;
 }
 
@@ -1669,6 +1389,62 @@ async function enqueueOutbox(client, { aggregateType, aggregateId, eventType, pa
     `,
     [aggregateType, aggregateId, eventType, payload],
   );
+}
+
+async function syncInventoryAfterOrder(order) {
+  if (!order || !order.restaurant_id) {
+    return;
+  }
+  const items = Array.isArray(order.items) ? order.items : [];
+  if (!items.length) return;
+
+  const adjustments = items
+    .map((item) => {
+      if (!item) return null;
+      const quantity = Number(item.quantity || item.qty || 0);
+      if (!Number.isFinite(quantity) || quantity <= 0) {
+        return null;
+      }
+      const branchProductId = normaliseUuid(
+        item.branch_product_id || item.branchProductId || item.branch_product,
+      );
+      const branchIdCandidate =
+        normaliseUuid(item.branch_id || item.branchId) ||
+        normaliseUuid(order.branch_id) ||
+        normaliseUuid(item.product_snapshot?.branch_id);
+      const productId = normaliseUuid(item.product_id || item.productId);
+      if (!branchProductId && !(branchIdCandidate && productId)) {
+        return null;
+      }
+      return {
+        branch_product_id: branchProductId,
+        branch_id: branchIdCandidate,
+        product_id: productId,
+        quantity: Math.max(Math.round(quantity), 0),
+      };
+    })
+    .filter(Boolean);
+
+  if (!adjustments.length) {
+    return;
+  }
+
+  const payload = {
+    restaurant_id: normaliseUuid(order.restaurant_id),
+    branch_id: normaliseUuid(order.branch_id),
+    order_id: order.id,
+    items: adjustments,
+  };
+
+  try {
+    await productClient.adjustInventoryAfterPurchase(payload);
+  } catch (error) {
+    console.error(
+      '[order-service] Failed to update product inventory for order %s: %s',
+      order.id,
+      error?.message || error,
+    );
+  }
 }
 
 async function createCustomerOrder({ user, payload = {}, context = {} }) {
@@ -1787,6 +1563,7 @@ async function createCustomerOrder({ user, payload = {}, context = {} }) {
     await client.query('COMMIT');
 
     const finalOrder = await fetchOrderById(order.id);
+    await syncInventoryAfterOrder(finalOrder);
 
     dispatchOrderEvent(
       'order.created',
@@ -1803,23 +1580,21 @@ async function createCustomerOrder({ user, payload = {}, context = {} }) {
       'order.created',
     );
 
-    if (paymentFlow === 'online') {
-      dispatchOrderEvent(
-        'PaymentPending',
-        {
-          order_id: order.id,
-          user_id: order.user_id,
-          restaurant_id: order.restaurant_id,
-          amount: pricing.totals.total_amount,
-          currency: pricing.totals.currency,
-          flow: paymentFlow,
-          method: paymentMethod,
-          payment_method_id: paymentMethodId,
-          branch_id: order.branch_id,
-        },
-        'PaymentPending',
-      );
-    }
+    dispatchOrderEvent(
+      'PaymentPending',
+      {
+        order_id: order.id,
+        user_id: order.user_id,
+        restaurant_id: order.restaurant_id,
+        amount: pricing.totals.total_amount,
+        currency: pricing.totals.currency,
+        flow: paymentFlow,
+        method: paymentMethod,
+        payment_method_id: paymentMethodId,
+        branch_id: order.branch_id,
+      },
+      'PaymentPending',
+    );
 
     return finalOrder;
   } catch (error) {
@@ -1903,7 +1678,7 @@ async function listAdminOrders({ query = {} }) {
 }
 
 async function getAdminOrder({ orderId }) {
-  return fetchOrderWithProfile(orderId);
+  return fetchOrderById(orderId);
 }
 
 async function patchAdminOrder({ user, orderId, payload = {} }) {
@@ -2007,7 +1782,7 @@ async function patchAdminOrder({ user, orderId, payload = {} }) {
 
     await client.query('COMMIT');
 
-    return fetchOrderWithProfile(orderId);
+    return fetchOrderById(orderId);
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;
@@ -2058,7 +1833,7 @@ async function deleteAdminOrder({ user, orderId, payload = {} }) {
 
     await client.query('COMMIT');
 
-    return fetchOrderWithProfile(orderId);
+    return fetchOrderById(orderId);
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;
@@ -2212,6 +1987,7 @@ module.exports = {
   ValidationError,
   ForbiddenError,
   NotFoundError,
+  syncInventoryAfterOrder,
 };
 
 async function listCustomerOrders({ user, query = {} }) {
@@ -2261,11 +2037,7 @@ async function listCustomerOrders({ user, query = {} }) {
     );
 
     const orderIds = ordersRes.rows.map((row) => row.id);
-    const hydrated = await fetchOrdersByIds(orderIds, {
-      client,
-      includeEvents: true,
-      includeRevisions: false,
-    });
+    const hydrated = await fetchOrdersByIds(orderIds, { client });
 
     return {
       data: hydrated,
@@ -2296,12 +2068,11 @@ async function getCustomerOrder({ user, orderId }) {
       `,
       [orderId, userId],
     );
-    const existing = orderRes.rows[0];
-    if (!existing) {
+    const order = orderRes.rows[0];
+    if (!order) {
       return null;
     }
-    const order = await fetchOrderById(orderId, { client });
-    return enrichOrderWithCustomerProfile(order);
+    return fetchOrderById(orderId, { client });
   } finally {
     client.release();
   }
@@ -2331,31 +2102,17 @@ async function cancelCustomerOrder({ user, orderId, payload = {} }) {
       throw new NotFoundError('order not found');
     }
 
-    if (!['pending', 'confirmed'].includes(order.status)) {
+    if (!['pending', 'confirmed'].includes(order.status) || order.payment_status === 'paid') {
       throw new ValidationError('order cannot be cancelled at this stage');
     }
-
-    const reason = normaliseReasonText(payload.reason, 'customer_request');
-
-    const updatedMetadata = appendTimelineMetadata(
-      order.metadata,
-      'cancelled',
-      userId,
-      reason,
-    );
 
     await client.query(
       `
         UPDATE orders
-        SET status = 'cancelled',
-            metadata = $2,
-            updated_at = now()
+        SET status = 'cancelled', updated_at = now()
         WHERE id = $1
       `,
-      [
-        orderId,
-        updatedMetadata,
-      ],
+      [orderId],
     );
 
     await logOrderEvent(client, {
@@ -2363,7 +2120,7 @@ async function cancelCustomerOrder({ user, orderId, payload = {} }) {
       eventType: 'OrderCancelled',
       actorId: userId,
       payload: {
-        reason,
+        reason: payload.reason || 'customer_request',
       },
     });
 
@@ -2375,7 +2132,6 @@ async function cancelCustomerOrder({ user, orderId, payload = {} }) {
         order_id: orderId,
         status: 'cancelled',
         actor: userId,
-        reason,
       },
     });
 
@@ -2393,32 +2149,12 @@ async function cancelCustomerOrder({ user, orderId, payload = {} }) {
       'customer-cancel',
     );
 
-    // Trigger refund after order status is updated to avoid blocking the cancellation.
-    attemptRefundAfterCancellation({
-      order,
-      reason,
-      actorId: userId,
-    }).catch((error) =>
-      console.error('[order-service] async refund trigger failed:', error?.message || error),
-    );
-
     return updated;
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;
   } finally {
     client.release();
-  }
-
-  if (nextStatus === 'cancelled') {
-    attemptRefundAfterCancellation({
-      order,
-      reason: note,
-      adminId: order.branch_id,
-      actorId,
-    }).catch((error) =>
-      console.error('[order-service] async refund trigger failed:', error?.message || error),
-    );
   }
 }
 
@@ -2452,29 +2188,20 @@ async function confirmCustomerOrderDelivery({ user, orderId, payload = {} }) {
 
     if (order.status === 'completed') {
       await client.query('ROLLBACK');
-      return fetchOrderWithProfile(orderId, { includePayments: false });
+      return fetchOrderById(orderId);
     }
 
     if (!['delivering', 'ready'].includes(order.status)) {
       throw new ValidationError('order is not ready to be confirmed by customer');
     }
 
-    const metadataWithTimeline = appendTimelineMetadata(
-      order.metadata,
-      'completed',
-      userId,
-      payload.note || 'customer_confirmation',
-    );
-
     await client.query(
       `
         UPDATE orders
-        SET status = 'completed',
-            metadata = $2,
-            updated_at = now()
+        SET status = 'completed', updated_at = now()
         WHERE id = $1
       `,
-      [orderId, metadataWithTimeline],
+      [orderId],
     );
 
     await client.query(
@@ -2513,11 +2240,7 @@ async function confirmCustomerOrderDelivery({ user, orderId, payload = {} }) {
 
     await client.query('COMMIT');
 
-    const updated = await fetchOrderById(orderId, {
-      includeEvents: false,
-      includeRevisions: false,
-      includePayments: false,
-    });
+    const updated = await fetchOrderById(orderId);
 
     dispatchOrderEvent(
       'order.status_updated',
@@ -2549,12 +2272,6 @@ async function confirmCustomerOrderDelivery({ user, orderId, payload = {} }) {
     return updated;
   } catch (error) {
     await client.query('ROLLBACK');
-    if (error instanceof ConflictError) {
-      throw error;
-    }
-    if (error?.code === '55P03') {
-      throw new ConflictError('order is being updated, please retry shortly');
-    }
     throw error;
   } finally {
     client.release();
@@ -2563,52 +2280,81 @@ async function confirmCustomerOrderDelivery({ user, orderId, payload = {} }) {
 
 async function listOwnerOrders({ user, query = {} }) {
   const restaurantScope = await resolveOwnerRestaurantScope(user);
-  if (!restaurantScope.length) {
-    throw new ForbiddenError('owner does not manage any restaurants');
+  const branchScope = await resolveOwnerBranchScope(user);
+  const staffAccount = isStaffAccount(user);
+  if (!restaurantScope.length && !branchScope.length) {
+    throw new ForbiddenError('owner does not manage any restaurants or branches');
   }
 
   const limit = Math.min(Math.max(Number(query.limit) || 20, 1), 100);
   const offset = Math.max(Number(query.offset) || 0, 0);
 
+  const params = [];
+  const clauses = [];
+
+  const requestedRestaurantId =
+    query.restaurant_id && query.restaurant_id !== 'all'
+      ? normaliseUuid(query.restaurant_id)
+      : null;
+
+  if (requestedRestaurantId) {
+    if (restaurantScope.length && !restaurantScope.includes(requestedRestaurantId)) {
+      throw new ForbiddenError('owner does not manage this restaurant');
+    }
+    params.push(requestedRestaurantId);
+    clauses.push(`restaurant_id = $${params.length}`);
+  } else if (restaurantScope.length) {
+    params.push(restaurantScope);
+    clauses.push(`restaurant_id = ANY($${params.length}::uuid[])`);
+  }
+
+  const requestedBranchId =
+    query.branch_id && query.branch_id !== 'all' ? normaliseUuid(query.branch_id) : null;
+  let branchFilters = null;
+  if (requestedBranchId) {
+    if (branchScope.length && !branchScope.includes(requestedBranchId)) {
+      throw new ForbiddenError('owner does not manage this branch');
+    }
+    branchFilters = [requestedBranchId];
+  } else if (!restaurantScope.length && branchScope.length) {
+    branchFilters = branchScope;
+  }
+
+  if (staffAccount) {
+    if (!branchScope.length) {
+      throw new ForbiddenError('staff account is missing branch assignment');
+    }
+    branchFilters = requestedBranchId ? branchFilters : branchScope;
+  }
+
+  if (branchFilters?.length) {
+    params.push(branchFilters);
+    clauses.push(`branch_id = ANY($${params.length}::uuid[])`);
+  }
+
+  if (!restaurantScope.length && !branchFilters?.length) {
+    throw new ForbiddenError('owner does not manage any restaurants or branches');
+  }
+
+  if (query.status && query.status !== 'all') {
+    params.push(normaliseOrderStatus(query.status));
+    clauses.push(`status = $${params.length}`);
+  }
+
+  if (query.start_date) {
+    params.push(new Date(query.start_date));
+    clauses.push(`created_at >= $${params.length}`);
+  }
+
+  if (query.end_date) {
+    params.push(new Date(query.end_date));
+    clauses.push(`created_at <= $${params.length}`);
+  }
+
+  const whereClause = clauses.length ? `WHERE ${clauses.join(' AND ')}` : 'WHERE true';
+
   const client = await pool.connect();
   try {
-    const params = [restaurantScope];
-    let whereClause = 'WHERE restaurant_id = ANY($1::uuid[])';
-
-    if (query.status && query.status !== 'all') {
-      const status = normaliseOrderStatus(query.status);
-      params.push(status);
-      whereClause += ` AND status = $${params.length}`;
-    }
-
-    if (query.restaurant_id) {
-      const restaurantId = normaliseUuid(query.restaurant_id);
-      if (restaurantId && restaurantScope.includes(restaurantId)) {
-        params.push(restaurantId);
-        whereClause += ` AND restaurant_id = $${params.length}`;
-      }
-    }
-
-    const branchId = normaliseUuid(query.branch_id);
-    if (branchId && branchId !== 'all') {
-      const branchScope = await resolveOwnerBranchScope(user);
-      if (branchScope.length && !branchScope.includes(branchId)) {
-        throw new ForbiddenError('owner does not manage this branch');
-      }
-      params.push(branchId);
-      whereClause += ` AND branch_id = $${params.length}`;
-    }
-
-    if (query.start_date) {
-      params.push(new Date(query.start_date));
-      whereClause += ` AND created_at >= $${params.length}`;
-    }
-
-    if (query.end_date) {
-      params.push(new Date(query.end_date));
-      whereClause += ` AND created_at <= $${params.length}`;
-    }
-
     const ordersRes = await client.query(
       `
         SELECT *
@@ -2633,10 +2379,9 @@ async function listOwnerOrders({ user, query = {} }) {
       ordersRes.rows.map((row) => row.id),
       { client },
     );
-    const enrichedOrders = await enrichOrdersWithCustomerProfiles(hydrated);
 
     return {
-      data: enrichedOrders,
+      data: hydrated,
       pagination: {
         limit,
         offset,
@@ -2650,27 +2395,43 @@ async function listOwnerOrders({ user, query = {} }) {
 
 async function getOwnerOrder({ user, orderId }) {
   const restaurantScope = await resolveOwnerRestaurantScope(user);
-  if (!restaurantScope.length) {
-    throw new ForbiddenError('owner does not manage any restaurants');
+  const branchScope = await resolveOwnerBranchScope(user);
+  const staffAccount = isStaffAccount(user);
+  if (!restaurantScope.length && !branchScope.length) {
+    throw new ForbiddenError('owner does not manage any restaurants or branches');
   }
+
+  const enforceBranch = (!restaurantScope.length && branchScope.length) || staffAccount;
 
   const client = await pool.connect();
   try {
+    const params = [orderId];
+    const clauses = ['id = $1'];
+
+    if (restaurantScope.length) {
+      params.push(restaurantScope);
+      clauses.push(`restaurant_id = ANY($${params.length}::uuid[])`);
+    }
+
+    if (enforceBranch) {
+      params.push(branchScope);
+      clauses.push(`branch_id = ANY($${params.length}::uuid[])`);
+    }
+
     const orderRes = await client.query(
       `
         SELECT *
         FROM orders
-        WHERE id = $1 AND restaurant_id = ANY($2::uuid[])
+        WHERE ${clauses.join(' AND ')}
       `,
-      [orderId, restaurantScope],
+      params,
     );
 
     if (!orderRes.rows.length) {
       return null;
     }
 
-    const order = await fetchOrderById(orderId, { client });
-    return enrichOrderWithCustomerProfile(order);
+    return fetchOrderById(orderId, { client });
   } finally {
     client.release();
   }
@@ -2678,8 +2439,17 @@ async function getOwnerOrder({ user, orderId }) {
 
 async function updateOwnerOrderStatus({ user, orderId, payload = {} }) {
   const restaurantScope = await resolveOwnerRestaurantScope(user);
-  if (!restaurantScope.length) {
-    throw new ForbiddenError('owner does not manage any restaurants');
+  const branchScope = await resolveOwnerBranchScope(user);
+  const staffAccount = isStaffAccount(user);
+  if (!restaurantScope.length && !branchScope.length) {
+    throw new ForbiddenError('owner does not manage any restaurants or branches');
+  }
+
+  const branchScopeSet = new Set(branchScope.map((value) => String(value)));
+  const enforceBranch = (!restaurantScope.length && branchScope.length) || staffAccount;
+
+  if (staffAccount && !branchScopeSet.size) {
+    throw new ForbiddenError('staff account is missing branch assignment');
   }
 
   const nextStatus = normaliseOrderStatus(payload.status);
@@ -2691,14 +2461,27 @@ async function updateOwnerOrderStatus({ user, orderId, payload = {} }) {
   try {
     await client.query('BEGIN');
 
+    const params = [orderId];
+    const clauses = ['id = $1'];
+
+    if (restaurantScope.length) {
+      params.push(restaurantScope);
+      clauses.push(`restaurant_id = ANY($${params.length}::uuid[])`);
+    }
+
+    if (enforceBranch) {
+      params.push(branchScope);
+      clauses.push(`branch_id = ANY($${params.length}::uuid[])`);
+    }
+
     const orderRes = await client.query(
       `
         SELECT *
         FROM orders
-        WHERE id = $1 AND restaurant_id = ANY($2::uuid[])
+        WHERE ${clauses.join(' AND ')}
         FOR UPDATE
       `,
-      [orderId, restaurantScope],
+      params,
     );
 
     const order = orderRes.rows[0];
@@ -2706,104 +2489,50 @@ async function updateOwnerOrderStatus({ user, orderId, payload = {} }) {
       throw new NotFoundError('order not found');
     }
 
-    const actorId = resolveUserId(user);
-    const note = normaliseReasonText(payload.note || payload.reason, null);
-
-    if (nextStatus === 'cancelled') {
-      if (!['pending', 'confirmed'].includes(order.status)) {
-        throw new ValidationError('only pending or confirmed orders can be cancelled');
+    if (staffAccount) {
+      const branchId = order.branch_id ? String(order.branch_id) : null;
+      if (!branchId || !branchScopeSet.has(branchId)) {
+        throw new ForbiddenError('staff can only manage orders in their assigned branches');
       }
-      if (!note) {
-        throw new ValidationError('reason is required to cancel this order');
+      const currentStatus = typeof order.status === 'string' ? order.status.toLowerCase() : '';
+      if (!isStaffStatusAllowed(currentStatus) || !isStaffStatusAllowed(nextStatus)) {
+        throw new ForbiddenError(
+          'Staff can only update orders while they are Confirmed, Preparing, or Ready.',
+        );
       }
-
-      const metadataWithTimeline = appendTimelineMetadata(
-        order.metadata,
-        nextStatus,
-        actorId,
-        note,
-      );
-
-      await client.query(
-        `
-          UPDATE orders
-          SET status = $1,
-              metadata = $3,
-              updated_at = now()
-          WHERE id = $2
-        `,
-        [
-          nextStatus,
-          orderId,
-          metadataWithTimeline,
-        ],
-      );
-
-      await logOrderEvent(client, {
-        orderId,
-        eventType: 'OrderCancelled',
-        actorId,
-        payload: {
-          previous: order.status,
-          next: nextStatus,
-          note,
-        },
-      });
-
-      await enqueueOutbox(client, {
-        aggregateType: 'Order',
-        aggregateId: orderId,
-        eventType: 'order.status_updated',
-        payload: {
-          order_id: orderId,
-          previous: order.status,
-          next: nextStatus,
-          actor: actorId,
-          note,
-        },
-      });
-    } else {
-      const metadataWithTimeline = appendTimelineMetadata(
-        order.metadata,
-        nextStatus,
-        actorId,
-        note,
-      );
-
-      await client.query(
-        `
-          UPDATE orders
-          SET status = $1,
-              metadata = $3,
-              updated_at = now()
-          WHERE id = $2
-        `,
-        [nextStatus, orderId, metadataWithTimeline],
-      );
-
-      await logOrderEvent(client, {
-        orderId,
-        eventType: 'OrderStatusUpdated',
-        actorId: resolveUserId(user),
-        payload: {
-          previous: order.status,
-          next: nextStatus,
-          note,
-        },
-      });
-
-      await enqueueOutbox(client, {
-        aggregateType: 'Order',
-        aggregateId: orderId,
-        eventType: 'order.status_updated',
-        payload: {
-          order_id: orderId,
-          previous: order.status,
-          next: nextStatus,
-          actor: resolveUserId(user),
-        },
-      });
     }
+
+    await client.query(
+      `
+        UPDATE orders
+        SET status = $1, updated_at = now()
+        WHERE id = $2
+      `,
+      [nextStatus, orderId],
+    );
+
+    await logOrderEvent(client, {
+      orderId,
+      eventType: 'OrderStatusUpdated',
+      actorId: resolveUserId(user),
+      payload: {
+        previous: order.status,
+        next: nextStatus,
+        note: payload.note || null,
+      },
+    });
+
+    await enqueueOutbox(client, {
+      aggregateType: 'Order',
+      aggregateId: orderId,
+      eventType: 'order.status_updated',
+      payload: {
+        order_id: orderId,
+        previous: order.status,
+        next: nextStatus,
+        actor: resolveUserId(user),
+      },
+    });
 
     await client.query('COMMIT');
 
@@ -2820,20 +2549,6 @@ async function updateOwnerOrderStatus({ user, orderId, payload = {} }) {
       'owner-status-update',
     );
 
-    if (nextStatus === 'cancelled') {
-      attemptRefundAfterCancellation({
-        order,
-        reason: note,
-        actorId,
-        refundRequestOverrides: {
-          user_id: null,
-          admin_id: null,
-        },
-      }).catch((error) =>
-        console.error('[order-service] async refund trigger failed:', error?.message || error),
-      );
-    }
-
     return updated;
   } catch (error) {
     await client.query('ROLLBACK');
@@ -2845,22 +2560,39 @@ async function updateOwnerOrderStatus({ user, orderId, payload = {} }) {
 
 async function createOwnerOrderRevision({ user, orderId, payload = {} }) {
   const restaurantScope = await resolveOwnerRestaurantScope(user);
-  if (!restaurantScope.length) {
-    throw new ForbiddenError('owner does not manage any restaurants');
+  const branchScope = await resolveOwnerBranchScope(user);
+  const staffAccount = isStaffAccount(user);
+  if (!restaurantScope.length && !branchScope.length) {
+    throw new ForbiddenError('owner does not manage any restaurants or branches');
   }
+
+  const enforceBranch = (!restaurantScope.length && branchScope.length) || staffAccount;
 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
+    const params = [orderId];
+    const clauses = ['id = $1'];
+
+    if (restaurantScope.length) {
+      params.push(restaurantScope);
+      clauses.push(`restaurant_id = ANY($${params.length}::uuid[])`);
+    }
+
+    if (enforceBranch) {
+      params.push(branchScope);
+      clauses.push(`branch_id = ANY($${params.length}::uuid[])`);
+    }
+
     const orderRes = await client.query(
       `
         SELECT *
         FROM orders
-        WHERE id = $1 AND restaurant_id = ANY($2::uuid[])
+        WHERE ${clauses.join(' AND ')}
         FOR UPDATE
       `,
-      [orderId, restaurantScope],
+      params,
     );
 
     if (!orderRes.rows.length) {

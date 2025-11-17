@@ -29,7 +29,7 @@ const ORDER_STATUS_STEPS = [
 ];
 
 const CANCELLABLE_STATUSES = new Set(["pending", "confirmed"]);
-const CONFIRMABLE_STATUSES = new Set(["ready", "delivering"]);
+const CONFIRMABLE_STATUSES = new Set(["delivering"]);
 
 const SUGGESTED_CANCEL_REASONS = [
   "Changed my mind, want to cancel this order",
@@ -291,8 +291,10 @@ const OrderDetails = () => {
     [order],
   );
   const normalisedStatus = normaliseStatus(order?.status);
+
   const canCancel = Boolean(order) && CANCELLABLE_STATUSES.has(normalisedStatus);
   const canConfirm = Boolean(order) && CONFIRMABLE_STATUSES.has(normalisedStatus);
+
 
   useEffect(() => {
     if (!canCancel && showCancelDialog) {

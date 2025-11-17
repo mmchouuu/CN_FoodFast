@@ -11,17 +11,37 @@ const catalogClient = createAxiosInstance({
   timeout: config.requestTimeout,
 });
 
-function toRequestHeaders(req, opts = {}) {
+const productClient = createAxiosInstance({
+  baseURL: `${config.productServiceUrl}/owner/restaurants`,
+  timeout: config.requestTimeout,
+});
+
+const toRequestHeaders = (req, opts = {}) => {
   const headers = { ...(opts.headers || {}) };
   if (req?.id && !headers['x-request-id']) {
     headers['x-request-id'] = req.id;
   }
+  if (req?.headers?.authorization && !headers.authorization) {
+    headers.authorization = req.headers.authorization;
+  }
   return headers;
-}
+};
 
-function withHeaders(req, opts = {}) {
-  return toRequestHeaders(req, opts);
-}
+const withHeaders = (req, opts = {}) => toRequestHeaders(req, opts);
+
+const buildOwnerHeaders = (req, opts = {}) => {
+  const headers = toRequestHeaders(req, opts);
+  if (req?.ownerContext?.ownerId && !headers['x-owner-id']) {
+    headers['x-owner-id'] = req.ownerContext.ownerId;
+  }
+  if (req?.ownerContext?.restaurantIds?.length && !headers['x-restaurant-ids']) {
+    headers['x-restaurant-ids'] = req.ownerContext.restaurantIds.join(',');
+  }
+  if (req?.ownerContext?.branchIds?.length && !headers['x-branch-ids']) {
+    headers['x-branch-ids'] = req.ownerContext.branchIds.join(',');
+  }
+  return headers;
+};
 
 async function signupOwner(payload, opts = {}) {
   const res = await ownerClient.post('/signup', payload, { headers: opts.headers });
@@ -35,6 +55,16 @@ async function verifyOwner(payload, opts = {}) {
 
 async function ownerLogin(payload, opts = {}) {
   const res = await ownerClient.post('/login', payload, { headers: opts.headers });
+  return res.data;
+}
+
+async function loginRestaurantAccount(payload, opts = {}) {
+  const res = await ownerClient.post('/accounts/login', payload, { headers: opts.headers });
+  return res.data;
+}
+
+async function listRestaurantMembers(restaurantId, opts = {}) {
+  const res = await ownerClient.get(`/${restaurantId}/accounts/members`, { headers: opts.headers });
   return res.data;
 }
 
@@ -233,14 +263,14 @@ async function createPromotion(restaurantId, payload, req) {
 async function listRestaurantProducts(restaurantId, params = {}, req) {
   const res = await productClient.get(`/${restaurantId}/products`, {
     params,
-    headers: buildHeaders(req),
+    headers: buildOwnerHeaders(req),
   });
   return res.data;
 }
 
 async function createRestaurantProduct(restaurantId, payload, req) {
   const res = await productClient.post(`/${restaurantId}/products`, payload, {
-    headers: buildHeaders(req),
+    headers: buildOwnerHeaders(req),
   });
   return res.data;
 }
@@ -249,43 +279,44 @@ async function updateRestaurantProduct(restaurantId, productId, payload, req) {
   const res = await productClient.patch(
     `/${restaurantId}/products/${productId}`,
     payload,
-    { headers: buildHeaders(req) },
+    { headers: buildOwnerHeaders(req) },
   );
   return res.data;
 }
 
 async function deleteRestaurantProduct(restaurantId, productId, req) {
   const res = await productClient.delete(`/${restaurantId}/products/${productId}`, {
-    headers: buildHeaders(req),
+    headers: buildOwnerHeaders(req),
   });
   return res.data;
 }
 
 async function listRestaurantInventory(restaurantId, req) {
   const res = await productClient.get(`/${restaurantId}/inventory`, {
-    headers: buildHeaders(req),
+    headers: buildOwnerHeaders(req),
   });
   return res.data;
 }
 
 async function listProductInventory(restaurantId, productId, req) {
   const res = await productClient.get(`/${restaurantId}/products/${productId}/inventory`, {
-    headers: buildHeaders(req),
+    headers: buildOwnerHeaders(req),
   });
   return res.data;
 }
 
 async function listBranchInventory(restaurantId, branchId, req) {
   const res = await productClient.get(`/${restaurantId}/branches/${branchId}/inventory`, {
-    headers: buildHeaders(req),
+    headers: buildOwnerHeaders(req),
   });
   return res.data;
 }
+
 async function upsertBranchInventory(restaurantId, branchId, productId, payload, req) {
   const res = await productClient.put(
     `/${restaurantId}/branches/${branchId}/inventory/${productId}`,
     payload,
-    { headers: buildHeaders(req) },
+    { headers: buildOwnerHeaders(req) },
   );
   return res.data;
 }
@@ -294,6 +325,8 @@ module.exports = {
   signupOwner,
   verifyOwner,
   ownerLogin,
+  loginRestaurantAccount,
+  listRestaurantMembers,
   ownerStatus,
   resendVerification,
   listCatalog,
@@ -320,4 +353,12 @@ module.exports = {
   createOptionGroup,
   createCombo,
   createPromotion,
+  listRestaurantProducts,
+  createRestaurantProduct,
+  updateRestaurantProduct,
+  deleteRestaurantProduct,
+  listRestaurantInventory,
+  listProductInventory,
+  listBranchInventory,
+  upsertBranchInventory,
 };

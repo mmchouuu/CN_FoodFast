@@ -633,6 +633,7 @@ const attachPaymentDetails = async (orders) => {
   if (!orderIds.length) {
     return orders;
   }
+
   let payments = [];
   try {
     payments = await paymentClient.lookupPayments(orderIds);
@@ -640,6 +641,7 @@ const attachPaymentDetails = async (orders) => {
     console.warn('[order-service] failed to lookup payments for orders:', error.message || error);
     payments = [];
   }
+
   const paymentMap = new Map(payments.map((payment) => [payment.order_id, payment]));
   return orders.map((order) => ({
     ...order,
@@ -1026,6 +1028,21 @@ const createOrder = async (payload, userContext = null) => {
     await client.query('COMMIT');
 
     let hydratedOrder = await getOrderById(orderRow.id);
+    if (!hydratedOrder) {
+      try {
+        hydratedOrder = await advancedOrdersService.getAdminOrder({ orderId: orderRow.id });
+      } catch (error) {
+        hydratedOrder = null;
+      }
+    }
+
+    await syncInventoryAfterLegacyOrder(hydratedOrder, {
+      orderId: orderRow.id,
+      restaurantId,
+      branchId,
+      items,
+    });
+
     if (hydratedOrder) {
       if (!hydratedOrder.metadata) {
         hydratedOrder.metadata = orderMetadata;
@@ -1087,8 +1104,8 @@ const updateOrderStatus = async (id, statusRaw) => {
     [id, 'STATUS_UPDATED', JSON.stringify({ new_status: status })],
   );
 
-  const baseOrders = await attachOrderRelations(result.rows);
-  const enriched = await attachPaymentDetails(baseOrders);
+  const orders = await attachOrderRelations(result.rows);
+  const enriched = await attachPaymentDetails(orders);
   return enriched[0] || null;
 };
 
@@ -1108,6 +1125,72 @@ const getOrdersByUserId = async (userId) => {
   return attachPaymentDetails(baseOrders);
 };
 
+const syncInventoryAfterLegacyOrder = async (orderPayload, context = {}) => {
+  if (typeof advancedOrdersService.syncInventoryAfterOrder !== 'function') {
+    return;
+  }
+  const basePayload = orderPayload
+    ? { ...orderPayload }
+    : {
+        id: context.orderId || null,
+        restaurant_id: context.restaurantId || null,
+        branch_id: context.branchId || null,
+        items: context.items || [],
+      };
+
+  if (!basePayload.restaurant_id && context.restaurantId) {
+    basePayload.restaurant_id = context.restaurantId;
+  }
+  if (!basePayload.branch_id && context.branchId) {
+    basePayload.branch_id = context.branchId;
+  }
+  if (!Array.isArray(basePayload.items) || !basePayload.items.length) {
+    basePayload.items = context.items || [];
+  }
+
+  if (!basePayload.restaurant_id || !Array.isArray(basePayload.items) || !basePayload.items.length) {
+    return;
+  }
+
+  try {
+    await advancedOrdersService.syncInventoryAfterOrder(basePayload);
+  } catch (error) {
+    console.error(
+      '[order-service] Failed to sync product inventory for order %s: %s',
+      basePayload.id || context.orderId || 'unknown',
+      error?.message || error,
+    );
+  }
+};
+
+const buildCustomerUserContext = (userId) => ({
+  id: userId,
+  userId,
+  user_id: userId,
+  sub: userId,
+  role: 'customer',
+});
+
+const rethrowAdvancedServiceError = (error) => {
+  if (error?.name === 'NotFoundError' || error?.status === 404) {
+    const notFound = new OrderValidationError(error.message || 'Order not found');
+    notFound.statusCode = 404;
+    throw notFound;
+  }
+  if (error?.name === 'ForbiddenError' || error?.status === 403) {
+    const forbidden = new OrderValidationError(error.message || 'Forbidden');
+    forbidden.statusCode = 403;
+    throw forbidden;
+  }
+  if (error?.name === 'ValidationError' || error?.status === 400) {
+    const validationErr = new OrderValidationError(error.message || 'Request validation failed');
+    validationErr.statusCode = 400;
+    validationErr.details = error?.details;
+    throw validationErr;
+  }
+  throw error;
+};
+
 const confirmCustomerOrder = async (orderId, userId, payload = {}) => {
   if (!orderId) {
     throw new OrderValidationError('order id is required');
@@ -1123,34 +1206,36 @@ const confirmCustomerOrder = async (orderId, userId, payload = {}) => {
 
   try {
     return await advancedOrdersService.confirmCustomerOrderDelivery({
-      user: {
-        id: userId,
-        userId,
-        user_id: userId,
-        sub: userId,
-        role: 'customer',
-      },
+      user: buildCustomerUserContext(userId),
       orderId,
       payload: safePayload,
     });
   } catch (error) {
-    if (error?.name === 'NotFoundError' || error?.status === 404) {
-      const notFound = new OrderValidationError(error.message || 'Order not found');
-      notFound.statusCode = 404;
-      throw notFound;
-    }
-    if (error?.name === 'ForbiddenError' || error?.status === 403) {
-      const forbidden = new OrderValidationError(error.message || 'Forbidden');
-      forbidden.statusCode = 403;
-      throw forbidden;
-    }
-    if (error?.name === 'ValidationError' || error?.status === 400) {
-      const validationErr = new OrderValidationError(error.message || 'Request validation failed');
-      validationErr.statusCode = 400;
-      validationErr.details = error?.details;
-      throw validationErr;
-    }
-    throw error;
+    rethrowAdvancedServiceError(error);
+  }
+};
+
+const cancelCustomerOrder = async (orderId, userId, payload = {}) => {
+  if (!orderId) {
+    throw new OrderValidationError('order id is required');
+  }
+  if (!userId) {
+    throw new OrderValidationError('user id is required');
+  }
+
+  const safePayload =
+    payload && typeof payload === 'object'
+      ? { ...payload }
+      : {};
+
+  try {
+    return await advancedOrdersService.cancelCustomerOrder({
+      user: buildCustomerUserContext(userId),
+      orderId,
+      payload: safePayload,
+    });
+  } catch (error) {
+    rethrowAdvancedServiceError(error);
   }
 };
 
@@ -1161,6 +1246,7 @@ module.exports = {
   updateOrderStatus,
   deleteOrder,
   getOrdersByUserId,
+  cancelCustomerOrder,
   confirmCustomerOrder,
   OrderValidationError,
 };

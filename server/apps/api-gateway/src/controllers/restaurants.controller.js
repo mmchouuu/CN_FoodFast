@@ -77,6 +77,21 @@ async function ownerLogin(req, res, next) {
   }
 }
 
+async function accountLogin(req, res, next) {
+  try {
+    const { email, password } = req.body || {};
+    if (!email || !password) {
+      return badRequest(res, 'email and password are required');
+    }
+    const result = await restaurantClient.loginRestaurantAccount(req.body, {
+      headers: { 'x-request-id': req.id },
+    });
+    return res.json(result);
+  } catch (error) {
+    return handleServiceError(error, res, next);
+  }
+}
+
 async function ownerStatus(req, res, next) {
   try {
     const { email } = req.query || {};
@@ -321,6 +336,21 @@ async function inviteMember(req, res, next) {
     }
     const result = await restaurantClient.inviteMember(restaurantId, req.body, req);
     return res.status(201).json(result);
+  } catch (error) {
+    return handleServiceError(error, res, next);
+  }
+}
+
+async function listMembers(req, res, next) {
+  try {
+    const { restaurantId } = req.params;
+    if (!restaurantId) {
+      return badRequest(res, 'restaurantId is required');
+    }
+    const result = await restaurantClient.listRestaurantMembers(restaurantId, {
+      headers: { 'x-request-id': req.id },
+    });
+    return res.json(result);
   } catch (error) {
     return handleServiceError(error, res, next);
   }
@@ -580,6 +610,7 @@ module.exports = {
   ownerSignup,
   ownerVerify,
   ownerLogin,
+  accountLogin,
   ownerStatus,
   resendVerification,
   listCatalog,
@@ -595,6 +626,7 @@ module.exports = {
   updateBranchSchedules,
   deleteBranch,
   inviteMember,
+  listMembers,
   createCategory,
   listCategories,
   createProduct,

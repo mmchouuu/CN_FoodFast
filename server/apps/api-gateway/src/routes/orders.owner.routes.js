@@ -23,6 +23,9 @@ const proxy = (target) => {
       if (req.ownerContext?.restaurantIds?.length) {
         proxyReq.setHeader('x-restaurant-ids', req.ownerContext.restaurantIds.join(','));
       }
+      if (req.ownerContext?.branchIds?.length) {
+        proxyReq.setHeader('x-branch-ids', req.ownerContext.branchIds.join(','));
+      }
       forwardProxyBody(proxyReq, req);
     },
     onError: (err, _req, res) => {
@@ -55,6 +58,12 @@ router.patch('/:id/status', attachOwnerContext, async (req, res) => {
   };
   if (req.ownerContext?.restaurantIds?.length) {
     headers['x-restaurant-ids'] = req.ownerContext.restaurantIds.join(',');
+  }
+  if (req.ownerContext?.branchIds?.length) {
+    headers['x-branch-ids'] = req.ownerContext.branchIds.join(',');
+  }
+  if (req.headers.authorization) {
+    headers.Authorization = req.headers.authorization;
   }
 
   try {

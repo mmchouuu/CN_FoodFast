@@ -1,27 +1,36 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { useAppContext } from '../../context/AppContext';
 import { assets } from '../../assets/data';
 import { Link, NavLink } from 'react-router-dom';
-import { UserButton } from '@clerk/clerk-react';
+import useOwnerPermission from '../../hooks/useOwnerPermission';
+
+const NAV_CONFIG = [
+  { path: '/owner', label: 'Dashboard', icon: assets.dashboard, roles: ['owner_main', 'owner', 'manager'] },
+  { path: '/owner/profile', label: 'Restaurant Info', icon: assets.house, roles: ['owner_main', 'owner', 'manager', 'staff'] },
+  { path: '/owner/menu', label: 'Dish Management', icon: assets.list, permissions: ['canManageMenu'] },
+  { path: '/owner/orders', label: 'Order Management', icon: assets.graph, permissions: ['canManageOrders'], roles: ['owner_main', 'owner', 'manager', 'staff'] },
+  { path: '/owner/settlements', label: 'Settlement Reports', icon: assets.secure, permissions: ['canManageFinance'] },
+  { path: '/owner/cash-settlement', label: 'Cash Settlement', icon: assets.returnRequest, permissions: ['canManageFinance'] },
+  { path: '/owner/shippers', label: 'Shipper Management', icon: assets.delivery, permissions: ['canManageStaff'], roles: ['owner_main', 'owner'] },
+  { path: '/owner/assignments', label: 'Assign Orders', icon: assets.forward, permissions: ['canManageOrders'], roles: ['owner_main', 'owner', 'manager'] },
+  { path: '/owner/tracking', label: 'Delivery Tracking', icon: assets.map, roles: ['owner_main', 'owner', 'manager', 'staff'] },
+  { path: '/owner/promotions', label: 'Promotions', icon: assets.badge, roles: ['owner_main', 'owner'] },
+  { path: '/owner/feedback', label: 'Customer Feedback', icon: assets.star, roles: ['owner_main', 'owner', 'manager', 'staff'] },
+  { path: '/owner/revenue', label: 'Revenue Statistics', icon: assets.dollar, permissions: ['canManageFinance'], roles: ['owner_main', 'owner', 'manager'] },
+  { path: '/owner/account', label: 'Account Management', icon: assets.user, permissions: ['canManageStaff'], roles: ['owner_main', 'owner', 'manager'] },
+];
 
 const Sidebar = () => {
-  const { navigate, isOwner} = useAppContext();
+  const { navigate, isOwner } = useAppContext();
+  const { hasRequirement } = useOwnerPermission();
 
-  const navItems = [
-    { path: '/owner', label: 'Dashboard', icon: assets.dashboard },
-    { path: '/owner/profile', label: 'Restaurant Info', icon: assets.house },
-    { path: '/owner/menu', label: 'Dish Management', icon: assets.list },
-    { path: '/owner/orders', label: 'Order Management', icon: assets.graph },
-    { path: '/owner/settlements', label: 'Settlement Reports', icon: assets.secure },
-    { path: '/owner/cash-settlement', label: 'Cash Settlement', icon: assets.returnRequest },
-    { path: '/owner/shippers', label: 'Shipper Management', icon: assets.delivery },
-    { path: '/owner/assignments', label: 'Assign Orders', icon: assets.forward },
-    { path: '/owner/tracking', label: 'Delivery Tracking', icon: assets.map },
-    { path: '/owner/promotions', label: 'Promotions', icon: assets.badge },
-    { path: '/owner/feedback', label: 'Customer Feedback', icon: assets.star },
-    { path: '/owner/revenue', label: 'Revenue Statistics', icon: assets.dollar },
-    { path: '/owner/account', label: 'Account Management', icon: assets.user },
-  ];
+  const navItems = useMemo(
+    () =>
+      NAV_CONFIG.filter((item) =>
+        hasRequirement({ roles: item.roles, permissions: item.permissions }),
+      ),
+    [hasRequirement],
+  );
 
   useEffect(() => {
     if (!isOwner) {

@@ -4,6 +4,7 @@ const morgan = require('morgan');
 const config = require('./config');
 const { connectRabbitMQ } = require('./utils/rabbitmq');
 const roleRepository = require('./repositories/role.repository');
+const startRestaurantEventConsumer = require('./consumers/restaurantEvents.consumer');
 
 const customerRoutes = require('./routes/customer.routes');
 const restaurantRoutes = require('./routes/restaurant.routes');
@@ -59,6 +60,7 @@ async function bootstrap() {
   await roleRepository.ensureGlobalRoles();
   try {
     await connectRabbitMQ();
+    await startRestaurantEventConsumer();
     // eslint-disable-next-line no-console
     console.log('Connected to RabbitMQ');
   } catch (error) {
@@ -74,3 +76,4 @@ async function bootstrap() {
 }
 
 bootstrap();
+

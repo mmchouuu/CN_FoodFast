@@ -18,6 +18,15 @@ const ORDER_STATUS_TABS = [
   { key: "completed", label: "Completed" },
   { key: "cancelled", label: "Cancelled" },
 ];
+const ORDER_STATUS_OPTIONS = ORDER_STATUS_TABS.filter((tab) => tab.key !== "all");
+const ORDER_STATUS_LABELS = ORDER_STATUS_OPTIONS.reduce((acc, tab) => {
+  acc[tab.key] = tab.label;
+  return acc;
+}, {});
+const STAFF_ALLOWED_STATUS_SET = new Set(["confirmed", "preparing", "ready"]);
+const STAFF_ALLOWED_STATUS_KEYS = ORDER_STATUS_OPTIONS.filter((tab) =>
+  STAFF_ALLOWED_STATUS_SET.has(tab.key),
+).map((tab) => tab.key);
 
 const resolveItemTotal = (item) => {
   if (!item) return 0;
@@ -274,6 +283,58 @@ const adaptOwnerOrder = (order, lookups) => {
 const Orders = () => {
   const { currency, restaurantProfile } = useAppContext();
   const ownerId = restaurantProfile?.id || null;
+  const ownerRole = restaurantProfile?.role || 'owner_main';
+  const canFetchOwnerRestaurants = ownerRole === 'owner_main';
+  const isStaff = ownerRole === 'staff';
+  const allStatusKeys = useMemo(
+    () => ORDER_STATUS_OPTIONS.map((tab) => tab.key),
+    [],
+  );
+  const staffBranchIds = useMemo(() => {
+    if (!isStaff) return new Set();
+    const ids = new Set();
+    const push = (value) => {
+      if (value === undefined || value === null) return;
+      const str = String(value).trim();
+      if (str.length) {
+        ids.add(str);
+      }
+    };
+    push(restaurantProfile?.branchId || restaurantProfile?.branch_id);
+    if (Array.isArray(restaurantProfile?.scope?.branchIds)) {
+      restaurantProfile.scope.branchIds.forEach(push);
+    }
+    if (Array.isArray(restaurantProfile?.memberships)) {
+      restaurantProfile.memberships.forEach((membership) => {
+        push(membership?.branchId || membership?.branch_id);
+      });
+    }
+    return ids;
+  }, [isStaff, restaurantProfile]);
+
+  const primaryStaffBranchId = useMemo(() => {
+    if (!isStaff || !staffBranchIds.size) return null;
+    const iterator = staffBranchIds.values();
+    const first = iterator.next();
+    return first?.value || null;
+  }, [isStaff, staffBranchIds]);
+
+  const getAllowedStatusesForOrder = useCallback(
+    (order) => {
+      if (!order) return allStatusKeys;
+      if (!isStaff) return allStatusKeys;
+      const branchId = order.branchId || order.branch_id;
+      if (!branchId || !staffBranchIds.has(String(branchId))) {
+        return [];
+      }
+      const currentStatus = (order.status || "").toLowerCase();
+      if (!STAFF_ALLOWED_STATUS_SET.has(currentStatus)) {
+        return [];
+      }
+      return STAFF_ALLOWED_STATUS_KEYS;
+    },
+    [allStatusKeys, isStaff, staffBranchIds],
+  );
 
   const [ownerRestaurants, setOwnerRestaurants] = useState([]);
   const [rawOrders, setRawOrders] = useState([]);
@@ -302,9 +363,8 @@ const Orders = () => {
   );
 
   useEffect(() => {
-    if (!ownerId) {
+    if (!ownerId || !canFetchOwnerRestaurants) {
       setOwnerRestaurants([]);
-      setRawOrders([]);
       return;
     }
 
@@ -337,7 +397,7 @@ const Orders = () => {
     return () => {
       cancelled = true;
     };
-  }, [ownerId]);
+  }, [ownerId, canFetchOwnerRestaurants]);
 
   const loadOrders = useCallback(async () => {
     if (!ownerId) {
@@ -348,10 +408,18 @@ const Orders = () => {
     setOrdersLoading(true);
     try {
       const params = { limit: 200 };
-      if (selectedRestaurantId !== "all") {
+      if (!isStaff && selectedRestaurantId !== "all") {
         params.restaurant_id = selectedRestaurantId;
       }
-      if (selectedBranchId !== "all") {
+      if (isStaff) {
+        let effectiveBranchId = selectedBranchId;
+        if (effectiveBranchId === "all" && primaryStaffBranchId) {
+          effectiveBranchId = primaryStaffBranchId;
+        }
+        if (effectiveBranchId && effectiveBranchId !== "all") {
+          params.branch_id = effectiveBranchId;
+        }
+      } else if (selectedBranchId !== "all") {
         params.branch_id = selectedBranchId;
       }
 
@@ -370,7 +438,13 @@ const Orders = () => {
     } finally {
       setOrdersLoading(false);
     }
-  }, [ownerId, selectedBranchId, selectedRestaurantId]);
+  }, [
+    ownerId,
+    selectedBranchId,
+    selectedRestaurantId,
+    isStaff,
+    primaryStaffBranchId,
+  ]);
 
   useEffect(() => {
     loadOrders();
@@ -379,9 +453,21 @@ const Orders = () => {
   const handleStatusChange = useCallback(
     async (order, nextStatusRaw) => {
       if (!order?.id) return;
-      const nextStatus = typeof nextStatusRaw === "string" ? nextStatusRaw.trim() : "";
+      const nextStatus =
+        typeof nextStatusRaw === "string" ? nextStatusRaw.trim().toLowerCase() : "";
       if (!nextStatus || order.status === nextStatus) {
         return;
+      }
+      if (isStaff) {
+        const allowed = getAllowedStatusesForOrder(order);
+        if (!allowed.length) {
+          toast.error("You can only update orders in your assigned branch while they're Confirmed, Preparing, or Ready.");
+          return;
+        }
+        if (!allowed.includes(nextStatus)) {
+          toast.error("Staff can only set status to Confirmed, Preparing, or Ready.");
+          return;
+        }
       }
       const prettyStatus = nextStatus
         .split("_")
@@ -442,19 +528,75 @@ const Orders = () => {
         });
       }
     },
-    [setRawOrders],
+    [getAllowedStatusesForOrder, isStaff, setRawOrders],
   );
 
+  const staffMembershipBranches = useMemo(() => {
+    if (!isStaff) return [];
+    const memberships = Array.isArray(restaurantProfile?.memberships)
+      ? restaurantProfile.memberships
+      : [];
+    const options = memberships
+      .map((membership) => {
+        const branchId = membership?.branchId || membership?.branch_id;
+        if (!branchId) return null;
+        const restaurantId =
+          membership?.restaurantId ||
+          membership?.restaurant_id ||
+          restaurantProfile?.restaurantId ||
+          restaurantProfile?.restaurant_id ||
+          null;
+        const name =
+          membership?.branchName ||
+          membership?.branch_name ||
+          restaurantProfile?.branchName ||
+          `Branch ${String(branchId).slice(0, 6)}`;
+        return {
+          id: String(branchId),
+          name,
+          restaurantId: restaurantId ? String(restaurantId) : null,
+        };
+      })
+      .filter(Boolean);
+    const seen = new Set();
+    return options.filter((option) => {
+      if (seen.has(option.id)) return false;
+      seen.add(option.id);
+      return true;
+    });
+  }, [isStaff, restaurantProfile]);
+
+  const staffRestaurantOption = useMemo(() => {
+    if (!isStaff) return null;
+    const restaurantId =
+      restaurantProfile?.restaurantId || restaurantProfile?.restaurant_id;
+    if (!restaurantId) return null;
+    const name =
+      restaurantProfile?.restaurantName ||
+      restaurantProfile?.restaurant_name ||
+      "Restaurant";
+    return { id: String(restaurantId), name };
+  }, [isStaff, restaurantProfile]);
+
   const restaurantOptions = useMemo(() => {
-    return ownerRestaurants.map((restaurant) => ({
-      id: restaurant.id,
+    const options = ownerRestaurants.map((restaurant) => ({
+      id: String(restaurant.id),
       name:
         restaurant.name ||
         restaurant.legalName ||
         restaurant.profile?.legal_name ||
         "Restaurant",
     }));
-  }, [ownerRestaurants]);
+    if (staffRestaurantOption) {
+      if (!options.length) {
+        return [staffRestaurantOption];
+      }
+      if (!options.some((option) => option.id === staffRestaurantOption.id)) {
+        return [...options, staffRestaurantOption];
+      }
+    }
+    return options;
+  }, [ownerRestaurants, staffRestaurantOption]);
 
   const branchOptions = useMemo(() => {
     const options = [];
@@ -474,8 +616,48 @@ const Orders = () => {
         });
       });
     });
+    if (!options.length && staffMembershipBranches.length) {
+      return staffMembershipBranches.filter((branch) => {
+        if (selectedRestaurantId === "all" || !branch.restaurantId) {
+          return true;
+        }
+        return String(branch.restaurantId) === String(selectedRestaurantId);
+      });
+    }
+    if (isStaff && staffMembershipBranches.length) {
+      const filteredStaffOptions = staffMembershipBranches.filter((branch) => {
+        if (selectedRestaurantId === "all" || !branch.restaurantId) return true;
+        return String(branch.restaurantId) === String(selectedRestaurantId);
+      });
+      const seen = new Set(options.map((option) => option.id));
+      filteredStaffOptions.forEach((option) => {
+        if (!seen.has(option.id)) {
+          options.push(option);
+        }
+      });
+    }
     return options;
-  }, [ownerRestaurants, selectedRestaurantId]);
+  }, [
+    ownerRestaurants,
+    selectedRestaurantId,
+    staffMembershipBranches,
+    isStaff,
+  ]);
+
+  useEffect(() => {
+    if (!isStaff) return;
+    const defaultRestaurantId = staffRestaurantOption?.id || null;
+    if (defaultRestaurantId) {
+      setSelectedRestaurantId((prev) =>
+        prev === "all" ? defaultRestaurantId : prev,
+      );
+    }
+    if (primaryStaffBranchId) {
+      setSelectedBranchId((prev) =>
+        prev === "all" ? primaryStaffBranchId : prev,
+      );
+    }
+  }, [isStaff, staffRestaurantOption, primaryStaffBranchId]);
 
   useEffect(() => {
     if (
@@ -686,6 +868,9 @@ const Orders = () => {
       <section className="mt-6 space-y-4">
         {filteredOrders.map((order) => {
           const isStatusUpdating = Boolean(statusUpdatingMap[order.id]);
+          const allowedStatuses = getAllowedStatusesForOrder(order);
+          const statusControlDisabled =
+            isStatusUpdating || (isStaff && !allowedStatuses.length);
           return (
             <article
               key={order.id}
@@ -712,8 +897,9 @@ const Orders = () => {
                 <div className="flex flex-wrap gap-3">
                   <StatusSelect
                     value={order.status}
-                    disabled={isStatusUpdating}
+                    disabled={statusControlDisabled}
                     loading={isStatusUpdating}
+                    allowedStatuses={allowedStatuses}
                     onChange={(value) => handleStatusChange(order, value)}
                   />
                   <PaymentStatus
@@ -833,9 +1019,13 @@ const Orders = () => {
   );
 };
 
-const StatusSelect = ({ value, onChange, disabled, loading }) => {
+const StatusSelect = ({ value, onChange, disabled, loading, allowedStatuses }) => {
   const isDisabled = disabled || loading;
   const resolvedValue = typeof value === "string" && value.length ? value : "pending";
+  const options =
+    Array.isArray(allowedStatuses) && allowedStatuses.length
+      ? allowedStatuses
+      : ORDER_STATUS_OPTIONS.map((tab) => tab.key);
   return (
     <div className="relative">
       <select
@@ -844,9 +1034,9 @@ const StatusSelect = ({ value, onChange, disabled, loading }) => {
         disabled={isDisabled}
         className="rounded-lg border border-slate-200 bg-white py-2 px-3 text-xs font-semibold text-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 disabled:cursor-not-allowed disabled:opacity-60 pr-8"
       >
-        {ORDER_STATUS_TABS.filter((tab) => tab.key !== "all").map((tab) => (
-          <option key={tab.key} value={tab.key}>
-            {tab.label}
+        {options.map((key) => (
+          <option key={key} value={key}>
+            {ORDER_STATUS_LABELS[key] || key}
           </option>
         ))}
       </select>

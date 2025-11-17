@@ -14,6 +14,260 @@ function assert(value, message) {
   }
 }
 
+function normaliseBranchId(value) {
+  if (!value) return null;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed.length ? trimmed : null;
+  }
+  if (typeof value === 'object') {
+    return normaliseBranchId(
+      value.branchId ??
+        value.branch_id ??
+        value.branch ??
+        value.id ??
+        (value.branch && value.branch.id),
+    );
+  }
+  return null;
+}
+
+function pickBoolean(value, fallback) {
+  if (value === undefined || value === null) return fallback;
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  if (typeof value === 'string') {
+    const lowered = value.toLowerCase().trim();
+    if (['false', '0', 'no', 'off'].includes(lowered)) return false;
+    if (['true', '1', 'yes', 'on'].includes(lowered)) return true;
+  }
+  return Boolean(value);
+}
+
+function buildBranchAssignmentMaps(payload = {}, defaults = {}) {
+  const assignmentMap = new Map();
+  const inventoryMap = new Map();
+  const defaultAvailable =
+    defaults.defaultAvailable === undefined ? true : defaults.defaultAvailable !== false;
+  const defaultVisible =
+    defaults.defaultVisible === undefined ? true : defaults.defaultVisible !== false;
+
+  const mergeInventory = (branchId, raw) => {
+    if (!branchId || !raw) return;
+    const entry = inventoryMap.get(branchId) || {};
+    const toNumberOrNull = (input) => {
+      if (input === undefined || input === null || input === '') return null;
+      const numeric = Number(input);
+      return Number.isFinite(numeric) ? numeric : null;
+    };
+
+    const setNumericField = (targetKey, ...sourceKeys) => {
+      for (const key of sourceKeys) {
+        if (raw[key] !== undefined && raw[key] !== null) {
+          const numeric = toNumberOrNull(raw[key]);
+          if (numeric !== null) {
+            entry[targetKey] = numeric;
+          }
+          break;
+        }
+      }
+    };
+
+    setNumericField('quantity', 'quantity', 'qty', 'stock');
+    setNumericField('reserved_qty', 'reserved_qty', 'reservedQty');
+    setNumericField('min_stock', 'min_stock', 'minStock');
+    setNumericField('daily_limit', 'daily_limit', 'dailyLimit');
+    setNumericField('daily_sold', 'daily_sold', 'dailySold');
+
+    if (raw.last_restock_at !== undefined || raw.lastRestockAt !== undefined) {
+      entry.last_restock_at = raw.last_restock_at ?? raw.lastRestockAt ?? null;
+    }
+
+    const visibleValue =
+      raw.is_visible ?? raw.isVisible ?? raw.inv_visible ?? raw.invVisible ?? raw.visible;
+    if (visibleValue !== undefined) {
+      entry.is_visible = pickBoolean(visibleValue, true);
+    }
+    const activeValue = raw.is_active ?? raw.isActive ?? raw.inv_active ?? raw.invActive;
+    if (activeValue !== undefined) {
+      entry.is_active = pickBoolean(activeValue, true);
+    }
+
+    inventoryMap.set(branchId, entry);
+  };
+
+  const registerAssignment = (source) => {
+    if (!source) return;
+    if (typeof source === 'string') {
+      const branchId = normaliseBranchId(source);
+      if (!branchId || assignmentMap.has(branchId)) return;
+      assignmentMap.set(branchId, {
+        branchId,
+        isAvailable: defaultAvailable,
+        isVisible: defaultVisible,
+        isFeatured: false,
+        priceMode: 'inherit',
+        basePriceOverride: null,
+        localName: null,
+        localDescription: null,
+        displayOrder: null,
+        availableFrom: null,
+        availableUntil: null,
+        dayparts: null,
+      });
+      return;
+    }
+
+    const branchId = normaliseBranchId(source);
+    if (!branchId) return;
+    const existing = assignmentMap.get(branchId) || {
+      branchId,
+      isAvailable: defaultAvailable,
+      isVisible: defaultVisible,
+      isFeatured: false,
+      priceMode: 'inherit',
+      basePriceOverride: null,
+      localName: null,
+      localDescription: null,
+      displayOrder: null,
+      availableFrom: null,
+      availableUntil: null,
+      dayparts: null,
+    };
+
+    const assignment = {
+      ...existing,
+      isAvailable: pickBoolean(source.isAvailable ?? source.is_available, existing.isAvailable),
+      isVisible: pickBoolean(source.isVisible ?? source.is_visible, existing.isVisible),
+      isFeatured: pickBoolean(source.isFeatured ?? source.is_featured, existing.isFeatured),
+      priceMode: source.priceMode || source.price_mode || existing.priceMode,
+      basePriceOverride:
+        source.basePriceOverride ?? source.base_price_override ?? existing.basePriceOverride,
+      localName: source.localName ?? source.local_name ?? existing.localName,
+      localDescription:
+        source.localDescription ?? source.local_description ?? existing.localDescription,
+      displayOrder: source.displayOrder ?? source.display_order ?? existing.displayOrder,
+      availableFrom: source.availableFrom ?? source.available_from ?? existing.availableFrom,
+      availableUntil: source.availableUntil ?? source.available_until ?? existing.availableUntil,
+      dayparts: source.dayparts ?? existing.dayparts,
+    };
+
+    assignmentMap.set(branchId, assignment);
+
+    if (source.inventory) {
+      mergeInventory(branchId, source.inventory);
+    } else {
+      mergeInventory(branchId, source);
+    }
+  };
+
+  const registerInventory = (source) => {
+    if (!source) return;
+    const branchId = normaliseBranchId(source.branch_id ?? source.branchId ?? source.branch);
+    if (!branchId) return;
+    mergeInventory(branchId, source);
+  };
+
+  if (Array.isArray(payload.branchAssignments)) {
+    payload.branchAssignments.forEach(registerAssignment);
+  }
+  if (Array.isArray(payload.branch_assignments)) {
+    payload.branch_assignments.forEach(registerAssignment);
+  }
+  if (Array.isArray(payload.assignedBranchIds)) {
+    payload.assignedBranchIds.forEach(registerAssignment);
+  }
+  if (Array.isArray(payload.assignedBranches)) {
+    payload.assignedBranches.forEach(registerAssignment);
+  }
+  if (Array.isArray(payload.branch_inventories)) {
+    payload.branch_inventories.forEach((item) => {
+      registerAssignment(item);
+      registerInventory(item);
+    });
+  }
+  if (Array.isArray(payload.branchInventories)) {
+    payload.branchInventories.forEach((item) => {
+      registerAssignment(item);
+      registerInventory(item);
+    });
+  }
+  if (payload.branchInventory && typeof payload.branchInventory === 'object') {
+    Object.entries(payload.branchInventory).forEach(([branchKey, entry]) => {
+      if (!branchKey) return;
+      const payloadEntry =
+        entry && typeof entry === 'object'
+          ? { branch_id: branchKey, ...entry }
+          : { branch_id: branchKey, quantity: entry };
+      registerAssignment(payloadEntry);
+      registerInventory(payloadEntry);
+    });
+  }
+
+  for (const branchId of inventoryMap.keys()) {
+    if (!assignmentMap.has(branchId)) {
+      assignmentMap.set(branchId, {
+        branchId,
+        isAvailable: defaultAvailable,
+        isVisible: defaultVisible,
+        isFeatured: false,
+        priceMode: 'inherit',
+        basePriceOverride: null,
+        localName: null,
+        localDescription: null,
+        displayOrder: null,
+        availableFrom: null,
+        availableUntil: null,
+        dayparts: null,
+      });
+    }
+  }
+
+  return { assignmentMap, inventoryMap };
+}
+
+async function persistBranchAssignments(
+  { restaurantId, productId, assignmentMap, inventoryMap },
+  client = null,
+) {
+  if (!assignmentMap || !assignmentMap.size) {
+    return;
+  }
+
+  for (const assignment of assignmentMap.values()) {
+    // eslint-disable-next-line no-await-in-loop
+    const branchProduct = await menuRepository.assignProductToBranch(
+      {
+        branchId: assignment.branchId,
+        productId,
+        isAvailable: assignment.isAvailable !== false,
+        isVisible: assignment.isVisible !== false,
+        isFeatured: assignment.isFeatured === true,
+        priceMode: assignment.priceMode || 'inherit',
+        basePriceOverride:
+          assignment.basePriceOverride !== undefined ? assignment.basePriceOverride : null,
+        localName: assignment.localName || null,
+        localDescription: assignment.localDescription || null,
+        displayOrder: assignment.displayOrder || null,
+        availableFrom: assignment.availableFrom || null,
+        availableUntil: assignment.availableUntil || null,
+        dayparts: assignment.dayparts || null,
+      },
+      client,
+    );
+
+    if (branchProduct?.id) {
+      // eslint-disable-next-line no-await-in-loop
+      await optionsRepository.syncBranchProductOptions(branchProduct.id, productId, client);
+      const inventorySource = inventoryMap.get(assignment.branchId);
+      if (inventorySource) {
+        // eslint-disable-next-line no-await-in-loop
+        await menuRepository.upsertInventory(branchProduct.id, { ...inventorySource }, client);
+      }
+    }
+  }
+}
+
 function mapBranchAssignment(row, inventory) {
   if (!row) return null;
   return {
@@ -252,233 +506,20 @@ async function createProduct(restaurantId, payload = {}) {
       client,
     );
 
-    const toBranchId = (value) => {
-      if (!value) return null;
-      if (typeof value === 'string') {
-        const trimmed = value.trim();
-        return trimmed.length ? trimmed : null;
-      }
-      if (typeof value === 'object') {
-        return toBranchId(
-          value.branchId ??
-            value.branch_id ??
-            value.branch ??
-            value.id ??
-            (typeof value === 'object' && value?.branch?.id),
-        );
-      }
-      return null;
-    };
+    const { assignmentMap, inventoryMap } = buildBranchAssignmentMaps(payload, {
+      defaultAvailable: payload.available !== false,
+      defaultVisible: payload.isVisible !== false,
+    });
 
-    const pickBoolean = (value, fallback) => {
-      if (value === undefined || value === null) return fallback;
-      if (typeof value === 'boolean') return value;
-      if (typeof value === 'number') return value !== 0;
-      if (typeof value === 'string') {
-        const lowered = value.toLowerCase().trim();
-        if (['false', '0', 'no', 'off'].includes(lowered)) return false;
-        if (['true', '1', 'yes', 'on'].includes(lowered)) return true;
-      }
-      return Boolean(value);
-    };
-
-    const assignmentMap = new Map();
-    const inventoryMap = new Map();
-
-    const mergeInventory = (branchId, raw) => {
-      if (!branchId || !raw) return;
-      const entry = inventoryMap.get(branchId) || {};
-      const toNumberOrNull = (input) => {
-        if (input === undefined || input === null || input === '') return null;
-        const numeric = Number(input);
-        return Number.isFinite(numeric) ? numeric : null;
-      };
-
-      const setNumericField = (targetKey, ...sourceKeys) => {
-        for (const key of sourceKeys) {
-          if (raw[key] !== undefined && raw[key] !== null) {
-            const numeric = toNumberOrNull(raw[key]);
-            if (numeric !== null) {
-              entry[targetKey] = numeric;
-            }
-            break;
-          }
-        }
-      };
-
-      setNumericField('quantity', 'quantity', 'qty');
-      setNumericField('reserved_qty', 'reserved_qty', 'reservedQty');
-      setNumericField('min_stock', 'min_stock', 'minStock');
-      setNumericField('daily_limit', 'daily_limit', 'dailyLimit');
-      setNumericField('daily_sold', 'daily_sold', 'dailySold');
-
-      if (raw.last_restock_at !== undefined || raw.lastRestockAt !== undefined) {
-        entry.last_restock_at = raw.last_restock_at ?? raw.lastRestockAt ?? null;
-      }
-
-      const visibleValue =
-        raw.is_visible ?? raw.isVisible ?? raw.inv_visible ?? raw.invVisible ?? raw.visible;
-      if (visibleValue !== undefined) {
-        entry.is_visible = pickBoolean(visibleValue, true);
-      }
-      const activeValue = raw.is_active ?? raw.isActive ?? raw.inv_active ?? raw.invActive;
-      if (activeValue !== undefined) {
-        entry.is_active = pickBoolean(activeValue, true);
-      }
-
-      inventoryMap.set(branchId, entry);
-    };
-
-    const registerAssignment = (source) => {
-      if (!source) return;
-      if (typeof source === 'string') {
-        const branchId = toBranchId(source);
-        if (!branchId) return;
-        if (!assignmentMap.has(branchId)) {
-          assignmentMap.set(branchId, {
-            branchId,
-            isAvailable: payload.available !== false,
-            isVisible: payload.isVisible !== false,
-            isFeatured: false,
-            priceMode: 'inherit',
-            basePriceOverride: null,
-            localName: null,
-            localDescription: null,
-            displayOrder: null,
-            availableFrom: null,
-            availableUntil: null,
-            dayparts: null,
-          });
-        }
-        return;
-      }
-
-      const branchId = toBranchId(source);
-      if (!branchId) return;
-      const existing = assignmentMap.get(branchId) || {
-        branchId,
-        isAvailable: payload.available !== false,
-        isVisible: payload.isVisible !== false,
-        isFeatured: false,
-        priceMode: 'inherit',
-        basePriceOverride: null,
-        localName: null,
-        localDescription: null,
-        displayOrder: null,
-        availableFrom: null,
-        availableUntil: null,
-        dayparts: null,
-      };
-
-      const assignment = {
-        ...existing,
-        isAvailable: pickBoolean(
-          source.isAvailable ?? source.is_available,
-          existing.isAvailable,
-        ),
-        isVisible: pickBoolean(source.isVisible ?? source.is_visible, existing.isVisible),
-        isFeatured: pickBoolean(source.isFeatured ?? source.is_featured, existing.isFeatured),
-        priceMode: source.priceMode || source.price_mode || existing.priceMode,
-        basePriceOverride:
-          source.basePriceOverride ?? source.base_price_override ?? existing.basePriceOverride,
-        localName: source.localName ?? source.local_name ?? existing.localName,
-        localDescription:
-          source.localDescription ?? source.local_description ?? existing.localDescription,
-        displayOrder: source.displayOrder ?? source.display_order ?? existing.displayOrder,
-        availableFrom: source.availableFrom ?? source.available_from ?? existing.availableFrom,
-        availableUntil: source.availableUntil ?? source.available_until ?? existing.availableUntil,
-        dayparts: source.dayparts ?? existing.dayparts,
-      };
-
-      assignmentMap.set(branchId, assignment);
-
-      if (source.inventory) {
-        mergeInventory(branchId, source.inventory);
-      } else {
-        mergeInventory(branchId, source);
-      }
-    };
-
-    const registerInventory = (source) => {
-      if (!source) return;
-      const branchId = toBranchId(source);
-      if (!branchId) return;
-      mergeInventory(branchId, source);
-    };
-
-    if (Array.isArray(payload.branchAssignments)) {
-      payload.branchAssignments.forEach(registerAssignment);
-    }
-    if (Array.isArray(payload.branch_assignments)) {
-      payload.branch_assignments.forEach(registerAssignment);
-    }
-    if (Array.isArray(payload.assignedBranchIds)) {
-      payload.assignedBranchIds.forEach(registerAssignment);
-    }
-    if (Array.isArray(payload.assignedBranches)) {
-      payload.assignedBranches.forEach(registerAssignment);
-    }
-    if (Array.isArray(payload.branch_inventories)) {
-      payload.branch_inventories.forEach((item) => {
-        registerAssignment(item);
-        registerInventory(item);
-      });
-    }
-
-    for (const branchId of inventoryMap.keys()) {
-      if (!assignmentMap.has(branchId)) {
-        assignmentMap.set(branchId, {
-          branchId,
-          isAvailable: payload.available !== false,
-          isVisible: payload.isVisible !== false,
-          isFeatured: false,
-          priceMode: 'inherit',
-          basePriceOverride: null,
-          localName: null,
-          localDescription: null,
-          displayOrder: null,
-          availableFrom: null,
-          availableUntil: null,
-          dayparts: null,
-        });
-      }
-    }
-
-    for (const assignment of assignmentMap.values()) {
-      // eslint-disable-next-line no-await-in-loop
-      const branchProduct = await menuRepository.assignProductToBranch(
-        {
-          branchId: assignment.branchId,
-          productId: product.id,
-          isAvailable: assignment.isAvailable !== false,
-          isVisible: assignment.isVisible !== false,
-          isFeatured: assignment.isFeatured === true,
-          priceMode: assignment.priceMode || 'inherit',
-          basePriceOverride:
-            assignment.basePriceOverride !== undefined ? assignment.basePriceOverride : null,
-          localName: assignment.localName || null,
-          localDescription: assignment.localDescription || null,
-          displayOrder: assignment.displayOrder || null,
-          availableFrom: assignment.availableFrom || null,
-          availableUntil: assignment.availableUntil || null,
-          dayparts: assignment.dayparts || null,
-        },
-        client,
-      );
-
-      if (branchProduct?.id) {
-        // eslint-disable-next-line no-await-in-loop
-        await optionsRepository.syncBranchProductOptions(branchProduct.id, product.id, client);
-      }
-
-      const inventorySource = inventoryMap.get(assignment.branchId);
-      if (branchProduct?.id && inventorySource) {
-        const inventoryPayload = { ...inventorySource };
-        // eslint-disable-next-line no-await-in-loop
-        await menuRepository.upsertInventory(branchProduct.id, inventoryPayload, client);
-      }
-    }
-
+    await persistBranchAssignments(
+      {
+        restaurantId,
+        productId: product.id,
+        assignmentMap,
+        inventoryMap,
+      },
+      client,
+    );
     return product;
   });
 
@@ -620,13 +661,55 @@ async function updateProduct(restaurantId, productId, payload = {}) {
     error.status = 404;
     throw error;
   }
-  return mapProductRow(updated);
+
+  const { assignmentMap, inventoryMap } = buildBranchAssignmentMaps(payload, {
+    defaultAvailable:
+      Object.prototype.hasOwnProperty.call(payload, 'available') && payload.available !== undefined
+        ? payload.available !== false
+        : updated.available !== false,
+    defaultVisible:
+      Object.prototype.hasOwnProperty.call(payload, 'isVisible') && payload.isVisible !== undefined
+        ? payload.isVisible !== false
+        : updated.is_visible !== false,
+  });
+
+  if (assignmentMap.size || inventoryMap.size) {
+    await persistBranchAssignments(
+      {
+        restaurantId,
+        productId,
+        assignmentMap,
+        inventoryMap,
+      },
+      null,
+    );
+  }
+
+  const optionGroupsProvided =
+    Object.prototype.hasOwnProperty.call(payload, 'optionGroups') ||
+    Object.prototype.hasOwnProperty.call(payload, 'option_groups') ||
+    Object.prototype.hasOwnProperty.call(payload, 'options');
+
+  let normalizedOptionGroups = null;
+  if (optionGroupsProvided) {
+    const rawGroups =
+      payload.optionGroups ?? payload.option_groups ?? payload.options ?? [];
+    normalizedOptionGroups = normalizeOptionGroupsPayload(rawGroups);
+    await replaceProductOptionGroups(restaurantId, productId, normalizedOptionGroups);
+  }
+
+  const mapped = mapProductRow(updated);
+  if (optionGroupsProvided) {
+    mapped.optionGroups = normalizedOptionGroups || [];
+    mapped.options = normalizedOptionGroups || [];
+  }
+  return mapped;
 }
 
 async function deleteProduct(restaurantId, productId) {
   assert(restaurantId, 'restaurantId is required');
   assert(productId, 'productId is required');
-  const deleted = await menuRepository.deleteProduct(productId);
+  const deleted = await withTransaction((client) => menuRepository.deleteProduct(productId, client));
   if (!deleted) {
     const error = new Error('Product not found');
     error.status = 404;
@@ -646,6 +729,230 @@ async function listProductInventory(restaurantId, productId) {
     return acc;
   }, {});
   return rows.map((row) => mapBranchAssignment(row, inventoryByBp[row.id])).filter(Boolean);
+}
+
+function toFiniteNumber(value, fallback = null) {
+  if (value === undefined || value === null || value === '') return fallback;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+function normalizeOptionGroupsPayload(rawGroups) {
+  if (!Array.isArray(rawGroups)) {
+    return [];
+  }
+  return rawGroups
+    .map((group, groupIndex) => {
+      if (!group) return null;
+      const name = (group.name || group.label || '').trim();
+      if (!name) return null;
+
+      const selectionTypeRaw = (group.selectionType || group.selection_type || '').toString().toLowerCase();
+      let allowMultiple =
+        group.allowMultiple !== undefined
+          ? Boolean(group.allowMultiple)
+          : selectionTypeRaw === 'single'
+            ? false
+            : selectionTypeRaw === 'multiple'
+              ? true
+              : undefined;
+
+      const resolvedMin = toFiniteNumber(
+        group.minSelect ?? group.min_select ?? group.group_min_select,
+        undefined,
+      );
+      const resolvedMax = toFiniteNumber(
+        group.maxSelect ?? group.max_select ?? group.group_max_select,
+        undefined,
+      );
+      const isRequired =
+        group.isRequired ?? group.is_required ?? group.required ?? (resolvedMin ?? 0) > 0;
+      const minSelect =
+        resolvedMin !== undefined && resolvedMin !== null
+          ? Math.max(0, resolvedMin)
+          : isRequired
+            ? 1
+            : 0;
+
+      let maxSelect =
+        resolvedMax !== undefined && resolvedMax !== null ? Math.max(0, resolvedMax) : null;
+      if (allowMultiple === undefined) {
+        allowMultiple = maxSelect === null || maxSelect > 1;
+      }
+      if (allowMultiple === false && (maxSelect === null || maxSelect === undefined)) {
+        maxSelect = 1;
+      }
+
+      const rawItems =
+        (Array.isArray(group.items) && group.items.length && group.items) ||
+        (Array.isArray(group.choices) && group.choices.length && group.choices) ||
+        [];
+      const items = rawItems
+        .map((item, itemIndex) => {
+          if (!item) return null;
+          const label = (item.name || item.label || item.title || item.value || '').trim();
+          if (!label) return null;
+          const priceDelta =
+            toFiniteNumber(
+              item.priceDelta ??
+                item.price_delta ??
+                item.extra_price ??
+                item.extraPrice ??
+                item.price ??
+                item.delta,
+              0,
+            ) || 0;
+          return {
+            name: label,
+            description: item.description || null,
+            priceDelta,
+            isActive: item.isActive !== false,
+            displayOrder:
+              toFiniteNumber(item.displayOrder ?? item.display_order ?? item.position, itemIndex) ??
+              itemIndex,
+          };
+        })
+        .filter(Boolean);
+      if (!items.length) return null;
+
+      return {
+        name,
+        description: group.description || null,
+        selectionType: allowMultiple === false ? 'single' : 'multiple',
+        minSelect,
+        maxSelect,
+        isRequired: Boolean(isRequired),
+        isActive: group.isActive !== false,
+        displayOrder:
+          toFiniteNumber(group.displayOrder ?? group.display_order ?? group.position, groupIndex) ??
+          groupIndex,
+        items,
+      };
+    })
+    .filter(Boolean);
+}
+
+async function safeDeleteBranchOptionRecords(query, params, client) {
+  try {
+    await client.query(query, params);
+  } catch (error) {
+    if (error?.code === '42P01') {
+      return;
+    }
+    throw error;
+  }
+}
+
+async function replaceProductOptionGroups(restaurantId, productId, optionGroups = []) {
+  return withTransaction(async (client) => {
+    const existingGroupRows = await client.query(
+      'SELECT group_id FROM product_option_groups WHERE product_id = $1',
+      [productId],
+    );
+    const existingGroupIds = existingGroupRows.rows.map((row) => row.group_id);
+
+    await safeDeleteBranchOptionRecords(
+      `
+        DELETE FROM branch_product_option_items
+        WHERE branch_product_id IN (
+          SELECT id FROM branch_products WHERE product_id = $1
+        )
+      `,
+      [productId],
+      client,
+    );
+    await safeDeleteBranchOptionRecords(
+      `
+        DELETE FROM branch_product_option_groups
+        WHERE branch_product_id IN (
+          SELECT id FROM branch_products WHERE product_id = $1
+        )
+      `,
+      [productId],
+      client,
+    );
+
+    await client.query('DELETE FROM product_option_groups WHERE product_id = $1', [productId]);
+
+    if (existingGroupIds.length) {
+      await client.query('DELETE FROM option_items WHERE group_id = ANY($1::uuid[])', [
+        existingGroupIds,
+      ]);
+      await client.query('DELETE FROM option_groups WHERE id = ANY($1::uuid[])', [
+        existingGroupIds,
+      ]);
+    }
+
+    if (!optionGroups.length) {
+      return [];
+    }
+
+    const branchAssignments = await menuRepository.listBranchAssignmentsForProduct(
+      productId,
+      client,
+    );
+
+    for (const [groupIndex, group] of optionGroups.entries()) {
+      // eslint-disable-next-line no-await-in-loop
+      const createdGroup = await optionsRepository.createOptionGroup(
+        {
+          restaurantId,
+          name: group.name,
+          description: group.description || null,
+          selectionType: group.selectionType || 'multiple',
+          minSelect: toFiniteNumber(group.minSelect, 0) || 0,
+          maxSelect:
+            group.maxSelect === undefined || group.maxSelect === null
+              ? null
+              : toFiniteNumber(group.maxSelect, null),
+          isRequired: group.isRequired === true,
+          isActive: group.isActive !== false,
+        },
+        client,
+      );
+
+      for (const [itemIndex, item] of group.items.entries()) {
+        // eslint-disable-next-line no-await-in-loop
+        await optionsRepository.createOptionItem(
+          {
+            groupId: createdGroup.id,
+            name: item.name,
+            description: item.description || null,
+            priceDelta: toFiniteNumber(item.priceDelta, 0) || 0,
+            isActive: item.isActive !== false,
+            displayOrder: item.displayOrder ?? itemIndex,
+          },
+          client,
+        );
+      }
+
+      // eslint-disable-next-line no-await-in-loop
+      await optionsRepository.attachGroupToProduct(
+        {
+          productId,
+          groupId: createdGroup.id,
+          minSelect: toFiniteNumber(group.minSelect, null),
+          maxSelect:
+            group.maxSelect === undefined || group.maxSelect === null
+              ? null
+              : toFiniteNumber(group.maxSelect, null),
+          isRequired: group.isRequired ?? null,
+          displayOrder: group.displayOrder ?? groupIndex,
+        },
+        client,
+      );
+    }
+
+    if (branchAssignments.length) {
+      for (const assignment of branchAssignments) {
+        if (!assignment?.id) continue;
+        // eslint-disable-next-line no-await-in-loop
+        await optionsRepository.syncBranchProductOptions(assignment.id, productId, client);
+      }
+    }
+
+    return optionGroups;
+  });
 }
 
 async function updateProductInventory(restaurantId, branchId, productId, payload = {}) {
@@ -987,3 +1294,4 @@ module.exports = {
   createCombo,
   createPromotion,
 };
+

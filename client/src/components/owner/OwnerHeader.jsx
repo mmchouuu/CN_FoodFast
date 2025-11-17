@@ -1,27 +1,45 @@
 import React, { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAppContext } from "../../context/AppContext";
+import useOwnerPermission from "../../hooks/useOwnerPermission";
 
-const buildBadges = (profile = {}) => {
-  const isActive = profile.isActive ?? profile.is_active;
-  if (isActive) {
-     return [];
+const ROLE_LABELS = {
+  owner_main: "Owner Main",
+  owner: "Owner",
+  manager: "Manager",
+  staff: "Staff",
+};
+
+const buildBadges = (profile = {}, role = null) => {
+  const badges = [];
+  const isActive = profile.isActive ?? profile.is_active ?? true;
+  badges.push(
+    isActive
+      ? { label: "Active", className: "bg-emerald-100 text-emerald-600" }
+      : { label: "Inactive", className: "bg-rose-100 text-rose-600" },
+  );
+
+  if (role) {
+    badges.push({
+      label: ROLE_LABELS[role] || role,
+      className: "bg-slate-100 text-slate-600",
+    });
+
   }
-  if (isActive === false) {
-    return [{ label: "Inactive", className: "bg-rose-100 text-rose-600" }];
-  }
-  return [];
+  return badges;
 };
 
 const OwnerHeader = () => {
   const navigate = useNavigate();
   const { restaurantProfile, logoutOwner } = useAppContext();
+  const { role } = useOwnerPermission();
 
   const {
     initials,
     ownerName,
     restaurantName,
     badges,
+    branchLabel,
   } = useMemo(() => {
     if (!restaurantProfile) {
       return {
@@ -29,6 +47,7 @@ const OwnerHeader = () => {
         ownerName: "Restaurant owner",
         restaurantName: "No restaurant profile",
         badges: [],
+        branchLabel: "",
       };
     }
 
@@ -39,7 +58,7 @@ const OwnerHeader = () => {
 
     const displayName = rawManager || rawFullName || email || "Restaurant owner";
     const displayRestaurant = rawRestaurant || "Restaurant profile not completed";
-    const badgeList = buildBadges(restaurantProfile);
+    const badgeList = buildBadges(restaurantProfile, role);
 
     const computedInitials =
       displayName
@@ -54,19 +73,23 @@ const OwnerHeader = () => {
       ownerName: displayName,
       restaurantName: displayRestaurant,
       badges: badgeList,
+      branchLabel:
+        restaurantProfile.branchName ||
+        (restaurantProfile.branchId ? `Branch #${restaurantProfile.branchId}` : ""),
     };
-  }, [restaurantProfile]);
+  }, [restaurantProfile, role]);
 
   const handleLogout = () => {
-    if (typeof logoutOwner === 'function') {
+    if (typeof logoutOwner === "function") {
       logoutOwner();
     }
-    navigate('/restaurant/auth/login', { replace: true });
+    navigate("/restaurant/auth/login", { replace: true });
   };
 
   return (
     <section className="mb border bg-white border-white p-3 shadow-sm md">
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        {/* LEFT: Owner Avatar + Name + Restaurant */}
         <div className="flex items-start gap-3">
           <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-orange-500 text-base font-semibold text-white md:h-14 md:w-14 md:text-lg">
             {initials}
@@ -77,7 +100,17 @@ const OwnerHeader = () => {
           </div>
         </div>
 
-        <div className="flex flex-col gap-2 md:items-end">
+        {/* RIGHT: Branch label + Badges + Logout */}
+        <div className="flex flex-col items-start gap-2 md:items-end">
+
+          {/* Branch Label (nếu có) */}
+          {branchLabel ? (
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              {branchLabel}
+            </p>
+          ) : null}
+
+          {/* Badges */}
           {badges.length ? (
             <div className="flex flex-wrap gap-2 md:justify-end">
               {badges.map((badge) => (
@@ -90,6 +123,8 @@ const OwnerHeader = () => {
               ))}
             </div>
           ) : null}
+
+          {/* Logout button */}
           <button
             type="button"
             onClick={handleLogout}
@@ -97,10 +132,10 @@ const OwnerHeader = () => {
           >
             Log out
           </button>
+
         </div>
       </div>
     </section>
-
   );
 };
 

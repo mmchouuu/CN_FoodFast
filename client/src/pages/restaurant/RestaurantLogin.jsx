@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 import restaurantAuth from "../../services/restaurantAuth";
 import { useAppContext } from "../../context/AppContext";
+import { buildRestaurantSession } from "../../utils/restaurantSession";
 
 const RestaurantLogin = () => {
   const navigate = useNavigate();
@@ -15,21 +16,30 @@ const RestaurantLogin = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [accountType, setAccountType] = useState("owner");
 
   const handleSubmit = async (event) => {
     event.preventDefault();
     setLoading(true);
     setError("");
     try {
-      const data = await restaurantAuth.login({ email: email.trim(), password });
+      const payload = { email: email.trim(), password };
+      const data =
+        accountType === "member"
+          ? await restaurantAuth.accountLogin(payload)
+          : await restaurantAuth.login(payload);
+      const session = buildRestaurantSession(data);
+      if (!session) {
+        throw new Error("Unable to resolve restaurant session from response.");
+      }
       toast.success("Signed in successfully.");
-      if (data?.token) {
-        localStorage.setItem("restaurant_token", data.token);
+      if (session?.authToken) {
+        localStorage.setItem("restaurant_token", session.authToken);
+      } else {
+        localStorage.removeItem("restaurant_token");
       }
-      if (data?.user) {
-        localStorage.setItem("restaurant_profile", JSON.stringify(data.user));
-        setRestaurantProfile(data.user);
-      }
+      localStorage.setItem("restaurant_profile", JSON.stringify(session));
+      setRestaurantProfile(session);
       setIsOwner(true);
       navigate("/owner", { replace: true });
     } catch (err) {
@@ -48,6 +58,17 @@ const RestaurantLogin = () => {
         </p>
         {error ? <p className="mb-4 text-sm text-red-600">{error}</p> : null}
         <form onSubmit={handleSubmit} className="space-y-4">
+          <label className="block text-sm text-gray-600">
+            Account Type
+            <select
+              className="mt-1 w-full rounded-xl border border-orange-100 px-4 py-3 text-sm outline-none transition focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
+              value={accountType}
+              onChange={(event) => setAccountType(event.target.value)}
+            >
+              <option value="owner">Owner main (brand controller)</option>
+              <option value="member">Owner / Manager / Staff (branch access)</option>
+            </select>
+          </label>
           <label className="block text-sm text-gray-600">
             Email
             <input

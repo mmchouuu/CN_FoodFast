@@ -2,6 +2,22 @@ import api from './api';
 
 const catalogRequestCache = new Map();
 
+function invalidateRestaurantCatalogCache(restaurantId) {
+  if (!catalogRequestCache.size) {
+    return;
+  }
+  if (!restaurantId) {
+    catalogRequestCache.clear();
+    return;
+  }
+  const prefix = `${restaurantId}:`;
+  for (const key of catalogRequestCache.keys()) {
+    if (key.startsWith(prefix)) {
+      catalogRequestCache.delete(key);
+    }
+  }
+}
+
 function buildParamsKey(params = {}) {
   const entries = Object.entries(params || {})
     .filter(([, value]) => value !== undefined)
@@ -265,6 +281,7 @@ const ownerProductService = {
 
   async createCategory(restaurantId, payload) {
     const { data } = await api.post(`/api/restaurants/${restaurantId}/categories`, payload);
+    invalidateRestaurantCatalogCache(restaurantId);
     return adaptCategory(data) || data;
   },
 
@@ -286,6 +303,7 @@ const ownerProductService = {
 
   async create(restaurantId, payload) {
     const response = await api.post(`/api/restaurants/${restaurantId}/products`, payload);
+    invalidateRestaurantCatalogCache(restaurantId);
     return adaptProduct(response?.data);
   },
 
@@ -294,11 +312,13 @@ const ownerProductService = {
       `/api/restaurants/${restaurantId}/products/${productId}`,
       payload,
     );
+    invalidateRestaurantCatalogCache(restaurantId);
     return adaptProduct(response?.data);
   },
 
   async remove(restaurantId, productId) {
     await api.delete(`/api/restaurants/${restaurantId}/products/${productId}`);
+    invalidateRestaurantCatalogCache(restaurantId);
     return true;
   },
 
@@ -314,6 +334,7 @@ const ownerProductService = {
       `/api/restaurants/${restaurantId}/branches/${branchId}/inventory/${productId}`,
       payload,
     );
+    invalidateRestaurantCatalogCache(restaurantId);
     return adaptBranchAssignment(response?.data || {});
   },
 
@@ -322,11 +343,13 @@ const ownerProductService = {
       `/api/restaurants/${restaurantId}/products/${productId}/options`,
       payload,
     );
+    invalidateRestaurantCatalogCache(restaurantId);
     return data;
   },
 
   async createCombo(restaurantId, payload) {
     const { data } = await api.post(`/api/restaurants/${restaurantId}/combos`, payload);
+    invalidateRestaurantCatalogCache(restaurantId);
     return data;
   },
 };

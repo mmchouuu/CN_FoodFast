@@ -1,7 +1,6 @@
 // api-gateway/src/controllers/orders.controller.js
 const orderClient = require('../services/order.client');
 
-// Hợp nhất: kết hợp buildHeaders và forwardHeaders
 function buildHeaders(req) {
   const headers = {
     'x-request-id': req.id,
@@ -18,9 +17,6 @@ function buildHeaders(req) {
   return headers;
 }
 
-// ----------------------------------------------------------------------
-// List all orders
-// ----------------------------------------------------------------------
 async function listOrders(req, res, next) {
   try {
     const data = await orderClient.listOrders({
@@ -33,9 +29,6 @@ async function listOrders(req, res, next) {
   }
 }
 
-// ----------------------------------------------------------------------
-// List orders by user (giữ nguyên logic xác thực user)
-// ----------------------------------------------------------------------
 async function listOrdersByUser(req, res, next) {
   try {
     const { userId } = req.params;
@@ -59,9 +52,6 @@ async function listOrdersByUser(req, res, next) {
   }
 }
 
-// ----------------------------------------------------------------------
-// Get order by ID
-// ----------------------------------------------------------------------
 async function getOrderById(req, res, next) {
   try {
     const data = await orderClient.getOrderById(req.params.id || req.params.orderId, {
@@ -73,9 +63,6 @@ async function getOrderById(req, res, next) {
   }
 }
 
-// ----------------------------------------------------------------------
-// Create order
-// ----------------------------------------------------------------------
 async function createOrder(req, res, next) {
   try {
     const payload = { ...(req.body || {}) };
@@ -95,9 +82,6 @@ async function createOrder(req, res, next) {
   }
 }
 
-// ----------------------------------------------------------------------
-// Update order status
-// ----------------------------------------------------------------------
 async function updateOrderStatus(req, res, next) {
   try {
     const { id } = req.params;
@@ -119,9 +103,42 @@ async function updateOrderStatus(req, res, next) {
   }
 }
 
-// ----------------------------------------------------------------------
-// Confirm order completion
-// ----------------------------------------------------------------------
+async function cancelOrder(req, res, next) {
+  try {
+    const { id } = req.params;
+    if (!id) {
+      return res.status(400).json({ error: 'order id is required' });
+    }
+
+    const payload = { ...(req.body || {}) };
+    const userId =
+      payload.user_id ||
+      payload.userId ||
+      req.user?.userId ||
+      req.user?.id ||
+      null;
+
+    if (!userId) {
+      return res.status(400).json({ error: 'user_id is required' });
+    }
+
+    if (!payload.user_id) {
+      payload.user_id = userId;
+    }
+    if (!payload.userId) {
+      payload.userId = userId;
+    }
+
+    const data = await orderClient.cancelOrder(id, payload, {
+      headers: buildHeaders(req),
+      params: req.query,
+    });
+    res.json(data);
+  } catch (error) {
+    next(error);
+  }
+}
+
 async function confirmOrder(req, res, next) {
   try {
     const { id } = req.params;
@@ -164,5 +181,6 @@ module.exports = {
   getOrderById,
   createOrder,
   updateOrderStatus,
+  cancelOrder,
   confirmOrder,
 };

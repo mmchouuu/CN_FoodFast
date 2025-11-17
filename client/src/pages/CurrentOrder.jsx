@@ -29,6 +29,7 @@ const ORDER_STATUS_STEPS = [
 ];
 
 const CANCELLABLE_STATUSES = new Set(["pending", "confirmed"]);
+
 const CONFIRMABLE_STATUSES = new Set(["ready", "delivering"]);
 const ORDER_HISTORY_STATUSES = new Set(["delivered", "completed", "cancelled"]);
 
@@ -37,6 +38,7 @@ const SUGGESTED_CANCEL_REASONS = [
   "Order confirmation time is too long",
   "Ordered wrong item/address, want to reorder",
 ];
+
 
 const normaliseStatus = (value) =>
   typeof value === "string" ? value.trim().toLowerCase() : "";
@@ -304,8 +306,10 @@ const CurrentOrder = () => {
   ]
     .filter(Boolean)
     .join(", ");
+
   const canCancel = CANCELLABLE_STATUSES.has(normalisedStatus);
   const canConfirm = CONFIRMABLE_STATUSES.has(normalisedStatus);
+
 
   useEffect(() => {
     if (!canCancel && showCancelDialog) {
