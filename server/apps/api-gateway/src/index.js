@@ -138,6 +138,7 @@ const customerOrderRoutes = require('./routes/orders.customer.routes');
 const ownerOrderRoutes = require('./routes/orders.owner.routes');
 const adminOrderRoutes = require('./routes/orders.admin.routes');
 const ownerSettlementsRoutes = require('./routes/settlements.owner.routes');
+const ownerRestaurantsRoutes = require('./routes/owner.restaurants.routes');
 const app = express();
 
 // ======================================================
@@ -192,6 +193,7 @@ app.use('/api/payments', paymentsRoutes);
 app.use('/customer/orders', customerOrderRoutes);
 app.use('/owner/orders', ownerOrderRoutes);
 app.use('/owner/settlements', ownerSettlementsRoutes);
+app.use('/owner/restaurants', ownerRestaurantsRoutes);
 app.use('/admin/orders', adminOrderRoutes);
 app.get('/health', health);
 app.use(errorHandler);

@@ -1041,6 +1041,17 @@ const CustomerProfilePanel = ({ open, onClose, onLogout }) => {
                     Ordered on{" "}
                     {new Date(review.createdAt).toLocaleDateString("vi-VN")}
                   </p>
+                  {review.ownerReply ? (
+                    <div className="mt-2 rounded-lg bg-white/80 p-3 text-xs text-gray-600">
+                      <p className="font-semibold text-gray-800">Restaurant replied</p>
+                      <p className="mt-1">{review.ownerReply}</p>
+                      <p className="mt-1 text-[11px] text-gray-400">
+                        {review.ownerReplyAt
+                          ? new Date(review.ownerReplyAt).toLocaleString("vi-VN")
+                          : "Recently"}
+                      </p>
+                    </div>
+                  ) : null}
                 </div>
               ))}
             </div>

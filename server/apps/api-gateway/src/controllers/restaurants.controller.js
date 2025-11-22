@@ -26,6 +26,14 @@ function ensureFields(body, fields) {
   return missing;
 }
 
+function ensureOwnerRestaurantAccess(req, restaurantId) {
+  const list =
+    (req.ownerContext?.restaurantIds || []).map((item) => String(item).trim().toLowerCase());
+  if (!restaurantId) return false;
+  const target = String(restaurantId).trim().toLowerCase();
+  return list.includes(target);
+}
+
 async function ownerSignup(req, res, next) {
   try {
     const payload = { ...(req.body || {}) };
@@ -531,6 +539,126 @@ async function createPromotion(req, res, next) {
   }
 }
 
+async function listRestaurantReviewsOwner(req, res, next) {
+  try {
+    const { restaurantId } = req.params;
+    if (!restaurantId) {
+      return badRequest(res, 'restaurantId is required');
+    }
+    if (!ensureOwnerRestaurantAccess(req, restaurantId)) {
+      return res.status(403).json({ message: 'You do not have access to this restaurant' });
+    }
+    const params = { ...(req.query || {}) };
+    if (req.ownerContext?.branchIds?.length) {
+      params.branchIds = req.ownerContext.branchIds.join(',');
+    }
+    const result = await restaurantClient.listRestaurantReviews(restaurantId, params, req);
+    if (Array.isArray(result)) {
+      return res.json({
+        reviews: result,
+        summary: { averageRating: null, totalReviews: result.length },
+      });
+    }
+    return res.json(result);
+  } catch (error) {
+    return handleServiceError(error, res, next);
+  }
+}
+
+async function replyRestaurantReviewOwner(req, res, next) {
+  try {
+    const { restaurantId, reviewId } = req.params;
+    if (!restaurantId || !reviewId) {
+      return badRequest(res, 'restaurantId and reviewId are required');
+    }
+    if (!ensureOwnerRestaurantAccess(req, restaurantId)) {
+      return res.status(403).json({ message: 'You do not have access to this restaurant' });
+    }
+    const body = { ...(req.body || {}) };
+    const reply =
+      typeof body.reply === 'string' && body.reply.trim().length
+        ? body.reply.trim()
+        : typeof body.message === 'string' && body.message.trim().length
+          ? body.message.trim()
+          : null;
+    if (!reply) {
+      return badRequest(res, 'reply text is required');
+    }
+    body.reply = reply;
+    body.ownerUserId = req.ownerContext?.ownerId || body.ownerUserId || body.owner_user_id;
+    const result = await restaurantClient.replyRestaurantReview(restaurantId, reviewId, body, req);
+    return res.json(result);
+  } catch (error) {
+    return handleServiceError(error, res, next);
+  }
+}
+
+async function listRestaurantReviews(req, res, next) {
+  try {
+    const { restaurantId } = req.params;
+    if (!restaurantId) {
+      return badRequest(res, 'restaurantId is required');
+    }
+    const params = { ...(req.query || {}) };
+    const result = await restaurantClient.listRestaurantReviews(restaurantId, params, req);
+    if (Array.isArray(result)) {
+      return res.json({
+        reviews: result,
+        summary: { averageRating: null, totalReviews: result.length },
+      });
+    }
+    return res.json(result);
+  } catch (error) {
+    return handleServiceError(error, res, next);
+  }
+}
+
+async function createRestaurantReview(req, res, next) {
+  try {
+    const { restaurantId } = req.params;
+    if (!restaurantId) {
+      return badRequest(res, 'restaurantId is required');
+    }
+    const body = { ...(req.body || {}) };
+    const userId = req.user?.userId || req.user?.id || req.user?.sub || null;
+    if (!body.userId && userId) {
+      body.userId = userId;
+    }
+    if (!body.customerName && req.user?.fullName) {
+      body.customerName = req.user.fullName;
+    }
+    const result = await restaurantClient.createRestaurantReview(restaurantId, body, req);
+    return res.status(201).json(result);
+  } catch (error) {
+    return handleServiceError(error, res, next);
+  }
+}
+
+async function listProductReviews(req, res, next) {
+  try {
+    const { restaurantId, productId } = req.params;
+    if (!restaurantId || !productId) {
+      return badRequest(res, 'restaurantId and productId are required');
+    }
+    const params = { ...(req.query || {}) };
+    const result = await restaurantClient.listProductReviews(
+      restaurantId,
+      productId,
+      params,
+      req,
+    );
+    if (Array.isArray(result)) {
+      return res.json({
+        reviews: result,
+        summary: { averageRating: null, totalReviews: result.length },
+      });
+    }
+    return res.json(result);
+  } catch (error) {
+    return handleServiceError(error, res, next);
+  }
+}
+
 async function listRestaurantProducts(req, res, next) {
   try {
     const result = await restaurantClient.listRestaurantProducts(req.params.id, req.query, req);
@@ -638,4 +766,9 @@ module.exports = {
   createOptionGroup,
   createCombo,
   createPromotion,
+  listRestaurantReviews,
+  createRestaurantReview,
+  listRestaurantReviewsOwner,
+  replyRestaurantReviewOwner,
+  listProductReviews,
 };

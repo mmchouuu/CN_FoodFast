@@ -4,7 +4,7 @@ const cors = require('cors');
 const config = require('./config');
 const deliveryRoutes = require('./routes');
 const deliveryService = require('./services/delivery.service');
-const logger = require('../../../libs/common/logger');
+const logger = require('./logger');
 
 const app = express();
 

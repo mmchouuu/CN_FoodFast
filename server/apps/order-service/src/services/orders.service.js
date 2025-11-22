@@ -4,6 +4,7 @@ const { pool } = require('../db');
 const productClient = require('../clients/product.client');
 const paymentClient = require('../clients/payment.client');
 const { publishOrderEvent } = require('../utils/rabbitmq');
+const { deriveDeliveryRecord } = require('../utils/delivery');
 
 const ALLOW_CLIENT_PRICING_FALLBACK = process.env.ALLOW_CLIENT_PRICING_FALLBACK === 'true';
 const DEFAULT_CURRENCY = 'VND';
@@ -862,19 +863,63 @@ const enrichMetadata = ({ payload, pricing, payment, user }) => {
     });
   }
 
-  return {
+  const deliveryMeta =
+    base.delivery && typeof base.delivery === 'object' ? { ...base.delivery } : {};
+  const applyDeliverySource = (source) => {
+    if (!source || typeof source !== 'object') return;
+    if (source.delivery_status || source.status) {
+      deliveryMeta.delivery_status = source.delivery_status || source.status;
+    }
+    if (source.estimated_at || source.estimatedAt) {
+      deliveryMeta.estimated_at = source.estimated_at || source.estimatedAt;
+    }
+    if (source.delivered_at || source.deliveredAt) {
+      deliveryMeta.delivered_at = source.delivered_at || source.deliveredAt;
+    }
+    if (source.delivery_address || source.address || source.location) {
+      deliveryMeta.delivery_address =
+        source.delivery_address || source.address || source.location;
+    }
+    if (source.contact_name || source.contactName) {
+      deliveryMeta.contact_name = source.contact_name || source.contactName;
+    }
+    if (source.contact_phone || source.contactPhone) {
+      deliveryMeta.contact_phone = source.contact_phone || source.contactPhone;
+    }
+    if (source.proof) {
+      deliveryMeta.proof = ensureJson(source.proof);
+    }
+    if (source.provider) {
+      deliveryMeta.provider = source.provider;
+    }
+  };
+  applyDeliverySource(pricing.delivery);
+  applyDeliverySource(payload.delivery);
+
+  if (!base.delivery_address && deliveryMeta.delivery_address) {
+    base.delivery_address = deliveryMeta.delivery_address;
+  }
+
+  const result = {
     ...base,
     payment: paymentMeta,
     pricing: pricingMeta,
     timeline,
     delivery_address:
       base.delivery_address ||
+      deliveryMeta.delivery_address ||
       pricing.delivery?.delivery_address ||
       payload.delivery_address ||
       payload.delivery?.delivery_address ||
       null,
     placed_at: base.placed_at || placedAt,
   };
+
+  if (Object.keys(deliveryMeta).length) {
+    result.delivery = deliveryMeta;
+  }
+
+  return result;
 };
 
 async function insertOrderGraph({
@@ -1094,38 +1139,6 @@ async function insertOrderGraph({
     );
   }
 
-  if (delivery) {
-    await client.query(
-      `
-        INSERT INTO deliveries (
-          order_id,
-          delivery_status,
-          delivery_address,
-          contact_name,
-          contact_phone,
-          estimated_at,
-          delivered_at,
-          provider,
-          proof
-        )
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-      `,
-      [
-        order.id,
-        delivery.delivery_status || 'preparing',
-        typeof delivery.delivery_address === 'object'
-          ? JSON.stringify(delivery.delivery_address)
-          : delivery.delivery_address,
-        delivery.contact_name || null,
-        delivery.contact_phone || null,
-        delivery.estimated_at || null,
-        delivery.delivered_at || null,
-        delivery.provider || null,
-        delivery.proof || {},
-      ],
-    );
-  }
-
   return order;
 }
 
@@ -1203,16 +1216,6 @@ async function fetchOrdersByIds(orderIds, { client, includeEvents = false, inclu
     `
       SELECT * FROM order_promotions
       WHERE order_id = ANY($1::uuid[])
-    `,
-    [orderIds],
-  );
-
-  const deliveryRes = await client.query(
-    `
-      SELECT DISTINCT ON (order_id) *
-      FROM deliveries
-      WHERE order_id = ANY($1::uuid[])
-      ORDER BY order_id, created_at DESC
     `,
     [orderIds],
   );
@@ -1315,32 +1318,6 @@ async function fetchOrdersByIds(orderIds, { client, includeEvents = false, inclu
     promotionsByOrder.set(promotion.order_id, list);
   }
 
-  const deliveryByOrder = new Map();
-  for (const delivery of deliveryRes.rows) {
-    let parsedAddress = delivery.delivery_address;
-    if (typeof parsedAddress === 'string') {
-      try {
-        parsedAddress = JSON.parse(parsedAddress);
-      } catch (err) {
-        parsedAddress = parsedAddress;
-      }
-    }
-    deliveryByOrder.set(delivery.order_id, {
-      id: delivery.id,
-      order_id: delivery.order_id,
-      delivery_status: delivery.delivery_status,
-      delivery_address: parsedAddress,
-      contact_name: delivery.contact_name,
-      contact_phone: delivery.contact_phone,
-      estimated_at: delivery.estimated_at,
-      delivered_at: delivery.delivered_at,
-      provider: delivery.provider,
-      proof: delivery.proof || {},
-      created_at: delivery.created_at,
-      updated_at: delivery.updated_at,
-    });
-  }
-
   const eventsByOrder = new Map();
   for (const event of eventsRes.rows) {
     const list = eventsByOrder.get(event.order_id) || [];
@@ -1394,14 +1371,18 @@ async function fetchOrdersByIds(orderIds, { client, includeEvents = false, inclu
       taxes: itemTaxesByItem.get(item.id) || [],
     }));
 
+    const metadata = parseJsonField(orderRow.metadata, {}) || {};
+    const shippingSnapshot =
+      parseJsonField(orderRow.shipping_address_snapshot, null) || orderRow.shipping_address_snapshot || null;
     const order = {
       ...orderRow,
+      metadata,
       items: enrichedItems,
       discounts: discountsByOrder.get(orderId) || [],
       surcharges: surchargesByOrder.get(orderId) || [],
       promotions: promotionsByOrder.get(orderId) || [],
       tax_breakdowns: orderTaxesByOrder.get(orderId) || [],
-      delivery: deliveryByOrder.get(orderId) || null,
+      delivery: deriveDeliveryRecord(orderRow, metadata, shippingSnapshot),
     };
 
     if (includeEvents) {
@@ -2621,25 +2602,24 @@ async function confirmCustomerOrderDelivery({ user, orderId, payload = {} }) {
       actorId: userId,
       source: 'customer_confirm_delivery',
     });
+    const metadata = parseJsonField(order.metadata, {}) || {};
+    const deliveryMeta =
+      metadata.delivery && typeof metadata.delivery === 'object' ? { ...metadata.delivery } : {};
+    const deliveredAt = new Date().toISOString();
+    deliveryMeta.delivery_status = 'delivered';
+    deliveryMeta.delivered_at = deliveryMeta.delivered_at || deliveredAt;
+    metadata.delivery = deliveryMeta;
 
     await client.query(
       `
         UPDATE orders
-        SET status = 'completed', updated_at = now(), timeline_metadata = $2
+        SET status = 'completed',
+            metadata = $2,
+            updated_at = now(),
+            timeline_metadata = $3
         WHERE id = $1
       `,
-      [orderId, JSON.stringify(timelineMetadata)],
-    );
-
-    await client.query(
-      `
-        UPDATE deliveries
-        SET delivery_status = 'delivered',
-            delivered_at = COALESCE(delivered_at, now()),
-            updated_at = now()
-        WHERE order_id = $1
-      `,
-      [orderId],
+      [orderId, JSON.stringify(metadata), JSON.stringify(timelineMetadata)],
     );
 
     await logOrderEvent(client, {

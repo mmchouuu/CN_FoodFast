@@ -7,5 +7,5 @@ until pg_isready -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME"; do
   sleep 1
 done
 
-echo "Postgres is ready - starting Product Service"
-exec node server.js
+echo "Postgres is ready - starting Delivery Service"
+exec node src/index.js

@@ -1,5 +1,5 @@
 const db = require('../db');
-const logger = require('../../../../libs/common/logger');
+const logger = require('../logger');
 
 const parseLimit = (value) => {
   const parsed = Number(value);

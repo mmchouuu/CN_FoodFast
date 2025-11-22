@@ -129,6 +129,7 @@ const RestaurantDetail = () => {
     getDishesByRestaurant,
     getReviewsForRestaurant,
     getRestaurantRatingSummary,
+    loadRestaurantReviews,
     addToCart,
     currency,
   } = useAppContext();
@@ -209,7 +210,11 @@ const RestaurantDetail = () => {
     return Array.from(set);
   }, [branchCategoryFilters, dishes]);
 
-  const ratingTargetId = restaurant?.id || branchId;
+  const ratingTargetId =
+    restaurant?.brandRestaurantId ||
+    restaurant?.restaurantId ||
+    restaurant?.id ||
+    branchId;
   const reviewsForRestaurant = useMemo(
     () => getReviewsForRestaurant(ratingTargetId),
     [getReviewsForRestaurant, ratingTargetId]
@@ -222,6 +227,11 @@ const RestaurantDetail = () => {
   useEffect(() => {
     setActiveCategory("all");
   }, [restaurant?.id]);
+
+  useEffect(() => {
+    if (!ratingTargetId) return;
+    loadRestaurantReviews(ratingTargetId).catch(() => {});
+  }, [ratingTargetId, loadRestaurantReviews]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -722,6 +732,20 @@ const RestaurantDetail = () => {
                   </span>
                 ))}
               </div>
+              {review.ownerReply ? (
+                <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
+                  <p className="font-semibold text-slate-900">Restaurant replied</p>
+                  <p className="mt-1">{review.ownerReply}</p>
+                  <p className="mt-2 text-xs text-slate-400">
+                    {review.ownerReplyAt
+                      ? new Date(review.ownerReplyAt).toLocaleString("en-US", {
+                          dateStyle: "medium",
+                          timeStyle: "short",
+                        })
+                      : "Just now"}
+                  </p>
+                </div>
+              ) : null}
             </article>
           ))}
           {!reviewsForRestaurant.length && (

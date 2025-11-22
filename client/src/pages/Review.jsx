@@ -6,7 +6,12 @@ import { useAppContext } from "../context/AppContext";
 const ratingLevels = [1, 2, 3, 4, 5];
 
 const Review = () => {
-  const { pastOrders, getRestaurantById, getDishById } = useAppContext();
+  const {
+    pastOrders,
+    getRestaurantById,
+    getDishById,
+    submitRestaurantReview,
+  } = useAppContext();
   const [searchParams] = useSearchParams();
   const orderId = searchParams.get("orderId");
 
@@ -16,6 +21,31 @@ const Review = () => {
   );
 
   const restaurant = order ? getRestaurantById(order.restaurantId) : null;
+
+  const targetRestaurantId =
+    restaurant?.brandRestaurantId ||
+    restaurant?.restaurantId ||
+    restaurant?.brand?.id ||
+    order?.restaurantBrandId ||
+    order?.restaurant_brand_id ||
+    order?.restaurantBrandID ||
+    null;
+
+  const targetBranchId =
+    restaurant?.id ||
+    restaurant?.branchId ||
+    order?.restaurantId ||
+    order?.branchId ||
+    order?.branch_id ||
+    null;
+
+  const resolvedRestaurantId =
+    targetRestaurantId ||
+    targetBranchId ||
+    order?.restaurantId ||
+    order?.branchId ||
+    order?.branch_id ||
+    null;
 
   const [restaurantRating, setRestaurantRating] = useState(5);
   const [dishRatings, setDishRatings] = useState(
@@ -27,6 +57,7 @@ const Review = () => {
   );
   const [riderRating, setRiderRating] = useState(5);
   const [feedback, setFeedback] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
   if (!order) {
     return (
@@ -39,10 +70,44 @@ const Review = () => {
     );
   }
 
-  const handleSubmit = (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault();
-    toast.success("Thank you for your feedback!");
-    setFeedback("");
+    if (!order) return;
+    if (!resolvedRestaurantId) {
+      toast.error("Restaurant information is missing. Please try again later.");
+      return;
+    }
+    const dishesPayload = order.items.map((item) => {
+      const dish = getDishById(item.dishId);
+      return {
+        productId: item.dishId,
+        productName: dish?.title || item.dishId,
+        productImage: dish?.images?.[0] || dish?.image || null,
+        rating: dishRatings[item.dishId] || restaurantRating,
+      };
+    });
+    try {
+      setSubmitting(true);
+      await submitRestaurantReview({
+        restaurantId: resolvedRestaurantId,
+        branchId: targetBranchId,
+        orderId: order.id,
+        rating: restaurantRating,
+        riderRating,
+        comment: feedback,
+        dishes: dishesPayload,
+      });
+      toast.success("Thank you for your feedback!");
+      setFeedback("");
+    } catch (error) {
+      const message =
+        error?.response?.data?.message ||
+        error?.message ||
+        "Unable to submit review right now.";
+      toast.error(message);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -86,11 +151,11 @@ const Review = () => {
             Rate your dishes
           </h2>
           <div className="grid gap-4 md:grid-cols-2">
-            {order.items.map((item) => {
+            {order.items.map((item, index) => {
               const dish = getDishById(item.dishId);
               return (
                 <div
-                  key={item.dishId}
+                  key={item.orderItemId || item.id || `${item.dishId}-${index}`}
                   className="rounded-2xl border border-gray-200 p-5 text-sm text-gray-600"
                 >
                   <p className="text-base font-semibold text-gray-900">
@@ -159,9 +224,14 @@ const Review = () => {
 
         <button
           type="submit"
-          className="rounded-full bg-orange-500 px-6 py-3 text-sm font-semibold text-white transition hover:bg-orange-600"
+          disabled={submitting}
+          className={`rounded-full px-6 py-3 text-sm font-semibold text-white transition ${
+            submitting
+              ? "cursor-not-allowed bg-orange-300"
+              : "bg-orange-500 hover:bg-orange-600"
+          }`}
         >
-          Submit review
+          {submitting ? "Submitting..." : "Submit review"}
         </button>
       </form>
     </div>

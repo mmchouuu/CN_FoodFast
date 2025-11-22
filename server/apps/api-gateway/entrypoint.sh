@@ -24,6 +24,7 @@ if [ "${GATEWAY_HTTPS_ENABLED}" = "true" ]; then
       -addext "subjectAltName=${ALT_NAMES}"
     echo "[api-gateway] Self-signed certificate created at $CERT_PATH"
   fi
+
 fi
 
 exec node src/index.js

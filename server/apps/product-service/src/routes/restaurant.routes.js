@@ -31,5 +31,15 @@ router.put('/:restaurantId/branches/:branchId/inventory/:productId', menuControl
 router.post('/:restaurantId/products/:productId/options', menuController.createOptionGroup);
 router.post('/:restaurantId/combos', menuController.createCombo);
 router.post('/:restaurantId/promotions', menuController.createPromotion);
+router.get('/:restaurantId/reviews', restaurantController.listRestaurantReviews);
+router.post('/:restaurantId/reviews', restaurantController.createRestaurantReview);
+router.get(
+  '/:restaurantId/products/:productId/reviews',
+  restaurantController.listProductReviews,
+);
+router.post(
+  '/:restaurantId/reviews/:reviewId/reply',
+  restaurantController.replyRestaurantReview,
+);
 
 module.exports = router;
