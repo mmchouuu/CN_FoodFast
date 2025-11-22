@@ -809,7 +809,7 @@ async function recordOrderPlacement(orderId) {
   }
 }
 
-async function recordRefund(refund, payment) {
+async function recordRefund(refund, payment, options = {}) {
   if (!refund || !payment) return;
   await ensureSettlementSchema();
   const branchId = payment.branch_id;
@@ -853,6 +853,9 @@ async function recordRefund(refund, payment) {
         meta: {
           currency,
           source: 'refund',
+          reason: options.reason || refund.reason || null,
+          actor: options.actor || 'system',
+          auto: options.auto ?? true,
         },
         isAdminOnly: false,
       });

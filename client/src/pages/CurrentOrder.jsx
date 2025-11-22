@@ -28,7 +28,7 @@ const ORDER_STATUS_STEPS = [
   { key: "completed", label: "Completed" },
 ];
 
-const CANCELLABLE_STATUSES = new Set(["pending", "confirmed"]);
+const CANCELLABLE_STATUSES = new Set(["pending", "confirmed", "preparing"]);
 
 const CONFIRMABLE_STATUSES = new Set(["ready", "delivering"]);
 const ORDER_HISTORY_STATUSES = new Set(["delivered", "completed", "cancelled"]);
@@ -40,8 +40,16 @@ const SUGGESTED_CANCEL_REASONS = [
 ];
 
 
-const normaliseStatus = (value) =>
-  typeof value === "string" ? value.trim().toLowerCase() : "";
+const normaliseStatus = (value) => {
+  if (typeof value !== "string") {
+    return "";
+  }
+  const key = value.trim().toLowerCase();
+  if (!key) {
+    return "";
+  }
+  return key.startsWith("cancel") ? "cancelled" : key;
+};
 
 const buildTrackingSteps = (status, placedAt, updatedAt) => {
   const normalisedStatus = normaliseStatus(status);
@@ -288,11 +296,40 @@ const CurrentOrder = () => {
       }));
     }
 
-    return steps.map((step) => ({
+    let mapped = steps.map((step) => ({
       ...step,
       variant: step.variant || "default",
     }));
-  }, [order.timeline, order.status, order.placedAt, order.updatedAt]);
+
+    // Insert a "Request Cancel" row if customer has requested cancellation
+    const cancelReqRaw = order?.metadata?.cancel_request || order?.metadata?.order_refund_request || null;
+    const rawStatus = cancelReqRaw && typeof cancelReqRaw.status === 'string' ? cancelReqRaw.status.toLowerCase() : '';
+    const pendingCancel = rawStatus === 'pending' || rawStatus === 'requested';
+    if (pendingCancel) {
+      const reqAt = cancelReqRaw?.created_at || cancelReqRaw?.at || cancelReqRaw?.requested_at;
+      const time = reqAt
+        ? new Date(reqAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+        : "Pending";
+      const preparingIndex = mapped.findIndex(
+        (s) => normaliseStatus(s.status || s.label) === "preparing",
+      );
+      const insertAt = preparingIndex >= 0 ? preparingIndex + 1 : mapped.length;
+      mapped = [
+        ...mapped.slice(0, insertAt),
+        {
+          id: "status-request-cancel",
+          label: "Request Cancel",
+          status: "request-cancel",
+          completed: false,
+          timestamp: time,
+          variant: "cancelled",
+        },
+        ...mapped.slice(insertAt),
+      ];
+    }
+
+    return mapped;
+  }, [order.timeline, order.status, order.placedAt, order.updatedAt, order?.metadata]);
   const totals = useMemo(() => resolveTotals(order), [order]);
   const paymentSummary = useMemo(
     () => resolvePaymentSummary(order),
@@ -307,7 +344,17 @@ const CurrentOrder = () => {
     .filter(Boolean)
     .join(", ");
 
-  const canCancel = CANCELLABLE_STATUSES.has(normalisedStatus);
+  const cancelRequest = order.metadata?.cancel_request || order.metadata?.order_refund_request || null;
+  const cancelRequestStatus =
+    cancelRequest && typeof cancelRequest.status === "string"
+      ? (cancelRequest.status.toLowerCase() === 'requested' ? 'pending' : cancelRequest.status.toLowerCase())
+      : "";
+  const isCancelRequestPending = cancelRequestStatus === "pending";
+  const isCancelRequestRejected = cancelRequestStatus === "rejected";
+  const canCancel =
+    CANCELLABLE_STATUSES.has(normalisedStatus) &&
+    !isCancelRequestPending &&
+    !isCancelRequestRejected;
   const canConfirm = CONFIRMABLE_STATUSES.has(normalisedStatus);
 
 
@@ -506,6 +553,25 @@ const CurrentOrder = () => {
             </div>
           )}
         </header>
+
+        {cancelRequestStatus === "pending" ? (
+          <div className="rounded-3xl border border-amber-200 bg-amber-50 p-6 shadow-sm">
+            <p className="text-sm font-semibold text-amber-800">
+              Cancellation request sent, please wait for restaurant confirmation.
+            </p>
+            <p className="text-sm text-amber-700">
+              We will notify you as soon as your request is processed.
+            </p>
+          </div>
+        ) : null}
+
+        {cancelRequestStatus === "rejected" ? (
+          <div className="rounded-3xl border border-red-200 bg-red-50 p-6 shadow-sm">
+            <p className="text-sm font-semibold text-red-700">
+              Notice: “Cancellation request denied, application is still being prepared”.
+            </p>
+          </div>
+        ) : null}
 
         <div className="rounded-3xl bg-white p-8 shadow-sm">
           <h2 className="text-lg font-semibold text-gray-900">

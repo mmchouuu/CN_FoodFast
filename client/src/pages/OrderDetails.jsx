@@ -28,7 +28,7 @@ const ORDER_STATUS_STEPS = [
   { key: "completed", label: "Completed" },
 ];
 
-const CANCELLABLE_STATUSES = new Set(["pending", "confirmed"]);
+const CANCELLABLE_STATUSES = new Set(["pending", "confirmed", "preparing"]);
 const CONFIRMABLE_STATUSES = new Set(["delivering"]);
 
 const SUGGESTED_CANCEL_REASONS = [
@@ -37,8 +37,16 @@ const SUGGESTED_CANCEL_REASONS = [
   "Ordered wrong item/address, want to reorder",
 ];
 
-const normaliseStatus = (value) =>
-  typeof value === "string" ? value.trim().toLowerCase() : "";
+const normaliseStatus = (value) => {
+  if (typeof value !== "string") {
+    return "";
+  }
+  const key = value.trim().toLowerCase();
+  if (!key) {
+    return "";
+  }
+  return key.startsWith("cancel") ? "cancelled" : key;
+};
 
 const buildTrackingSteps = (status, placedAt, updatedAt) => {
   const normalisedStatus = normaliseStatus(status);
@@ -291,8 +299,18 @@ const OrderDetails = () => {
     [order],
   );
   const normalisedStatus = normaliseStatus(order?.status);
-
-  const canCancel = Boolean(order) && CANCELLABLE_STATUSES.has(normalisedStatus);
+  const cancelRequest = order?.metadata?.cancel_request || null;
+  const cancelRequestStatus =
+    cancelRequest && typeof cancelRequest.status === "string"
+      ? cancelRequest.status.toLowerCase()
+      : "";
+  const isCancelRequestPending = cancelRequestStatus === "pending";
+  const isCancelRequestRejected = cancelRequestStatus === "rejected";
+  const canCancel =
+    Boolean(order) &&
+    CANCELLABLE_STATUSES.has(normalisedStatus) &&
+    !isCancelRequestPending &&
+    !isCancelRequestRejected;
   const canConfirm = Boolean(order) && CONFIRMABLE_STATUSES.has(normalisedStatus);
 
 
@@ -500,6 +518,18 @@ const OrderDetails = () => {
           </Link>
         </div>
       </header>
+
+      {cancelRequestStatus === "pending" ? (
+        <div className="rounded-3xl border border-amber-200 bg-amber-50 p-6 text-sm text-amber-700">
+          Cancellation request has been sent, please wait for restaurant confirmation.
+        </div>
+      ) : null}
+
+      {cancelRequestStatus === "rejected" ? (
+        <div className="rounded-3xl border border-red-200 bg-red-50 p-6 text-sm font-semibold text-red-700">
+          Notice: “Cancellation request denied, application is still being prepared”.
+        </div>
+      ) : null}
 
       <section className="grid gap-6 lg:grid-cols-[2fr,1.2fr]">
         <div className="space-y-6">

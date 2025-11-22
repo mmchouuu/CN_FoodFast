@@ -66,7 +66,6 @@ const ORDER_REVIEWABLE_STATUSES = new Set(['delivered', 'completed']);
 const ORDER_STATUS_SEQUENCE = [
     'pending',
     'confirmed',
-    'cancelled',
     'preparing',
     'ready',
     'delivering',
@@ -645,23 +644,31 @@ const normaliseStatusKey = (value) => {
     if (!key) {
         return null;
     }
-    return ORDER_STATUS_SEQUENCE.includes(key) ? key : null;
+    const canonical = key.startsWith('cancel') ? 'cancelled' : key;
+    return ORDER_STATUS_SEQUENCE.includes(canonical) ? canonical : null;
 };
 
-const resolveTimelineSequence = (status) => {
+const resolveTimelineSequence = (status, options = {}) => {
     const normalised = typeof status === 'string' ? status.toLowerCase() : '';
-    if (normalised === 'cancelled') {
-        return ['pending', 'confirmed', 'cancelled'];
+    const includeCancelled =
+        options.includeCancelled === undefined ? normalised === 'cancelled' : Boolean(options.includeCancelled);
+    if (normalised === 'cancelled' || includeCancelled) {
+        const includeConfirmed =
+            options.includeConfirmed === undefined ? true : Boolean(options.includeConfirmed);
+        return includeConfirmed ? ['pending', 'confirmed', 'cancelled'] : ['pending', 'cancelled'];
     }
     return ORDER_STATUS_SEQUENCE;
 };
 
-const buildDefaultTimeline = (status, placedAt) => {
+const buildDefaultTimeline = (status, placedAt, updatedAt, options = {}) => {
     const normalizedStatus = typeof status === 'string' ? status.toLowerCase() : '';
-    const sequence = resolveTimelineSequence(normalizedStatus);
+    const sequence = resolveTimelineSequence(normalizedStatus, options);
     const statusIndex = sequence.indexOf(normalizedStatus);
     const placedTime = placedAt
         ? new Date(placedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        : null;
+    const currentStatusTime = updatedAt
+        ? new Date(updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         : null;
 
     return sequence.map((key, index) => {
@@ -673,7 +680,7 @@ const buildDefaultTimeline = (status, placedAt) => {
             if (index === 0) {
                 timestamp = placedTime;
             } else if (isKnownStatus && index === statusIndex) {
-                timestamp = 'In progress';
+                timestamp = currentStatusTime || 'In progress';
             } else {
                 timestamp = 'Completed';
             }
@@ -690,22 +697,31 @@ const buildDefaultTimeline = (status, placedAt) => {
 
 const buildTimelineFromEvents = (rawOrder, status, placedAt) => {
     const events = Array.isArray(rawOrder?.events) ? rawOrder.events : [];
-    const metadataTimeline = Array.isArray(rawOrder?.metadata?.timeline)
+    const metadataTimelineSource = Array.isArray(rawOrder?.metadata?.timeline)
         ? rawOrder.metadata.timeline
         : [];
+    const fallbackTimeline = Array.isArray(rawOrder?.timeline_metadata)
+        ? rawOrder.timeline_metadata
+        : [];
+    const metadataTimeline = [...fallbackTimeline, ...metadataTimelineSource];
     if (!events.length && !metadataTimeline.length && !placedAt) {
         return null;
     }
 
     const timestamps = new Map();
+    const seenStatuses = new Set();
     if (placedAt) {
         timestamps.set('pending', placedAt);
+        seenStatuses.add('pending');
     }
+
+    const updatedAt = rawOrder?.updated_at || rawOrder?.updatedAt || null;
 
     metadataTimeline.forEach((entry) => {
         if (!entry) return;
         const entryStatus = normaliseStatusKey(entry.status || entry.code);
         if (!entryStatus) return;
+        seenStatuses.add(entryStatus);
         const resolvedTimestamp = entry.at || entry.timestamp || entry.created_at || null;
         if (resolvedTimestamp && !timestamps.has(entryStatus)) {
             timestamps.set(entryStatus, resolvedTimestamp);
@@ -721,6 +737,7 @@ const buildTimelineFromEvents = (rawOrder, status, placedAt) => {
         if (type === 'OrderCreated') {
             if (event.created_at) {
                 timestamps.set('pending', event.created_at);
+                seenStatuses.add('pending');
             }
             return;
         }
@@ -730,15 +747,18 @@ const buildTimelineFromEvents = (rawOrder, status, placedAt) => {
                 normaliseStatusKey(payload.status) ||
                 normaliseStatusKey(payload.to);
             if (nextStatus) {
+                seenStatuses.add(nextStatus);
                 timestamps.set(nextStatus, event.created_at || payload.at || null);
             }
             return;
         }
         if (type === 'OrderCompleted') {
+            seenStatuses.add('completed');
             timestamps.set('completed', event.created_at || payload.at || null);
             return;
         }
         if (type === 'OrderCancelled') {
+            seenStatuses.add('cancelled');
             timestamps.set('cancelled', event.created_at || payload.at || null);
         }
     });
@@ -748,7 +768,13 @@ const buildTimelineFromEvents = (rawOrder, status, placedAt) => {
     }
 
     const normalizedStatus = typeof status === 'string' ? status.toLowerCase() : '';
-    const sequence = resolveTimelineSequence(normalizedStatus || 'pending');
+    const includeConfirmed =
+        normalizedStatus === 'cancelled' ? seenStatuses.has('confirmed') : true;
+    const includeCancelled = normalizedStatus === 'cancelled' || seenStatuses.has('cancelled');
+    const sequence = resolveTimelineSequence(normalizedStatus || 'pending', {
+        includeConfirmed,
+        includeCancelled,
+    });
     const statusIndex = sequence.indexOf(normalizedStatus);
 
     return sequence.map((key, index) => {
@@ -759,11 +785,14 @@ const buildTimelineFromEvents = (rawOrder, status, placedAt) => {
         let timestamp = formattedTimestamp;
         if (!timestamp) {
             if (statusIndex === index) {
-                timestamp = 'In progress';
+                timestamp = updatedAt ? formatTimelineTimestamp(updatedAt) : 'In progress';
             } else if (index < statusIndex) {
-                timestamp = 'Completed';
+                // show the time of previous known status if missing
+                const prev = timestamps.get(sequence[index]) || timestamps.get(sequence[index - 1]);
+                timestamp = formatTimelineTimestamp(prev) || 'Completed';
             } else {
-                timestamp = 'Pending';
+                // show placed time for Pending specifically
+                timestamp = key === 'pending' ? formatTimelineTimestamp(timestamps.get('pending')) || 'Pending' : 'Pending';
             }
         }
         return {
@@ -945,7 +974,7 @@ const adaptOrderFromApi = (order) => {
         fallbackSnapshotFromMap?.image ||
         restaurantPlaceholderImage;
     const timelineFromEvents = buildTimelineFromEvents(order, lowerStatus, placedAt);
-    const timeline = timelineFromEvents || buildDefaultTimeline(lowerStatus, placedAt);
+    const timeline = timelineFromEvents || buildDefaultTimeline(lowerStatus, placedAt, order.updated_at);
 
     return {
         id: order.id,
@@ -2856,8 +2885,19 @@ export const AppContextProvider = ({ children }) => {
                 const adapted = adaptOrderFromApi(data);
                 if (adapted) {
                     updateOrderCollections(adapted);
+                    const cancelRequestStatus =
+                        adapted?.metadata?.cancel_request?.status &&
+                        typeof adapted.metadata.cancel_request.status === 'string'
+                            ? adapted.metadata.cancel_request.status.toLowerCase()
+                            : '';
+                    if (cancelRequestStatus === 'pending') {
+                        toast.success('Cancellation request sent to restaurant. We will notify you once confirmed.');
+                    } else {
+                        toast.success('The order has been canceled.');
+                    }
+                } else {
+                    toast.success('The order has been canceled.');
                 }
-                toast.success('Đơn hàng đã được huỷ.');
                 return adapted;
             } catch (error) {
                 const message =
