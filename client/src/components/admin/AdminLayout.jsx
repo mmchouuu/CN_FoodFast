@@ -6,6 +6,7 @@ const navItems = [
     { path: "/admin", label: "Overview Dashboard" },
     { path: "/admin/customers", label: "Customer Management" },
     { path: "/admin/restaurants", label: "Restaurant Management" },
+    { path: "/admin/orders", label: "Order Management" },
     { path: "/admin/payouts", label: "Payout Management" },
     { path: "/admin/cod-settlements", label: "COD Settlements" },
     { path: "/admin/authorization", label: "Account Authorization" },

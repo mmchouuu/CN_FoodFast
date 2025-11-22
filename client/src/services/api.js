@@ -6,12 +6,22 @@ const timeoutMs = Number(import.meta.env.VITE_API_TIMEOUT ?? 90000);
 
 const matchesAdminRoute = (rawUrl = '') => {
   if (typeof rawUrl !== 'string' || rawUrl.length === 0) return false;
-  if (rawUrl.startsWith('/api/admin') || rawUrl.startsWith('api/admin')) return true;
+  if (
+    rawUrl.startsWith('/api/admin') ||
+    rawUrl.startsWith('api/admin') ||
+    rawUrl.startsWith('/admin') ||
+    rawUrl.startsWith('admin/')
+  ) {
+    return true;
+  }
   try {
     const parsed = new URL(rawUrl, baseURL);
-    return parsed.pathname.startsWith('/api/admin');
+    return (
+      parsed.pathname.startsWith('/api/admin') ||
+      parsed.pathname.startsWith('/admin')
+    );
   } catch (error) {
-    return rawUrl.includes('/api/admin');
+    return rawUrl.includes('/api/admin') || rawUrl.includes('/admin/');
   }
 };
 
