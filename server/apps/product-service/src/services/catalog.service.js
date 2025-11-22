@@ -2,6 +2,7 @@ const restaurantRepository = require('../repositories/restaurant.repository');
 const optionsRepository = require('../repositories/options.repository');
 const comboRepository = require('../repositories/combo.repository');
 const taxRepository = require('../repositories/tax.repository');
+const reviewRepository = require('../repositories/review.repository');
 const menuService = require('./menu.service');
 
 const DEFAULT_TAX_RATE = 7;
@@ -658,20 +659,29 @@ async function getRestaurantCatalog(restaurantId, filters = {}) {
     restaurantTaxAssignments,
     branchTaxAssignments,
     combosData,
+    restaurantReviewSummaries,
   ] = await Promise.all([
     menuService.listCategories(restaurant.id),
     menuService.listProducts(restaurant.id, { ...filters, branchId: undefined, branch_id: undefined }),
     taxRepository.listRestaurantTaxAssignments(restaurant.id),
     branchIds.length ? taxRepository.listBranchTaxAssignments(branchIds) : [],
     buildComboData(restaurant.id, branchIds),
+    reviewRepository.getRestaurantSummaries([restaurant.id]),
   ]);
 
+  const restaurantReviewSummary = restaurantReviewSummaries[restaurant.id];
+  if (restaurantReviewSummary) {
+    restaurant.avg_branch_rating = restaurantReviewSummary.averageRating;
+    restaurant.total_branch_ratings = restaurantReviewSummary.reviewCount;
+  }
+
   const productIds = products.map((product) => product.id);
-  const [branchProductOverrides, optionMap] = await Promise.all([
+  const [branchProductOverrides, optionMap, productReviewSummaries] = await Promise.all([
     branchIds.length && productIds.length
       ? taxRepository.listBranchProductTaxOverrides(branchIds, productIds)
       : [],
     buildOptionMap(productIds, branchIds),
+    reviewRepository.getProductSummaries(productIds),
   ]);
 
   const taxResolver = buildTaxMaps(
@@ -682,10 +692,23 @@ async function getRestaurantCatalog(restaurantId, filters = {}) {
 
   const branchCategoryMap = buildBranchCategoryMap(branches, categories);
 
-  const productsWithOptions = products.map((product) => ({
-    ...product,
-    options: applyBranchOverridesToOptions(optionMap[product.id] || []),
-  }));
+  const productsWithOptions = products.map((product) => {
+    const summary = productReviewSummaries[product.id];
+    const rating =
+      summary && summary.averageRating !== undefined
+        ? Number(summary.averageRating || 0)
+        : Number(product.rating || 0);
+    const reviewCount =
+      summary && summary.reviewCount !== undefined
+        ? Number(summary.reviewCount || 0)
+        : Number(product.review_count || 0);
+    return {
+      ...product,
+      rating,
+      review_count: reviewCount,
+      options: applyBranchOverridesToOptions(optionMap[product.id] || []),
+    };
+  });
 
   const branchProductsMap = branches.reduce((acc, branch) => {
     acc[branch.id] = [];

@@ -53,6 +53,33 @@ CREATE INDEX IF NOT EXISTS idx_branches_city       ON restaurant_branches(city, 
 CREATE INDEX IF NOT EXISTS idx_branches_primary    ON restaurant_branches(restaurant_id, is_primary);
 
 -- =====================================================================
+-- 2.5) RESTAURANT REVIEWS
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS restaurant_reviews (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  restaurant_id UUID NOT NULL REFERENCES restaurants(id) ON DELETE CASCADE,
+  branch_id UUID REFERENCES restaurant_branches(id) ON DELETE SET NULL,
+  order_id UUID,
+  user_id UUID,
+  customer_name VARCHAR(150),
+  customer_phone VARCHAR(50),
+  rating NUMERIC(3,2) NOT NULL CHECK (rating BETWEEN 0 AND 5),
+  rider_rating NUMERIC(3,2),
+  comment TEXT,
+  photos TEXT[],
+  metadata JSONB,
+  owner_reply TEXT,
+  owner_reply_by UUID,
+  owner_reply_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_restaurant_reviews_restaurant
+  ON restaurant_reviews(restaurant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_restaurant_reviews_order
+  ON restaurant_reviews(order_id);
+
+-- =====================================================================
 -- 3) OPENING HOURS
 -- =====================================================================
 CREATE TABLE IF NOT EXISTS branch_opening_hours (
@@ -280,6 +307,29 @@ CREATE TABLE IF NOT EXISTS products (
 CREATE INDEX IF NOT EXISTS idx_products_restaurant ON products(restaurant_id);
 CREATE INDEX IF NOT EXISTS idx_products_category   ON products(category_id);
 CREATE INDEX IF NOT EXISTS idx_products_visible    ON products(is_visible);
+
+-- =====================================================================
+-- 6.1) PRODUCT REVIEWS
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS product_reviews (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  restaurant_review_id UUID REFERENCES restaurant_reviews(id) ON DELETE CASCADE,
+  restaurant_id UUID NOT NULL REFERENCES restaurants(id) ON DELETE CASCADE,
+  product_id UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  order_id UUID,
+  user_id UUID,
+  product_name VARCHAR(200),
+  product_image TEXT,
+  rating NUMERIC(3,2) NOT NULL CHECK (rating BETWEEN 0 AND 5),
+  comment TEXT,
+  metadata JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_product_reviews_product
+  ON product_reviews(product_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_product_reviews_restaurant
+  ON product_reviews(restaurant_id);
 
 -- =====================================================================
 -- 7) BRANCH MENU (override giá/thuế theo chi nhánh)

@@ -260,6 +260,41 @@ async function createPromotion(restaurantId, payload, req) {
   return res.data;
 }
 
+async function listRestaurantReviews(restaurantId, params = {}, req) {
+  const res = await catalogClient.get(`/${restaurantId}/reviews`, {
+    params,
+    headers: withHeaders(req),
+  });
+  return res.data;
+}
+
+async function createRestaurantReview(restaurantId, payload, req) {
+  const res = await catalogClient.post(`/${restaurantId}/reviews`, payload, {
+    headers: withHeaders(req),
+  });
+  return res.data;
+}
+
+async function replyRestaurantReview(restaurantId, reviewId, payload, req) {
+  const res = await catalogClient.post(
+    `/${restaurantId}/reviews/${reviewId}/reply`,
+    payload,
+    { headers: withHeaders(req) },
+  );
+  return res.data;
+}
+
+async function listProductReviews(restaurantId, productId, params = {}, req) {
+  const res = await catalogClient.get(
+    `/${restaurantId}/products/${productId}/reviews`,
+    {
+      params,
+      headers: withHeaders(req),
+    },
+  );
+  return res.data;
+}
+
 async function listRestaurantProducts(restaurantId, params = {}, req) {
   const res = await productClient.get(`/${restaurantId}/products`, {
     params,
@@ -353,6 +388,10 @@ module.exports = {
   createOptionGroup,
   createCombo,
   createPromotion,
+  listRestaurantReviews,
+  createRestaurantReview,
+  replyRestaurantReview,
+  listProductReviews,
   listRestaurantProducts,
   createRestaurantProduct,
   updateRestaurantProduct,

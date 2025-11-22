@@ -1,4 +1,5 @@
 const restaurantService = require('../services/restaurant.service');
+const reviewsService = require('../services/reviews.service');
 
 async function createRestaurant(req, res, next) {
   try {
@@ -137,6 +138,62 @@ async function getBranchById(req, res, next) {
   }
 }
 
+async function listRestaurantReviews(req, res, next) {
+  try {
+    const { restaurantId } = req.params;
+    const result = await reviewsService.listRestaurantReviews(restaurantId, req.query || {});
+    if (Array.isArray(result)) {
+      return res.json({
+        reviews: result,
+        summary: { averageRating: null, totalReviews: result.length },
+      });
+    }
+    return res.json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function createRestaurantReview(req, res, next) {
+  try {
+    const { restaurantId } = req.params;
+    const result = await reviewsService.createRestaurantReview(restaurantId, req.body || {});
+    res.status(201).json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function replyRestaurantReview(req, res, next) {
+  try {
+    const { restaurantId, reviewId } = req.params;
+    const result = await reviewsService.replyToRestaurantReview(restaurantId, reviewId, req.body || {});
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function listProductReviews(req, res, next) {
+  try {
+    const { productId } = req.params;
+    const { restaurantId } = req.params;
+    const result = await reviewsService.listProductReviews(productId, {
+      restaurantId,
+      ...req.query,
+    });
+    if (Array.isArray(result)) {
+      return res.json({
+        reviews: result,
+        summary: { averageRating: null, totalReviews: result.length },
+      });
+    }
+    return res.json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
   createRestaurant,
   getRestaurant,
@@ -150,4 +207,8 @@ module.exports = {
   updateBranchSchedules,
   inviteMember,
   getBranchById,
+  listRestaurantReviews,
+  createRestaurantReview,
+  replyRestaurantReview,
+  listProductReviews,
 };

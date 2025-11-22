@@ -9,6 +9,7 @@ import toast from 'react-hot-toast';
 import catalogService from '../services/catalog';
 import ordersService from '../services/orders';
 import paymentsService from '../services/payments';
+import reviewsService from '../services/reviews';
 import { restaurantPlaceholderImage, dishPlaceholderImage } from '../utils/imageHelpers';
 import { formatPaymentMethodLabel, formatPaymentStatusLabel } from '../utils/paymentDisplay';
 import { buildRestaurantSession } from '../utils/restaurantSession';
@@ -116,6 +117,93 @@ const normalizePaymentMethodForSubmit = (value) => {
 };
 
 const ensureArray = (value) => (Array.isArray(value) ? value : value ? [value] : []);
+
+const adaptDishReviewFromApi = (record) => {
+    if (!record) return null;
+    const dishId =
+        record.dishId ||
+        record.dish_id ||
+        record.productId ||
+        record.product_id;
+    if (!dishId) return null;
+    const rating = toNumberOr(record.rating, null);
+    return {
+        id: record.id || `${dishId}-${record.reviewId || record.restaurant_review_id || Date.now()}`,
+        dishId,
+        title: record.productName || record.product_name || record.title || 'Dish',
+        image: record.productImage || record.product_image || dishPlaceholderImage,
+        rating: rating ?? 0,
+        comment: record.comment || '',
+    };
+};
+
+const adaptRestaurantReviewFromApi = (review) => {
+    if (!review) return null;
+    const restaurantId = review.restaurantId || review.restaurant_id;
+    if (!restaurantId) return null;
+    const dishesSource =
+        Array.isArray(review.dishes) && review.dishes.length
+            ? review.dishes
+            : Array.isArray(review.items)
+                ? review.items
+                : [];
+    const dishes = dishesSource.map(adaptDishReviewFromApi).filter(Boolean);
+    const photos = ensureArray(review.photos).filter(Boolean);
+    const createdAt = review.createdAt || review.created_at || new Date().toISOString();
+    return {
+        id: review.id || `${restaurantId}-${createdAt}`,
+        restaurantId,
+        branchId: review.branchId || review.branch_id || null,
+        orderId: review.orderId || review.order_id || null,
+        customerName: review.customerName || review.customer_name || 'Ẩn danh',
+        customerPhone: review.customerPhone || review.customer_phone || '',
+        avatar:
+            review.avatar ||
+            review.customerAvatar ||
+            review.customer_avatar ||
+            restaurantPlaceholderImage,
+        rating: toNumberOr(review.rating, 0),
+        riderRating: review.riderRating ?? review.rider_rating ?? null,
+        comment: review.comment || '',
+        photos,
+        dishes,
+        branchName: review.branchName || review.branch_name || null,
+        metadata: review.metadata || {},
+        createdAt,
+        updatedAt: review.updatedAt || review.updated_at || createdAt,
+        ownerReply: review.ownerReply || review.owner_reply || null,
+        ownerReplyAt: review.ownerReplyAt || review.owner_reply_at || null,
+        ownerReplyBy: review.ownerReplyBy || review.owner_reply_by || null,
+    };
+};
+
+const mergeReviewCollections = (existing = [], incoming = []) => {
+    const map = new Map();
+    existing.forEach((review) => {
+        if (review?.id) {
+            map.set(review.id, review);
+        }
+    });
+    incoming.forEach((review) => {
+        if (review?.id) {
+            map.set(review.id, review);
+        }
+    });
+    return Array.from(map.values()).sort((a, b) => {
+        const aTime = new Date(a.createdAt || a.created_at || 0).getTime();
+        const bTime = new Date(b.createdAt || b.created_at || 0).getTime();
+        return bTime - aTime;
+    });
+};
+
+const computeReviewSummary = (reviews = []) => {
+    if (!Array.isArray(reviews) || !reviews.length) {
+        return { average: null, count: 0 };
+    }
+    const total = reviews.reduce((sum, review) => sum + (Number(review.rating) || 0), 0);
+    const average = Number((total / reviews.length).toFixed(2));
+    return { average, count: reviews.length };
+};
 
 const detectCardBrand = (digitString = '') => {
     if (!digitString) return 'card';
@@ -1084,6 +1172,8 @@ export const AppContextProvider = ({ children }) => {
         [addresses, selectedAddressId]
     );
     const [restaurantReviews, setRestaurantReviews] = useState(initialRestaurantReviews);
+    const [restaurantReviewSummaries, setRestaurantReviewSummaries] = useState({});
+    const [loadedReviewRestaurants, setLoadedReviewRestaurants] = useState({});
     const [appliedDiscountCode, setAppliedDiscountCode] = useState(null);
     const [method, setMethod] = useState(DEFAULT_PAYMENT_METHOD);
     const [isOwner, setIsOwner] = useState(() => {
@@ -1357,17 +1447,26 @@ export const AppContextProvider = ({ children }) => {
         }
     });
     const authProfileId = authProfile?.id || null;
-    const [restaurantProfile, setRestaurantProfile] = useState(() => {
-        try {
-            const raw = JSON.parse(localStorage.getItem('restaurant_profile') || 'null');
-            if (!raw) return null;
-            if (raw.permissions) return raw;
-            const hydrated = buildRestaurantSession({ account: raw }) || buildRestaurantSession({ owner: raw });
-            return hydrated || raw;
-        } catch {
-            return null;
+const [restaurantProfile, setRestaurantProfile] = useState(() => {
+    try {
+        const raw = JSON.parse(localStorage.getItem('restaurant_profile') || 'null');
+        if (!raw) return null;
+        if (raw.permissions) return raw;
+        const hydrated = buildRestaurantSession({ account: raw }) || buildRestaurantSession({ owner: raw });
+        // Ensure restaurantId fallback from scope if missing
+        if (hydrated && !hydrated.restaurantId) {
+            const scopeIds = Array.isArray(hydrated.scope?.restaurantIds)
+                ? hydrated.scope.restaurantIds
+                : [];
+            if (scopeIds.length) {
+                hydrated.restaurantId = scopeIds[0];
+            }
         }
-    });
+        return hydrated || raw;
+    } catch {
+        return null;
+    }
+});
 
 
     const refreshOrders = useCallback(async () => {
@@ -2471,7 +2570,16 @@ export const AppContextProvider = ({ children }) => {
     useEffect(() => {
         try {
             if (restaurantProfile) {
-                localStorage.setItem('restaurant_profile', JSON.stringify(restaurantProfile));
+                const toStore = { ...restaurantProfile };
+                if (!toStore.restaurantId) {
+                    const scopeIds = Array.isArray(toStore.scope?.restaurantIds)
+                        ? toStore.scope.restaurantIds
+                        : [];
+                    if (scopeIds.length) {
+                        toStore.restaurantId = scopeIds[0];
+                    }
+                }
+                localStorage.setItem('restaurant_profile', JSON.stringify(toStore));
             } else {
                 localStorage.removeItem('restaurant_profile');
             }
@@ -2988,27 +3096,213 @@ export const AppContextProvider = ({ children }) => {
         });
     };
 
-    const addRestaurantReview = (review) => {
-        setRestaurantReviews(prev => [review, ...prev]);
-    };
+    const updateRestaurantAggregate = useCallback(
+        (restaurantId, summary) => {
+            if (!restaurantId || !summary) {
+                return;
+            }
+            const normalized = restaurantId.toString();
+            setRestaurants((prev) =>
+                prev.map((branch) => {
+                    const branchRestaurantId =
+                        branch.brandRestaurantId || branch.restaurantId || branch.id;
+                    if (branchRestaurantId === normalized) {
+                        return {
+                            ...branch,
+                            rating:
+                                summary.average !== null && summary.average !== undefined
+                                    ? summary.average
+                                    : branch.rating,
+                            ratingCount:
+                                summary.count !== undefined ? summary.count : branch.ratingCount,
+                        };
+                    }
+                    return branch;
+                }),
+            );
+            setRestaurantBrands((prev) =>
+                prev.map((brand) => {
+                    if (brand.id === normalized) {
+                        return {
+                            ...brand,
+                            rating:
+                                summary.average !== null && summary.average !== undefined
+                                    ? summary.average
+                                    : brand.rating,
+                            reviewCount:
+                                summary.count !== undefined ? summary.count : brand.reviewCount,
+                        };
+                    }
+                    return brand;
+                }),
+            );
+        },
+        [setRestaurantBrands, setRestaurants],
+    );
 
-    const getReviewsForRestaurant = (restaurantId) =>
-        restaurantReviews.filter(review => review.restaurantId === restaurantId);
+    const addRestaurantReview = useCallback((review) => {
+        if (!review) return;
+        setRestaurantReviews((prev) => {
+            const merged = mergeReviewCollections(prev, [review]);
+            if (review.restaurantId) {
+                const related = merged.filter(
+                    (item) => item.restaurantId === review.restaurantId,
+                );
+                setRestaurantReviewSummaries((prevSummaries) => ({
+                    ...prevSummaries,
+                    [review.restaurantId]: computeReviewSummary(related),
+                }));
+                setLoadedReviewRestaurants((prevLoaded) => ({
+                    ...prevLoaded,
+                    [review.restaurantId]: true,
+                }));
+                updateRestaurantAggregate(review.restaurantId, computeReviewSummary(related));
+            }
+            return merged;
+        });
+    }, [updateRestaurantAggregate]);
 
-    const getRestaurantRatingSummary = (restaurantId) => {
-        const reviews = getReviewsForRestaurant(restaurantId);
-        if (!reviews.length) {
-            return {
-                average: null,
-                count: 0,
+    const getReviewsForRestaurant = useCallback(
+        (restaurantId) =>
+            restaurantReviews.filter((review) => review.restaurantId === restaurantId),
+        [restaurantReviews],
+    );
+
+    const getRestaurantRatingSummary = useCallback(
+        (restaurantId) => {
+            if (!restaurantId) {
+                return { average: null, count: 0 };
+            }
+            const cached = restaurantReviewSummaries[restaurantId];
+            if (cached) {
+                return {
+                    average: cached.average ?? null,
+                    count: cached.count ?? 0,
+                };
+            }
+            const reviews = getReviewsForRestaurant(restaurantId);
+            return computeReviewSummary(reviews);
+        },
+        [restaurantReviewSummaries, getReviewsForRestaurant],
+    );
+
+    const loadRestaurantReviews = useCallback(
+        async (restaurantId, options = {}) => {
+            const resolvedId =
+                typeof restaurantId === 'string' && restaurantId.trim().length
+                    ? restaurantId
+                    : null;
+            if (!resolvedId) {
+                return { reviews: [], summary: { average: null, count: 0 } };
+            }
+            if (!options.force && loadedReviewRestaurants[resolvedId]) {
+                const cached = restaurantReviews.filter(
+                    (review) => review.restaurantId === resolvedId,
+                );
+                const summary =
+                    restaurantReviewSummaries[resolvedId] || computeReviewSummary(cached);
+                return { reviews: cached, summary };
+            }
+            try {
+                const response = await reviewsService.fetchRestaurantReviews(resolvedId, {
+                    limit: options.limit || 20,
+                    offset: options.offset || 0,
+                });
+                const normalized = Array.isArray(response.reviews)
+                    ? response.reviews.map(adaptRestaurantReviewFromApi).filter(Boolean)
+                    : [];
+                const existingForRestaurant = restaurantReviews.filter(
+                    (review) => review.restaurantId === resolvedId,
+                );
+                const mergedForRestaurant = mergeReviewCollections(
+                    existingForRestaurant,
+                    normalized,
+                ).filter((review) => review.restaurantId === resolvedId);
+                const summaryPayload = response.summary
+                    ? {
+                        average: response.summary.averageRating ?? null,
+                        count: response.summary.totalReviews ?? mergedForRestaurant.length,
+                    }
+                    : computeReviewSummary(mergedForRestaurant);
+                setRestaurantReviews((prev) => mergeReviewCollections(prev, normalized));
+                setLoadedReviewRestaurants((prev) => ({ ...prev, [resolvedId]: true }));
+                setRestaurantReviewSummaries((prev) => ({
+                    ...prev,
+                    [resolvedId]: summaryPayload,
+                }));
+                updateRestaurantAggregate(resolvedId, summaryPayload);
+                return { reviews: mergedForRestaurant, summary: summaryPayload };
+            } catch (error) {
+                console.error('Unable to load restaurant reviews', error);
+                throw error;
+            }
+        },
+        [loadedReviewRestaurants, restaurantReviews, restaurantReviewSummaries, updateRestaurantAggregate],
+    );
+
+    const submitRestaurantReview = useCallback(
+        async ({
+            restaurantId,
+            branchId,
+            orderId,
+            rating,
+            riderRating,
+            comment,
+            dishes = [],
+            photos = [],
+        }) => {
+            if (!restaurantId) {
+                throw new Error('restaurantId is required');
+            }
+            const payload = {
+                orderId,
+                branchId,
+                rating,
+                riderRating,
+                comment,
+                photos,
+                dishes: dishes
+                    .map((item) => {
+                        const productId = item.productId || item.dishId;
+                        if (!productId) return null;
+                        return {
+                            productId,
+                            productName: item.productName || item.title || item.name || null,
+                            productImage: item.productImage || item.image || null,
+                            rating: item.rating,
+                            comment: item.comment || null,
+                        };
+                    })
+                    .filter(Boolean),
+                userId: authProfileId || authProfile?.id || null,
+                customerName: authProfile?.fullName || authProfile?.first_name || null,
+                customerPhone: authProfile?.phone || null,
             };
-        }
-        const total = reviews.reduce((sum, review) => sum + (review.rating || 0), 0);
-        return {
-            average: parseFloat((total / reviews.length).toFixed(2)),
-            count: reviews.length,
-        };
-    };
+            const response = await reviewsService.submitRestaurantReview(restaurantId, payload);
+            if (response?.review) {
+                const normalized = adaptRestaurantReviewFromApi(response.review);
+                addRestaurantReview(normalized);
+                if (response.summary) {
+                    setRestaurantReviewSummaries((prev) => ({
+                        ...prev,
+                        [restaurantId]: {
+                            average: response.summary.averageRating ?? normalized.rating,
+                            count:
+                                response.summary.totalReviews ??
+                                ((prev[restaurantId]?.count || 0) + 1),
+                        },
+                    }));
+                    updateRestaurantAggregate(restaurantId, {
+                        average: response.summary.averageRating ?? null,
+                        count: response.summary.totalReviews ?? null,
+                    });
+                }
+                return normalized;
+            }
+            return null;
+        },
+        [addRestaurantReview, authProfile, authProfileId, updateRestaurantAggregate],
+    );
 
     // --- Exposed Values ---
     const value = {
@@ -3078,8 +3372,10 @@ export const AppContextProvider = ({ children }) => {
         paymentOptions: paymentOptionList,
         restaurantReviews,
         addRestaurantReview,
+        loadRestaurantReviews,
         getReviewsForRestaurant,
         getRestaurantRatingSummary,
+        submitRestaurantReview,
         updateLocalProfile,
         restaurantProfile,
         setRestaurantProfile,
