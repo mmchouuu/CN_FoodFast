@@ -24,6 +24,7 @@ module.exports = {
     url: process.env.RABBITMQ_URL || 'amqp://guest:guest@rabbitmq:5672',
     deliveryQueue: process.env.DELIVERY_EVENTS_QUEUE || 'delivery_events',
     orderQueue: process.env.ORDER_EVENTS_QUEUE || 'order_events',
+    socketQueue: process.env.RABBITMQ_SOCKET_QUEUE || 'socket_events',
   },
   logLevel: process.env.LOG_LEVEL || 'info',
 };

@@ -2,12 +2,13 @@ const deliveryService = require('../services/delivery.service');
 
 async function listDeliveries(req, res, next) {
   try {
-    const limit = req.query.limit;
-    const result = await deliveryService.listDeliveries({ limit });
+    const { limit, status } = req.query;
+    const result = await deliveryService.listDeliveries({ limit, status });
     res.json({
       data: result.items,
       limit: result.limit,
       total: result.total,
+      metrics: result.metrics,
     });
   } catch (error) {
     next(error);

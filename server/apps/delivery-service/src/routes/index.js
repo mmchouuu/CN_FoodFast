@@ -16,5 +16,6 @@ router.post('/drones', droneController.createDrone);
 router.put('/drones/:id', droneController.updateDrone);
 router.delete('/drones/:id', droneController.deleteDrone);
 router.get('/drones/:id/logs', droneController.getDroneLogs);
+router.post('/drones/:id/telemetry', droneController.ingestTelemetry);
 
 module.exports = router;

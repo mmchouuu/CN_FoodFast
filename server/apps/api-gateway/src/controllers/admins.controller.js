@@ -328,6 +328,15 @@ async function getAdminDroneLogs(req, res, next) {
   }
 }
 
+async function listAdminDeliveries(req, res, next) {
+  try {
+    const result = await adminClient.listDeliveries(req.query || {}, withRequestHeaders(req));
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
   listCustomers,
   customerDetails,
@@ -351,4 +360,5 @@ module.exports = {
   updateAdminDrone,
   deleteAdminDrone,
   getAdminDroneLogs,
+  listAdminDeliveries,
 };

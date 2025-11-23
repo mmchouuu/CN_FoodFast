@@ -166,6 +166,14 @@ async function getDeliveryDroneLogs(id, opts = {}) {
   return res.data;
 }
 
+async function listDeliveries(params = {}, opts = {}) {
+  const res = await deliveryAdminClient.get('/', {
+    params,
+    headers: opts.headers,
+  });
+  return res.data;
+}
+
 module.exports = {
   listCustomers,
   customerDetails,
@@ -189,4 +197,5 @@ module.exports = {
   updateDeliveryDrone,
   deleteDeliveryDrone,
   getDeliveryDroneLogs,
+  listDeliveries,
 };

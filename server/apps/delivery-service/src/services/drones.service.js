@@ -1,28 +1,105 @@
 const { pool } = require('../db');
+const { publishDroneUpdate } = require('../events/socketPublisher');
 
 const ACTIVE_STATUSES = ['idle', 'assigned', 'flying', 'charging'];
 const VALID_STATUSES = [...ACTIVE_STATUSES, 'offline', 'maintenance'];
 
+const parseNumber = (value) => {
+  if (value === null || value === undefined) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const clampBatteryLevel = (value) => {
+  const parsed = parseNumber(value);
+  if (parsed === null) return null;
+  if (parsed >= 100) return 100;
+  if (parsed <= 0) return 0;
+  return Math.round(parsed);
+};
+
+const normalizeTelemetryPayload = (payload = {}) => {
+  const base = payload || {};
+  const positionSource =
+    base.position && typeof base.position === 'object' ? base.position : base;
+
+  const lat = parseNumber(
+    positionSource.lat ??
+      positionSource.latitude ??
+      base.lat ??
+      base.latitude,
+  );
+  const lng = parseNumber(
+    positionSource.lng ??
+      positionSource.lon ??
+      positionSource.long ??
+      positionSource.longitude ??
+      base.lng ??
+      base.lon ??
+      base.long ??
+      base.longitude,
+  );
+
+  let position = null;
+  if (lat !== null && lng !== null && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
+    position = { lat, lng };
+  }
+
+  const altitude = parseNumber(
+    positionSource.alt ?? positionSource.altitude ?? base.alt ?? base.altitude,
+  );
+  if (position && altitude !== null) {
+    position.alt = altitude;
+  }
+
+  const speed = parseNumber(
+    positionSource.speed ??
+      positionSource.velocity ??
+      base.speed ??
+      base.velocity,
+  );
+  if (position && speed !== null) {
+    position.speed = speed;
+  }
+
+  const heading = parseNumber(
+    positionSource.heading ?? base.heading ?? base.direction,
+  );
+  if (position && heading !== null) {
+    position.heading = heading;
+  }
+
+  const deliveryIdRaw = base.delivery_id ?? base.deliveryId ?? null;
+  const deliveryId =
+    typeof deliveryIdRaw === 'string' ? deliveryIdRaw.trim() || null : deliveryIdRaw || null;
+
+  return {
+    position,
+    speed,
+    heading,
+    batteryLevel: clampBatteryLevel(base.battery_level ?? base.batteryLevel ?? base.battery),
+    status: typeof base.status === 'string' ? base.status.toLowerCase().trim() : null,
+    deliveryId,
+  };
+};
+
 const mapDroneRow = (row) => {
   if (!row) return null;
-  const safeNumber = (value) => {
-    if (value === null || value === undefined) return null;
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : null;
-  };
 
   return {
     id: row.id,
     code: row.code,
     model: row.model,
-    max_payload: safeNumber(row.max_payload),
-    battery_level: safeNumber(row.battery_level),
+    max_payload: parseNumber(row.max_payload),
+    battery_level: parseNumber(row.battery_level),
     status: row.status,
     branch_id: row.branch_id, // backwards compatibility
     hub_id: row.hub_id,
     hub_name: row.hub_name || row.name || null,
     image_url: row.image_url || null,
-    flights_today: safeNumber(row.flights_today) || 0,
+    flights_today: parseNumber(row.flights_today) || 0,
+    last_known_position: row.last_known_position || null,
+    last_active_at: row.last_active_at,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
@@ -248,7 +325,7 @@ async function getDroneLogs(id) {
   }
 
   const { rows } = await pool.query(
-    `SELECT id, drone_id, delivery_id, position, battery_level, speed, created_at
+    `SELECT id, drone_id, delivery_id, lat, lng, battery AS battery_level, speed, heading, status, created_at
      FROM drone_tracking_logs
      WHERE drone_id = $1
      ORDER BY created_at DESC
@@ -256,7 +333,129 @@ async function getDroneLogs(id) {
     [id],
   );
 
-  return rows;
+  return rows.map((row) => ({
+    id: row.id,
+    drone_id: row.drone_id,
+    delivery_id: row.delivery_id,
+    position: row.lat != null && row.lng != null ? { lat: Number(row.lat), lng: Number(row.lng) } : null,
+    battery_level: parseNumber(row.battery_level),
+    speed: parseNumber(row.speed),
+    heading: parseNumber(row.heading),
+    status: row.status,
+    created_at: row.created_at,
+  }));
+}
+
+async function ingestTelemetry(droneId, payload = {}) {
+  if (!droneId) {
+    const err = new Error('drone id is required');
+    err.status = 400;
+    throw err;
+  }
+
+  const normalized = normalizeTelemetryPayload(payload);
+  if (!normalized.position) {
+    const err = new Error('latitude and longitude are required');
+    err.status = 400;
+    throw err;
+  }
+  if (normalized.status && !VALID_STATUSES.includes(normalized.status)) {
+    const err = new Error('Invalid drone status');
+    err.status = 400;
+    throw err;
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+    const updateFields = ['last_known_position = $1', 'last_active_at = NOW()', 'updated_at = NOW()'];
+    const updateValues = [normalized.position];
+
+    if (normalized.batteryLevel !== null) {
+      updateValues.push(normalized.batteryLevel);
+      updateFields.push(`battery_level = $${updateValues.length}`);
+    }
+    if (normalized.status) {
+      updateValues.push(normalized.status);
+      updateFields.push(`status = $${updateValues.length}`);
+    }
+
+    updateValues.push(droneId);
+
+    const { rows } = await client.query(
+      `
+        UPDATE drones
+        SET ${updateFields.join(', ')}
+        WHERE id = $${updateValues.length}
+        RETURNING *
+      `,
+      updateValues,
+    );
+
+    if (!rows.length) {
+      const err = new Error('Drone not found');
+      err.status = 404;
+      throw err;
+    }
+
+    const recordedBattery =
+      normalized.batteryLevel !== null ? normalized.batteryLevel : rows[0].battery_level;
+
+    await client.query(
+      `
+        INSERT INTO drone_tracking_logs
+          (drone_id, delivery_id, lat, lng, battery, speed, heading, status)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `,
+      [
+        droneId,
+        normalized.deliveryId,
+        normalized.position?.lat ?? null,
+        normalized.position?.lng ?? null,
+        recordedBattery,
+        normalized.speed,
+        normalized.heading,
+        normalized.status,
+      ],
+    );
+
+    if (normalized.deliveryId) {
+      await client.query(
+        `
+          UPDATE deliveries
+          SET current_position = $1,
+              updated_at = NOW()
+          WHERE id = $2
+        `,
+        [normalized.position, normalized.deliveryId],
+      );
+    }
+
+    await client.query('COMMIT');
+
+    const drone = mapDroneRow(rows[0]);
+    publishDroneUpdate({
+      droneId: drone.id,
+      code: drone.code,
+      hubId: drone.hub_id,
+      hubName: drone.hub_name,
+      position: normalized.position,
+      batteryLevel: recordedBattery,
+      status: normalized.status || drone.status,
+      speed: normalized.speed,
+      heading: normalized.heading,
+      deliveryId: normalized.deliveryId,
+      recordedAt: new Date().toISOString(),
+    });
+
+    return drone;
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 module.exports = {
@@ -266,4 +465,5 @@ module.exports = {
   updateDrone,
   deleteDrone,
   getDroneLogs,
+  ingestTelemetry,
 };
