@@ -9,25 +9,89 @@ const ADMIN_JWT_TTL = process.env.ADMIN_JWT_TTL || '1h';
 const ADMIN_JWT_REMEMBER_TTL = process.env.ADMIN_JWT_REMEMBER_TTL || '14d';
 const DEFAULT_ADMIN_EMAIL = (process.env.ADMIN_DEFAULT_EMAIL || 'admin@foodfast.vn').toLowerCase();
 const DEFAULT_ADMIN_PASSWORD = process.env.ADMIN_DEFAULT_PASSWORD || 'admin123';
+const ADMIN_ROLE_LABELS = {
+  admin: 'System Administrator',
+  drone_operator: 'Drone Operations Manager',
+};
 
 function createError(message, status = 400) {
   const error = new Error(message);
   error.status = status;
   return error;
 }
+function normalizeInput(value) {
+  if (typeof value !== 'string') {
+    return '';
+  }
+  return value.trim().toLowerCase();
+}
 
-function buildAdminPayload(user) {
+function resolveRoleSelection(credentials = {}) {
+  const { accountType, role, roleCode } = credentials;
+  const normalizedRole = normalizeInput(roleCode || role).replace(/[\s-]+/g, '_');
+  if (normalizedRole === 'drone_operator' || normalizedRole === 'drone_operations_manager') {
+    return { roleCode: 'drone_operator', explicit: true };
+  }
+  if (normalizedRole === 'admin' || normalizedRole === 'administrator' || normalizedRole === 'system_administrator') {
+    return { roleCode: 'admin', explicit: true };
+  }
+
+  const normalizedType = normalizeInput(accountType);
+  if (normalizedType) {
+    if (normalizedType.includes('drone')) {
+      return { roleCode: 'drone_operator', explicit: true };
+    }
+    return { roleCode: 'admin', explicit: true };
+  }
+
+  return { roleCode: 'admin', explicit: false };
+}
+
+function hasFullAdminAccess(profile) {
+  if (!profile) return false;
+  const permissions = profile.permissions;
+  if (!permissions || typeof permissions !== 'object') {
+    return true;
+  }
+  if (permissions.all === true) {
+    return true;
+  }
+  return Object.keys(permissions).length === 0;
+}
+
+function normalizePermissions(rawPermissions, roleCode = 'admin') {
+  if (rawPermissions && typeof rawPermissions === 'object' && !Array.isArray(rawPermissions)) {
+    return rawPermissions;
+  }
+  if (roleCode === 'admin') {
+    return { all: true };
+  }
+  return {};
+}
+
+function buildAdminPayload(user, { roleCode = 'admin', profile = null, permissions = null } = {}) {
+  const profileName =
+    typeof profile?.full_name === 'string' && profile.full_name.trim().length
+      ? profile.full_name
+      : null;
   const fullName =
+    profileName ||
     user.full_name ||
     [user.first_name, user.last_name].filter(Boolean).join(' ').trim() ||
     user.email;
+
+  const resolvedPermissions = permissions || normalizePermissions(profile?.permissions, roleCode);
+
   return {
     id: user.id,
     email: user.email,
     first_name: user.first_name,
     last_name: user.last_name,
     full_name: fullName,
-    role: 'admin',
+    role: roleCode,
+    accountType: ADMIN_ROLE_LABELS[roleCode] || ADMIN_ROLE_LABELS.admin,
+    position: profile?.position || null,
+    permissions: resolvedPermissions,
   };
 }
 
@@ -78,99 +142,156 @@ async function login(credentials = {}) {
     throw createError('Admin account disabled', 403);
   }
 
+  const roleSelection = resolveRoleSelection(credentials);
+  const adminProfile = await userRepository.getAdminProfile(user.id);
+  const fullAdminProfile = hasFullAdminAccess(adminProfile);
+
+  let requestedRoleCode = roleSelection.roleCode;
   let roleCodes = await userRepository.getUserRoleCodes(user.id);
-  let adminRole = null;
 
-  const hasLegacyAdminRole =
-    (typeof user.role === 'string' && user.role.toLowerCase() === 'admin') ||
-    (await userRepository.hasAdminProfile(user.id));
+  if (
+    requestedRoleCode === 'admin' &&
+    !roleSelection.explicit &&
+    !roleCodes.includes('admin') &&
+    roleCodes.includes('drone_operator') &&
+    !fullAdminProfile
+  ) {
+    requestedRoleCode = 'drone_operator';
+  }
 
-  if (!roleCodes.includes('admin') && hasLegacyAdminRole) {
-    adminRole = await roleRepository.getRoleByCode('admin');
-    if (!adminRole) {
-      throw createError('Admin role unavailable', 500);
+  let credential = null;
+  let passwordOk = false;
+
+  if (requestedRoleCode === 'admin') {
+    let adminRole = null;
+
+    if (!roleCodes.includes('admin') && fullAdminProfile) {
+      adminRole = await roleRepository.getRoleByCode('admin');
+      if (!adminRole) {
+        throw createError('Admin role unavailable', 500);
+      }
+      await userRepository.assignRole(user.id, adminRole.id);
+      roleCodes = [...roleCodes, 'admin'];
     }
-    await userRepository.assignRole(user.id, adminRole.id);
-    roleCodes = [...roleCodes, 'admin'];
-  }
 
-  if (!roleCodes.includes('admin')) {
-    throw createError('Invalid credentials', 401);
-  }
-
-  if (!adminRole) {
-    adminRole = await roleRepository.getRoleByCode('admin');
-    if (!adminRole) {
-      throw createError('Admin role unavailable', 500);
+    if (!roleCodes.includes('admin')) {
+      throw createError('Invalid credentials', 401);
     }
-  }
 
-  let credential = await userRepository.getCredential(user.id, adminRole.id);
-  if (!credential) {
-    credential = await userRepository.getAnyCredential(user.id);
-  }
-  const isDefaultAdmin =
-    normalizedEmail === DEFAULT_ADMIN_EMAIL && password === DEFAULT_ADMIN_PASSWORD;
+    if (!adminRole) {
+      adminRole = await roleRepository.getRoleByCode('admin');
+      if (!adminRole) {
+        throw createError('Admin role unavailable', 500);
+      }
+    }
 
-  if (!credential && user.password_hash) {
-    await userRepository.upsertCredential({
-      userId: user.id,
-      roleId: adminRole.id,
-      passwordHash: user.password_hash,
-      isTemp: false,
-    });
     credential = await userRepository.getCredential(user.id, adminRole.id);
-  }
+    if (!credential) {
+      credential = await userRepository.getAnyCredential(user.id);
+    }
 
-  if (!credential && isDefaultAdmin) {
-    const bootstrapHash = await bcrypt.hash(password);
-    await userRepository.upsertCredential({
-      userId: user.id,
-      roleId: adminRole.id,
-      passwordHash: bootstrapHash,
-      isTemp: false,
-    });
-    credential = await userRepository.getCredential(user.id, adminRole.id);
-  }
+    const isDefaultAdmin =
+      normalizedEmail === DEFAULT_ADMIN_EMAIL && password === DEFAULT_ADMIN_PASSWORD;
 
-  if (!credential) {
-    throw createError('Invalid credentials', 401);
-  }
+    if (!credential && user.password_hash) {
+      await userRepository.upsertCredential({
+        userId: user.id,
+        roleId: adminRole.id,
+        passwordHash: user.password_hash,
+        isTemp: false,
+      });
+      credential = await userRepository.getCredential(user.id, adminRole.id);
+    }
 
-  let passwordOk = await bcrypt.compare(password, credential.password_hash);
+    if (!credential && isDefaultAdmin) {
+      const bootstrapHash = await bcrypt.hash(password);
+      await userRepository.upsertCredential({
+        userId: user.id,
+        roleId: adminRole.id,
+        passwordHash: bootstrapHash,
+        isTemp: false,
+      });
+      credential = await userRepository.getCredential(user.id, adminRole.id);
+    }
 
-  if (!passwordOk && isDefaultAdmin) {
-    const updatedHash = await bcrypt.hash(password);
-    await userRepository.upsertCredential({
-      userId: user.id,
-      roleId: adminRole.id,
-      passwordHash: updatedHash,
-      isTemp: false,
-    });
-    credential.password_hash = updatedHash;
-    passwordOk = true;
-  }
+    if (!credential) {
+      throw createError('Invalid credentials', 401);
+    }
 
-  if (!passwordOk) {
-    throw createError('Invalid credentials', 401);
-  }
+    passwordOk = await bcrypt.compare(password, credential.password_hash);
 
-  if (credential.role_id !== adminRole.id) {
-    await userRepository.upsertCredential({
-      userId: user.id,
-      roleId: adminRole.id,
-      passwordHash: credential.password_hash,
-      isTemp: credential.is_temp === true,
-    });
+    if (!passwordOk && isDefaultAdmin) {
+      const updatedHash = await bcrypt.hash(password);
+      await userRepository.upsertCredential({
+        userId: user.id,
+        roleId: adminRole.id,
+        passwordHash: updatedHash,
+        isTemp: false,
+      });
+      credential.password_hash = updatedHash;
+      passwordOk = true;
+    }
+
+    if (!passwordOk) {
+      throw createError('Invalid credentials', 401);
+    }
+
+    if (credential.role_id !== adminRole.id) {
+      await userRepository.upsertCredential({
+        userId: user.id,
+        roleId: adminRole.id,
+        passwordHash: credential.password_hash,
+        isTemp: credential.is_temp === true,
+      });
+    }
+  } else if (requestedRoleCode === 'drone_operator') {
+    if (!roleCodes.includes('drone_operator')) {
+      throw createError('Drone Operations access is not enabled for this account', 403);
+    }
+
+    const droneRole = await roleRepository.getRoleByCode('drone_operator');
+    if (!droneRole) {
+      throw createError('Drone Operations role unavailable', 500);
+    }
+
+    credential = await userRepository.getCredential(user.id, droneRole.id);
+    if (!credential) {
+      credential = await userRepository.getAnyCredential(user.id);
+    }
+
+    if (!credential) {
+      throw createError('Invalid credentials', 401);
+    }
+
+    passwordOk = await bcrypt.compare(password, credential.password_hash);
+    if (!passwordOk) {
+      throw createError('Invalid credentials', 401);
+    }
+
+    if (credential.role_id !== droneRole.id) {
+      await userRepository.upsertCredential({
+        userId: user.id,
+        roleId: droneRole.id,
+        passwordHash: credential.password_hash,
+        isTemp: credential.is_temp === true,
+      });
+    }
+  } else {
+    throw createError('Unsupported admin account type', 400);
   }
 
   const expiresIn = rememberMe ? ADMIN_JWT_REMEMBER_TTL : ADMIN_JWT_TTL;
-  const token = jwt.sign({ userId: user.id, role: 'admin' }, { expiresIn });
+  const token = jwt.sign({ userId: user.id, role: requestedRoleCode }, { expiresIn });
+  const permissions = normalizePermissions(adminProfile?.permissions, requestedRoleCode);
 
   return {
     message: 'Login successful',
     token,
-    user: buildAdminPayload(user),
+    user: buildAdminPayload(user, {
+      roleCode: requestedRoleCode,
+      profile: adminProfile,
+      permissions,
+    }),
     expiresIn,
   };
 }

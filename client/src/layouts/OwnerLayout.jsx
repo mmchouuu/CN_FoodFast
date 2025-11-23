@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import Sidebar from '../components/owner/Sidebar';
 import OwnerHeader from '../components/owner/OwnerHeader';
@@ -31,6 +31,8 @@ const UnauthorizedView = () => (
 const OwnerLayout = () => {
   const location = useLocation();
   const { hasRequirement } = useOwnerPermission();
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   const allowed = useMemo(() => {
     const pathname = location.pathname || '';
@@ -43,11 +45,18 @@ const OwnerLayout = () => {
 
   return (
     <div className="flex h-screen overflow-hidden bg-slate-50">
-      <aside className="hidden md:flex w-72 flex-shrink-0 h-screen overflow-y-auto bg-white shadow-lg ring-1 ring-slate-200">
-        <Sidebar />
+      <aside
+        className={`${sidebarCollapsed ? 'md:w-20' : 'md:w-72'} w-0 flex-shrink-0 h-screen overflow-y-auto bg-white shadow-lg ring-1 ring-slate-200 transition-all duration-300`}
+      >
+        <Sidebar
+          onCollapseChange={setSidebarCollapsed}
+          mobileOpen={mobileSidebarOpen}
+          onMobileOpenChange={setMobileSidebarOpen}
+          showInternalMobileButton={false}
+        />
       </aside>
       <div className="flex flex-1 flex-col h-screen overflow-y-auto">
-        <OwnerHeader />
+        <OwnerHeader onMenuToggle={() => setMobileSidebarOpen(true)} />
         <main className="flex-1 px-3 pb-10 pt-4 md:px-8">
           {allowed ? <Outlet /> : <UnauthorizedView />}
         </main>

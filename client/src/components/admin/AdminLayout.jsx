@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { NavLink, Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
-import GradientBackgrounds from "./GradientBackgrounds";
 
 const navItems = [
     { path: "/admin", label: "Overview Dashboard" },
@@ -8,11 +7,22 @@ const navItems = [
     { path: "/admin/restaurants", label: "Restaurant Management" },
     { path: "/admin/payouts", label: "Payout Management" },
     { path: "/admin/cod-settlements", label: "COD Settlements" },
+    { path: "/admin/drone-hubs", label: "Drone Hub Management" },
+    { path: "/admin/assignments", label: "Assign Orders" },
+    { path: "/admin/delivery-tracking", label: "Delivery Tracking" },
+    { path: "/admin/maintenance", label: "Drone Maintenance" },
     { path: "/admin/authorization", label: "Account Authorization" },
     { path: "/admin/complaints", label: "Complaint Management" },
     { path: "/admin/promotions", label: "System Promotions" },
     { path: "/admin/activity", label: "Activity Monitoring" },
 ];
+
+const DRONE_FEATURE_PATHS = new Set([
+    "/admin/drone-hubs",
+    "/admin/assignments",
+    "/admin/delivery-tracking",
+    "/admin/maintenance",
+]);
 
 const getStoredAdminProfile = () => {
     try {
@@ -27,6 +37,7 @@ const AdminLayout = () => {
     const navigate = useNavigate();
     const location = useLocation();
     const [sidebarOpen, setSidebarOpen] = useState(false);
+    const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
     const [token, setToken] = useState(() => {
         try {
             return localStorage.getItem('admin_token');
@@ -64,6 +75,19 @@ const AdminLayout = () => {
         return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
     }, [profile]);
 
+    const filteredNavItems = useMemo(() => {
+        if (!profile?.role) {
+            return navItems;
+        }
+        if (profile.role === 'drone_operator') {
+            return navItems.filter((item) => DRONE_FEATURE_PATHS.has(item.path));
+        }
+        if (profile.role === 'admin') {
+            return navItems.filter((item) => !DRONE_FEATURE_PATHS.has(item.path));
+        }
+        return navItems;
+    }, [profile]);
+
     const handleLogout = () => {
         try {
             localStorage.removeItem('admin_token');
@@ -81,24 +105,28 @@ const AdminLayout = () => {
 
     return (
         <div className="relative min-h-screen bg-neutral-50 text-neutral-800">
-            <GradientBackgrounds />
             <div className="flex min-h-screen">
+                {/* Sidebar */}
                 <aside
-                    className={`fixed inset-y-0 left-0 z-40 w-64 transform border-r border-neutral-200 bg-white shadow-sm transition-transform duration-200 ease-in-out md:translate-x-0 md:shadow-none overflow-y-auto ${
+                    className={`fixed inset-y-0 left-0 z-40 border-r border-neutral-200 bg-white shadow-sm transition-all duration-300 ease-in-out overflow-y-auto ${
+                        sidebarCollapsed ? 'w-16' : 'w-64'
+                    } ${
                         sidebarOpen ? "translate-x-0" : "-translate-x-full"
-                    }`}
+                    } md:translate-x-0 md:shadow-none`}
                 >
-                    <div className="p-6 flex items-center justify-between md:block">
-                        <div className="flex items-center gap-3">
-                            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-neutral-900 text-white">
+                    <div className={`p-6 flex items-center ${sidebarCollapsed ? 'justify-center' : 'justify-between'} md:block`}>
+                        <div className={`flex items-center ${sidebarCollapsed ? 'justify-center' : 'gap-3'}`}>
+                            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-neutral-900 text-white flex-shrink-0">
                                 <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
                                     <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
                                 </svg>
                             </div>
-                            <div>
-                                <p className="text-base font-semibold text-neutral-900">Admin Console</p>
-                                <p className="text-xs text-neutral-500">System oversight</p>
-                            </div>
+                            {!sidebarCollapsed && (
+                                <div>
+                                    <p className="text-base font-semibold text-neutral-900">Admin Console</p>
+                                    <p className="text-xs text-neutral-500">System oversight</p>
+                                </div>
+                            )}
                         </div>
                         <button
                             type="button"
@@ -111,30 +139,58 @@ const AdminLayout = () => {
                             </svg>
                         </button>
                     </div>
+
+                    {/* Collapse Toggle Button - Desktop only */}
+                    <div className={`px-4 pb-2 hidden md:block ${sidebarCollapsed ? 'flex justify-center' : ''}`}>
+                        <button
+                            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+                            className="w-full rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm font-medium text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900 flex items-center justify-center gap-2"
+                            title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+                        >
+                            <svg 
+                                className={`h-4 w-4 transition-transform ${sidebarCollapsed ? 'rotate-180' : ''}`} 
+                                fill="none" 
+                                stroke="currentColor" 
+                                viewBox="0 0 24 24"
+                            >
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                            </svg>
+                            {!sidebarCollapsed && <span>Collapse</span>}
+                        </button>
+                    </div>
+
                     <nav className="px-4 pb-6">
                         <div className="space-y-2">
-                            {navItems.map(item => (
+                            {filteredNavItems.map(item => (
                                 <NavLink
                                     key={item.path}
                                     to={item.path}
                                     end={item.path === "/admin"}
                                     className={({ isActive }) =>
-                                        `flex items-center justify-between rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
+                                        `flex items-center ${sidebarCollapsed ? 'justify-center' : 'justify-between'} rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
                                             isActive
                                                 ? "bg-neutral-900 text-white shadow-sm"
                                                 : "text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900"
                                         }`
                                     }
                                     onClick={() => setSidebarOpen(false)}
+                                    title={sidebarCollapsed ? item.label : ''}
                                 >
-                                    <span>{item.label}</span>
+                                    {sidebarCollapsed ? (
+                                        <span className="text-xs font-bold">{item.label.charAt(0)}</span>
+                                    ) : (
+                                        <span>{item.label}</span>
+                                    )}
                                 </NavLink>
                             ))}
                         </div>
                     </nav>
                 </aside>
 
-                <div className="flex flex-1 flex-col md:ml-64">
+                {/* Main Content */}
+                <div className={`flex flex-1 flex-col transition-all duration-300 ${
+                    sidebarCollapsed ? 'md:ml-16' : 'md:ml-64'
+                }`}>
                     <header className="sticky top-0 z-30 border-b border-neutral-200 bg-white/80 backdrop-blur-sm">
                         <div className="flex items-center justify-between px-4 py-4 md:px-6">
                             <div className="flex items-center gap-3">

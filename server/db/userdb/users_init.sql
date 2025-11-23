@@ -23,7 +23,7 @@ CREATE INDEX IF NOT EXISTS idx_users_is_active  ON users(is_active);
 CREATE TABLE IF NOT EXISTS roles (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   code        VARCHAR(30) UNIQUE NOT NULL
-                CHECK (code IN ('customer','owner','admin')),
+                CHECK (code IN ('customer','owner','admin','drone_operator')),
   description TEXT
 );
 
@@ -368,7 +368,8 @@ CREATE INDEX IF NOT EXISTS idx_shipper_profiles_last_seen   ON shipper_profiles(
 INSERT INTO roles (code, description)
 VALUES
   ('admin', 'System administrator with full privileges'),
-  ('owner', 'Restaurant owner with console access')
+  ('owner', 'Restaurant owner with console access'),
+  ('drone_operator', 'Manages drone fleet operations')
 ON CONFLICT (code) DO NOTHING;
 
 -- =========================================================
@@ -424,7 +425,6 @@ FROM tmp_admin_seed seed
 CROSS JOIN admin_role
 ON CONFLICT (user_id, role_id) DO NOTHING;
 
-
 -- 6️⃣ TẠO ADMIN PROFILE
 INSERT INTO admin_profiles (user_id, full_name, position, permissions)
 SELECT user_id, full_name, position, '{"all": true}'::jsonb
@@ -432,6 +432,75 @@ FROM tmp_admin_seed
 ON CONFLICT (user_id) DO NOTHING;
 
 DROP TABLE tmp_admin_seed;
+
+-- =========================================================
+-- 1️⃣B DRONE OPERATOR SEED
+-- =========================================================
+DROP TABLE IF EXISTS tmp_drone_seed;
+
+CREATE TEMP TABLE tmp_drone_seed (
+  user_id        UUID,
+  email          TEXT,
+  first_name     TEXT,
+  last_name      TEXT,
+  phone          TEXT,
+  full_name      TEXT,
+  position       TEXT,
+  password_hash  TEXT
+);
+
+-- bcrypt drone123 = $2b$10$N8iM94/gxrvK9PogbQ.tV.neZ3/BgEmy.Gnzm10PEtgSDU4YDe9wC
+INSERT INTO tmp_drone_seed VALUES
+(
+  '11111111-1111-4111-8111-555555555555',
+  'drone.ops@foodfast.vn',
+  'Drone',
+  'Operator',
+  '0900005555',
+  'Drone Operations Manager',
+  'Drone Operator',
+  '$2b$10$N8iM94/gxrvK9PogbQ.tV.neZ3/BgEmy.Gnzm10PEtgSDU4YDe9wC'
+);
+
+-- 1️⃣B.1 TẠO USERS
+INSERT INTO users (id, email, first_name, last_name, phone, is_active, email_verified)
+SELECT user_id, email, first_name, last_name, phone, TRUE, TRUE
+FROM tmp_drone_seed
+ON CONFLICT (email) DO NOTHING;
+
+-- 1️⃣B.2 GÁN ROLE drone_operator
+WITH drone_role AS (SELECT id FROM roles WHERE code='drone_operator')
+INSERT INTO user_roles (user_id, role_id)
+SELECT seed.user_id, drone_role.id
+FROM tmp_drone_seed seed
+CROSS JOIN drone_role
+ON CONFLICT DO NOTHING;
+
+-- 1️⃣B.3 GÁN PASSWORD
+WITH drone_role AS (SELECT id FROM roles WHERE code='drone_operator')
+INSERT INTO user_credentials (user_id, role_id, password_hash, is_temp)
+SELECT seed.user_id, drone_role.id, seed.password_hash, FALSE
+FROM tmp_drone_seed seed
+CROSS JOIN drone_role
+ON CONFLICT (user_id, role_id) DO NOTHING;
+
+-- 1️⃣B.4 TẠO ADMIN PROFILE (nhưng chỉ có quyền drone)
+INSERT INTO admin_profiles (user_id, full_name, position, permissions)
+SELECT 
+  user_id,
+  full_name,
+  position,
+  '{
+    "manage_drones": true,
+    "assign_drones": true,
+    "view_drone_logs": true,
+    "manage_drone_maintenance": true
+  }'::jsonb
+FROM tmp_drone_seed
+ON CONFLICT (user_id) DO NOTHING;
+
+DROP TABLE tmp_drone_seed;
+
 
 -- =========================================================
 -- 2️⃣ OWNER SEED (brand-level)
@@ -677,3 +746,7 @@ VALUES
 ON CONFLICT (account_id) DO NOTHING;
 
 DROP TABLE tmp_shipper_seed;
+
+-- UPDATE user_credentials
+-- SET password_hash = '$2b$10$N8iM94/gxrvK9PogbQ.tV.neZ3/BgEmy.Gnzm10PEtgSDU4YDe9wC'
+-- WHERE user_id = '11111111-1111-4111-8111-555555555555';

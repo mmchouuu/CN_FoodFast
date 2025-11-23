@@ -29,7 +29,7 @@ const buildBadges = (profile = {}, role = null) => {
   return badges;
 };
 
-const OwnerHeader = () => {
+const OwnerHeader = ({ onMenuToggle }) => {
   const navigate = useNavigate();
   const { restaurantProfile, logoutOwner } = useAppContext();
   const { role } = useOwnerPermission();
@@ -89,8 +89,20 @@ const OwnerHeader = () => {
   return (
     <section className="mb border bg-white border-white p-3 shadow-sm md">
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        {/* LEFT: Owner Avatar + Name + Restaurant */}
+        {/* LEFT: Menu toggle (mobile) + Owner Avatar + Name + Restaurant */}
         <div className="flex items-start gap-3">
+          {typeof onMenuToggle === 'function' && (
+            <button
+              type="button"
+              onClick={onMenuToggle}
+              className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 shadow-sm transition hover:border-slate-300 hover:text-slate-900 md:hidden"
+            >
+              <svg className="mr-2 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+              Menu
+            </button>
+          )}
           <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-orange-500 text-base font-semibold text-white md:h-14 md:w-14 md:text-lg">
             {initials}
           </div>
