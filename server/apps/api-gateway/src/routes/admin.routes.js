@@ -19,5 +19,13 @@ router.post('/catalog/promotions/global', controller.createGlobalPromotion);
 router.get('/payouts', controller.listPayoutRestaurants);
 router.get('/payouts/restaurants/:restaurantId/branches', controller.listPayoutBranches);
 router.get('/payouts/settlements/:settlementId/orders', controller.listPayoutSettlementOrders);
+router.get('/drone-hubs/system-summary', controller.getDroneSystemSummary);
+router.get('/drone-hubs', controller.listDroneHubs);
+router.get('/drone-hubs/:hubId/overview', controller.getDroneHubOverview);
+router.get('/drones', controller.listAdminDrones);
+router.post('/drones', controller.createAdminDrone);
+router.put('/drones/:id', controller.updateAdminDrone);
+router.delete('/drones/:id', controller.deleteAdminDrone);
+router.get('/drones/:id/logs', controller.getAdminDroneLogs);
 
 module.exports = router;
