@@ -1097,6 +1097,30 @@ const adaptOrderFromApi = (order) => {
         restaurantSnapshot: restaurantSnapshotMeta,
         restaurantName,
         restaurantImage,
+        // delivery tracking helpers for customer map
+        deliveryId:
+            metadata.delivery_id ||
+            metadata.deliveryId ||
+            order.delivery_id ||
+            (metadata.delivery && (metadata.delivery.id || metadata.delivery.delivery_id)) ||
+            null,
+        deliveryStatus:
+            metadata.delivery_status ||
+            (metadata.delivery && metadata.delivery.delivery_status) ||
+            order.delivery_status ||
+            null,
+        deliveryCurrentPosition:
+            metadata.current_position ||
+            (metadata.delivery && (metadata.delivery.current_position || metadata.delivery.position)) ||
+            null,
+        deliveryRoute:
+            metadata.route ||
+            (metadata.delivery && metadata.delivery.route) ||
+            null,
+        deliveryDrone:
+            metadata.drone_snapshot ||
+            (metadata.delivery && (metadata.delivery.drone_snapshot || metadata.delivery.drone)) ||
+            null,
         items: Array.isArray(order.items)
             ? order.items.map((item) => ({
                 id: item.id,

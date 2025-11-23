@@ -1,5 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
+import { io } from "socket.io-client";
+import maplibregl from "maplibre-gl";
+import "maplibre-gl/dist/maplibre-gl.css";
 import { useAppContext } from "../context/AppContext";
 import {
   restaurantPlaceholderImage,
@@ -39,6 +42,22 @@ const SUGGESTED_CANCEL_REASONS = [
   "Ordered wrong item/address, want to reorder",
 ];
 
+const SOCKET_GATEWAY_URL = import.meta.env.VITE_SOCKET_GATEWAY_URL || "http://localhost:4000";
+const MAPTILER_KEY = import.meta.env.VITE_MAPTILER_KEY || "";
+const CUSTOM_MAP_STYLE = import.meta.env.VITE_MAP_STYLE_URL || "";
+const MAP_STYLE =
+  CUSTOM_MAP_STYLE ||
+  (MAPTILER_KEY
+    ? `https://api.maptiler.com/maps/dataviz-light/style.json?key=${MAPTILER_KEY}`
+    : "https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json");
+
+const toLngLat = (point) => {
+  if (!point || typeof point !== "object") return null;
+  const lat = Number(point.lat ?? point.latitude);
+  const lng = Number(point.lng ?? point.lon ?? point.long ?? point.longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return [lng, lat];
+};
 
 const normaliseStatus = (value) => {
   if (typeof value !== "string") {
@@ -160,6 +179,14 @@ const CurrentOrder = () => {
   const [showCancelDialog, setShowCancelDialog] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
   const [cancelError, setCancelError] = useState("");
+  const mapContainerRef = useRef(null);
+  const mapRef = useRef(null);
+  const droneMarkerRef = useRef(null);
+  const hubMarkerRef = useRef(null);
+  const customerMarkerRef = useRef(null);
+  const routeSourceId = useRef(`route-${Math.random().toString(36).slice(2)}`);
+  const [telemetry, setTelemetry] = useState(null);
+  const [socketState, setSocketState] = useState("connecting");
   const pendingRefreshRef = useRef(false);
 
   useEffect(() => {
@@ -204,6 +231,24 @@ const CurrentOrder = () => {
 
   const normalisedStatus = normaliseStatus(order?.status);
   const isHistorical = Boolean(order && ORDER_HISTORY_STATUSES.has(normalisedStatus));
+  const deliveryId =
+    order?.deliveryId ||
+    order?.metadata?.delivery_id ||
+    order?.metadata?.delivery?.id ||
+    null;
+  const deliveryPosition =
+    telemetry?.position ||
+    order?.deliveryCurrentPosition ||
+    order?.metadata?.delivery?.current_position ||
+    null;
+  const deliveryRoute = order?.deliveryRoute || order?.metadata?.delivery?.route || null;
+  const deliveryDrone = telemetry?.drone || order?.deliveryDrone || null;
+  const deliveryStatus =
+    telemetry?.status ||
+    order?.deliveryStatus ||
+    order?.metadata?.delivery_status ||
+    order?.metadata?.delivery?.delivery_status ||
+    null;
 
   useEffect(() => {
     if (isHistorical && trackedOrderId) {
@@ -272,6 +317,8 @@ const CurrentOrder = () => {
   const deliveryAddress = order.deliveryAddress || {};
   const deliveryDetails = order?.delivery || (order?.metadata?.delivery ?? null);
   const droneDetails =
+    deliveryDrone ||
+    telemetry?.drone ||
     deliveryDetails?.drone_snapshot ||
     deliveryDetails?.drone ||
     deliveryDetails?.droneInfo ||
@@ -279,10 +326,14 @@ const CurrentOrder = () => {
   const droneCode = droneDetails?.code || droneDetails?.identifier || droneDetails?.name || null;
   const droneModel = droneDetails?.model || droneDetails?.drone_model || null;
   const rawBattery =
-    droneDetails?.battery_level ?? droneDetails?.batteryLevel ?? null;
+    telemetry?.batteryLevel ??
+    droneDetails?.battery_level ??
+    droneDetails?.batteryLevel ??
+    null;
   const droneBatteryLevel =
     typeof rawBattery === "number" ? Math.max(0, Math.min(100, rawBattery)) : null;
   const droneStatus =
+    deliveryStatus ||
     deliveryDetails?.delivery_status ||
     droneDetails?.status ||
     (normalisedStatus === "delivering" ? "flying" : null);
@@ -299,6 +350,7 @@ const CurrentOrder = () => {
       ? Math.max(0, Math.min(100, deliveryDetails.progress_percent))
       : null;
   const lastKnownPosition =
+    deliveryPosition ||
     deliveryDetails?.current_position ||
     deliveryDetails?.last_known_position ||
     droneDetails?.last_known_position ||
@@ -326,7 +378,126 @@ const CurrentOrder = () => {
         ? `${lastKnownPosition.coordinates[0]}, ${lastKnownPosition.coordinates[1]}`
         : null)
       : null;
-  const showDroneTracking = normalisedStatus === "delivering";
+  const customerCoord = toLngLat(order?.deliverySnapshot?.location || order?.deliverySnapshot);
+  const hubCoord = toLngLat(order?.restaurantSnapshot?.location || order?.restaurantSnapshot);
+  // Force show map for preview/design even when delivery has not been assigned yet.
+  const showDroneTracking = true;
+
+  useEffect(() => {
+    if (!showDroneTracking || mapRef.current || !mapContainerRef.current) return;
+    const fallbackCenter = toLngLat(deliveryPosition) || customerCoord || hubCoord || [106.7, 10.78];
+    const map = new maplibregl.Map({
+      container: mapContainerRef.current,
+      style: MAP_STYLE,
+      center: fallbackCenter,
+      zoom: 12,
+      attributionControl: false,
+    });
+    mapRef.current = map;
+    map.addControl(new maplibregl.NavigationControl(), "top-right");
+    return () => {
+      map.remove();
+      mapRef.current = null;
+      droneMarkerRef.current = null;
+      hubMarkerRef.current = null;
+      customerMarkerRef.current = null;
+    };
+  }, [showDroneTracking, deliveryPosition, customerCoord, hubCoord]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !showDroneTracking) return;
+
+    const routeCoords = Array.isArray(deliveryRoute?.waypoints)
+      ? deliveryRoute.waypoints.map(toLngLat).filter(Boolean)
+      : [];
+
+    if (customerMarkerRef.current) {
+      customerMarkerRef.current.remove();
+      customerMarkerRef.current = null;
+    }
+    if (hubMarkerRef.current) {
+      hubMarkerRef.current.remove();
+      hubMarkerRef.current = null;
+    }
+
+    if (customerCoord) {
+      customerMarkerRef.current = new maplibregl.Marker({ color: "#f97316" })
+        .setLngLat(customerCoord)
+        .addTo(map);
+    }
+    if (hubCoord) {
+      hubMarkerRef.current = new maplibregl.Marker({ color: "#4f46e5" })
+        .setLngLat(hubCoord)
+        .addTo(map);
+    }
+
+    if (map.getSource(routeSourceId.current)) {
+      map.removeLayer(`${routeSourceId.current}-line`);
+      map.removeSource(routeSourceId.current);
+    }
+    if (routeCoords.length >= 2) {
+      map.addSource(routeSourceId.current, {
+        type: "geojson",
+        data: {
+          type: "Feature",
+          geometry: { type: "LineString", coordinates: routeCoords },
+        },
+      });
+      map.addLayer({
+        id: `${routeSourceId.current}-line`,
+        type: "line",
+        source: routeSourceId.current,
+        paint: { "line-color": "#10b981", "line-width": 4 },
+      });
+    }
+  }, [deliveryRoute, order?.deliverySnapshot, order?.restaurantSnapshot, showDroneTracking, customerCoord, hubCoord]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !showDroneTracking) return;
+    const coord = toLngLat(deliveryPosition);
+    if (!coord) return;
+    if (!droneMarkerRef.current) {
+      droneMarkerRef.current = new maplibregl.Marker({ color: "#0ea5e9" })
+        .setLngLat(coord)
+        .addTo(map);
+    } else {
+      droneMarkerRef.current.setLngLat(coord);
+    }
+  }, [deliveryPosition, showDroneTracking]);
+
+  useEffect(() => {
+    if (!deliveryId || !showDroneTracking) return undefined;
+    const socket = io(SOCKET_GATEWAY_URL, {
+      transports: ["websocket"],
+      query: { role: "customer", deliveryId },
+    });
+    socket.on("connect", () => setSocketState("connected"));
+    socket.on("disconnect", () => setSocketState("disconnected"));
+    socket.on("drone:update", (payload) => {
+      if (!payload || payload.deliveryId !== deliveryId) return;
+      setTelemetry({
+        position: payload.position || null,
+        status: payload.status || null,
+        batteryLevel: payload.batteryLevel ?? null,
+        speed: payload.speed ?? null,
+        heading: payload.heading ?? null,
+        recordedAt: payload.recordedAt || new Date().toISOString(),
+        drone: {
+          id: payload.droneId,
+          code: payload.code,
+          hubId: payload.hubId,
+          hubName: payload.hubName,
+        },
+      });
+    });
+    return () => {
+      socket.disconnect();
+      setSocketState("disconnected");
+    };
+  }, [deliveryId, showDroneTracking]);
+
   const fallbackEtaLabel =
     typeof order?.etaMinutes === "number"
       ? `${order.etaMinutes} min`
@@ -768,11 +939,13 @@ const CurrentOrder = () => {
                 <p className="text-xs uppercase text-orange-500">
                   Real time map preview
                 </p>
-                <div className="mt-2 h-48 w-full rounded-2xl bg-gradient-to-br from-gray-100 to-gray-200 text-center text-xs font-semibold uppercase text-gray-400">
-                  <div className="flex h-full items-center justify-center">
-                    Map preview placeholder
-                  </div>
-                </div>
+                <div
+                  ref={mapContainerRef}
+                  className="mt-2 h-64 w-full overflow-hidden rounded-2xl border border-gray-100"
+                />
+                <p className="mt-2 text-xs text-gray-500">
+                  Live updates: {socketState === "connected" ? "Connected" : "Reconnecting…"}
+                </p>
               </div>
               <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-400">

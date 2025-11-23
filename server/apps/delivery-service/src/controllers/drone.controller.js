@@ -15,8 +15,11 @@ async function getSummary(req, res, next) {
 
 async function listDrones(req, res, next) {
   try {
+    const query = req.query || {};
     const drones = await droneService.listDrones({
-      branchId: req.query?.branchId || req.query?.branch_id || null,
+      branchId: query.branchId || query.branch_id || null,
+      hubId: query.hubId || query.hub_id || null,
+      status: query.status || null,
     });
     respond(res, { data: drones });
   } catch (error) {

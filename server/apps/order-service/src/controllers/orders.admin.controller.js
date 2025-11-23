@@ -76,3 +76,31 @@ exports.deleteOrder = async (req, res) => {
     return mapError(res, error);
   }
 };
+
+exports.listAssignmentOrders = async (req, res) => {
+  try {
+    const hubId = req.query?.hubId || req.query?.hub_id;
+    const limit = req.query?.limit;
+    const offset = req.query?.offset;
+    const data = await ordersService.listAssignmentOrders({
+      hubId,
+      limit,
+      offset,
+    });
+    return res.json({ data });
+  } catch (error) {
+    console.error('[order-service] admin listAssignmentOrders failed:', error);
+    return mapError(res, error);
+  }
+};
+
+exports.listPendingAssignmentOrders = async (req, res) => {
+  try {
+    const limit = Math.min(Math.max(Number(req.query?.limit) || 50, 1), 500);
+    const result = await ordersService.listPendingAssignmentOrders({ limit });
+    return res.json({ data: result.items, total: result.total });
+  } catch (error) {
+    console.error('[order-service] admin listPendingAssignmentOrders failed:', error);
+    return mapError(res, error);
+  }
+};

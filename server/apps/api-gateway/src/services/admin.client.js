@@ -21,6 +21,11 @@ const deliveryAdminClient = createAxiosInstance({
   timeout: config.requestTimeout,
 });
 
+const orderAdminClient = createAxiosInstance({
+  baseURL: `${config.orderServiceUrl}/admin/orders`,
+  timeout: config.requestTimeout,
+});
+
 async function login(payload = {}, opts = {}) {
   const res = await userAdminClient.post('/login', payload, { headers: opts.headers });
   return res.data;
@@ -130,6 +135,40 @@ async function getDroneHubOverview(hubId, opts = {}) {
   return res.data;
 }
 
+async function listPendingAssignmentOrders(params = {}, opts = {}) {
+  const res = await orderAdminClient.get('/assignments/pending', {
+    params,
+    headers: opts.headers,
+  });
+  return res.data;
+}
+
+async function listAssignmentOrders(params = {}, opts = {}) {
+  const res = await orderAdminClient.get('/assignments', {
+    params,
+    headers: opts.headers,
+  });
+  return res.data;
+}
+
+async function getAdminOrder(orderId, opts = {}) {
+  if (!orderId) {
+    throw new Error('orderId is required');
+  }
+  const res = await orderAdminClient.get(`/${orderId}`, {
+    headers: opts.headers,
+  });
+  return res.data;
+}
+
+async function getDeliveryDroneSummary(params = {}, opts = {}) {
+  const res = await deliveryAdminClient.get('/drones/summary', {
+    params,
+    headers: opts.headers,
+  });
+  return res.data;
+}
+
 async function listDeliveryDrones(params = {}, opts = {}) {
   const res = await deliveryAdminClient.get('/drones', {
     params,
@@ -166,11 +205,27 @@ async function getDeliveryDroneLogs(id, opts = {}) {
   return res.data;
 }
 
-async function listDeliveries(params = {}, opts = {}) {
-  const res = await deliveryAdminClient.get('/', {
+async function listDeliveriesByOrders(params = {}, opts = {}) {
+  const res = await deliveryAdminClient.get('/admin/deliveries', {
     params,
     headers: opts.headers,
   });
+  return res.data;
+}
+
+async function assignDelivery(deliveryId, payload = {}, opts = {}) {
+  const res = await deliveryAdminClient.post(`/admin/deliveries/${deliveryId}/assign`, payload, {
+    headers: opts.headers,
+  });
+  return res.data;
+}
+
+async function reprocessOrderAssignment(orderId, opts = {}) {
+  const res = await deliveryAdminClient.post(
+    `/admin/orders/${orderId}/reprocess-hub`,
+    {},
+    { headers: opts.headers, timeout: config.longRequestTimeout || config.requestTimeout },
+  );
   return res.data;
 }
 
@@ -192,10 +247,16 @@ module.exports = {
   getDroneSystemSummary,
   listDroneHubs,
   getDroneHubOverview,
+  listPendingAssignmentOrders,
+  listAssignmentOrders,
+  getAdminOrder,
+  getDeliveryDroneSummary,
   listDeliveryDrones,
   createDeliveryDrone,
   updateDeliveryDrone,
   deleteDeliveryDrone,
   getDeliveryDroneLogs,
-  listDeliveries,
+  listDeliveriesByOrders,
+  assignDelivery,
+  reprocessOrderAssignment,
 };

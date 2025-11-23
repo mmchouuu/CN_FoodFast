@@ -1,4 +1,4 @@
-const MAPTILER_KEY = import.meta.env.VITE_MAPTILER_KEY || '';
+const MAPTILER_KEY = import.meta.env.VITE_MAPTILER_KEY || 'YUyNgtKuEPD1fLE16S0e';
 
 if (!MAPTILER_KEY) {
   // eslint-disable-next-line no-console

@@ -3,6 +3,8 @@ const { publishDroneUpdate } = require('../events/socketPublisher');
 
 const ACTIVE_STATUSES = ['idle', 'assigned', 'flying', 'charging'];
 const VALID_STATUSES = [...ACTIVE_STATUSES, 'offline', 'maintenance'];
+const AVAILABLE_SUMMARY_STATUSES = ['idle', 'charging'];
+const ETA_STATUSES = ['assigned', 'flying'];
 
 const parseNumber = (value) => {
   if (value === null || value === undefined) return null;
@@ -118,6 +120,11 @@ async function getSummary({ branchId, hubId } = {}) {
     : "SELECT COUNT(*)::int AS count FROM drones WHERE status = 'flying'";
   const inFlightParams = hasHubFilter ? [targetHub] : [];
 
+  const availableQuery = hasHubFilter
+    ? 'SELECT COUNT(*)::int AS count FROM drones WHERE status = ANY($1) AND hub_id = $2'
+    : 'SELECT COUNT(*)::int AS count FROM drones WHERE status = ANY($1)';
+  const availableParams = hasHubFilter ? [AVAILABLE_SUMMARY_STATUSES, targetHub] : [AVAILABLE_SUMMARY_STATUSES];
+
   const completedQuery = hasHubFilter
     ? `SELECT COUNT(*)::int AS count
        FROM deliveries d
@@ -131,16 +138,33 @@ async function getSummary({ branchId, hubId } = {}) {
          AND delivered_at::date = CURRENT_DATE`;
   const completedParams = hasHubFilter ? [targetHub] : [];
 
-  const [activeRes, inFlightRes, completedRes] = await Promise.all([
+  const avgEtaQuery = hasHubFilter
+    ? `SELECT AVG(d.estimated_time_sec)::numeric AS avg_eta
+       FROM deliveries d
+       JOIN drones dr ON dr.id = d.drone_id
+       WHERE d.delivery_status = ANY($1)
+         AND d.estimated_time_sec IS NOT NULL
+         AND dr.hub_id = $2`
+    : `SELECT AVG(estimated_time_sec)::numeric AS avg_eta
+       FROM deliveries
+       WHERE delivery_status = ANY($1)
+         AND estimated_time_sec IS NOT NULL`;
+  const avgEtaParams = hasHubFilter ? [ETA_STATUSES, targetHub] : [ETA_STATUSES];
+
+  const [activeRes, inFlightRes, completedRes, availableRes, avgEtaRes] = await Promise.all([
     pool.query(activeQuery, activeParams),
     pool.query(inFlightQuery, inFlightParams),
     pool.query(completedQuery, completedParams),
+    pool.query(availableQuery, availableParams),
+    pool.query(avgEtaQuery, avgEtaParams),
   ]);
 
   return {
     active: activeRes.rows[0]?.count || 0,
+    available: availableRes.rows[0]?.count || 0,
     inFlight: inFlightRes.rows[0]?.count || 0,
     completedToday: completedRes.rows[0]?.count || 0,
+    avgEtaSeconds: avgEtaRes.rows[0]?.avg_eta ? Number(avgEtaRes.rows[0].avg_eta) : 0,
   };
 }
 
@@ -170,7 +194,8 @@ async function listDrones({ branchId, hubId, status } = {}) {
   const query = `
     SELECT d.*,
            h.name AS hub_name,
-           COALESCE(ft.flights_today, 0) AS flights_today
+           COALESCE(ft.flights_today, 0) AS flights_today,
+           COALESCE(ad.active_deliveries, 0) AS active_deliveries
     FROM drones d
     LEFT JOIN drone_hubs h ON h.id = d.hub_id
     LEFT JOIN (
@@ -180,6 +205,12 @@ async function listDrones({ branchId, hubId, status } = {}) {
         AND delivered_at::date = CURRENT_DATE
       GROUP BY drone_id
     ) ft ON ft.drone_id = d.id
+    LEFT JOIN (
+      SELECT drone_id, COUNT(*)::int AS active_deliveries
+      FROM deliveries
+      WHERE delivery_status IN ('assigned', 'flying')
+      GROUP BY drone_id
+    ) ad ON ad.drone_id = d.id
     ${whereClause}
     ORDER BY d.code NULLS LAST, d.created_at DESC
   `;

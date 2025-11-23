@@ -69,6 +69,7 @@ const AdminDroneManagement = () => {
   const [hubs, setHubs] = useState([]);
   const [selectedHubId, setSelectedHubId] = useState('');
   const [hubOverview, setHubOverview] = useState(defaultHubStats);
+  const [hubDetails, setHubDetails] = useState(null);
   const [performance, setPerformance] = useState(defaultPerformance);
   const [drones, setDrones] = useState([]);
   const [activeFilter, setActiveFilter] = useState('');
@@ -94,6 +95,21 @@ const AdminDroneManagement = () => {
   const selectedHub = useMemo(
     () => hubs.find((hub) => hub.id === selectedHubId) || null,
     [hubs, selectedHubId],
+  );
+
+  const effectiveHubMeta = useMemo(() => {
+    if (hubDetails?.id === selectedHubId) return hubDetails;
+    return selectedHub || null;
+  }, [hubDetails, selectedHub, selectedHubId]);
+
+  const locationDetailFields = useMemo(
+    () => [
+      { label: 'District', value: effectiveHubMeta?.district || '—' },
+      { label: 'Ward', value: effectiveHubMeta?.ward || '—' },
+      { label: 'Zone', value: effectiveHubMeta?.zoneName || '—' },
+      { label: 'Address', value: effectiveHubMeta?.address || '—' },
+    ],
+    [effectiveHubMeta],
   );
 
   const performanceMetrics = useMemo(
@@ -160,11 +176,13 @@ const AdminDroneManagement = () => {
         }),
       ]);
       setHubOverview(overviewPayload?.overview || defaultHubStats);
+      setHubDetails(overviewPayload?.hub || null);
       setPerformance(overviewPayload?.performance || defaultPerformance);
       const items = Array.isArray(droneRows?.data) ? droneRows.data : droneRows;
       setDrones(Array.isArray(items) ? items : []);
     } catch (err) {
       setError(err?.response?.data?.error || err?.message || 'Failed to load hub data');
+      setHubDetails(null);
     } finally {
       setHubLoading(false);
     }
@@ -314,7 +332,8 @@ const AdminDroneManagement = () => {
     setLogsState({ open: false, loading: false, drone: null, items: [], error: '' });
   };
 
-  const hubCoverage = hubOverview.coverage || selectedHub?.coverage || selectedHub?.address || '—';
+  const hubCoverage =
+    effectiveHubMeta?.coverage || effectiveHubMeta?.address || hubOverview.coverage || '—';
 
   const formatPayload = (value) => {
     if (value === null || value === undefined || value === '') return '—';
@@ -422,6 +441,18 @@ const AdminDroneManagement = () => {
                   <div className="rounded-lg bg-white p-3 shadow-sm">
                     <p className="text-xs font-medium text-neutral-500">Coverage</p>
                     <p className="mt-1 text-sm font-semibold text-neutral-700">{hubCoverage}</p>
+                    <div className="mt-3 space-y-2">
+                      {locationDetailFields.map((field) => (
+                        <div key={field.label} className="flex items-center justify-between">
+                          <span className="text-xs font-medium text-neutral-500">
+                            {field.label}
+                          </span>
+                          <span className="text-xs font-semibold text-neutral-800">
+                            {field.value}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                   <div className="rounded-lg bg-white p-3 shadow-sm">
                     <p className="text-xs font-medium text-neutral-500">Active</p>

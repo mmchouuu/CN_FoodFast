@@ -5,8 +5,8 @@
   "main": "db/pool.js",
   "dependencies": {
     "amqplib": "^0.10.9",
+    "axios": "^1.13.2",
     "bcryptjs": "^3.0.2",
     "dotenv": "^17.2.3"
   }
-
 }

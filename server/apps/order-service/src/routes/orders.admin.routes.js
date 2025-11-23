@@ -3,6 +3,8 @@ const adminController = require('../controllers/orders.admin.controller');
 
 const router = express.Router();
 
+router.get('/assignments/pending', adminController.listPendingAssignmentOrders);
+router.get('/assignments', adminController.listAssignmentOrders);
 router.get('/', adminController.listOrders);
 router.get('/:id', adminController.getOrder);
 router.patch('/:id', adminController.patchOrder);

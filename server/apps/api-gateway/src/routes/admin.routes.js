@@ -22,6 +22,11 @@ router.get('/payouts/settlements/:settlementId/orders', controller.listPayoutSet
 router.get('/drone-hubs/system-summary', controller.getDroneSystemSummary);
 router.get('/drone-hubs', controller.listDroneHubs);
 router.get('/drone-hubs/:hubId/overview', controller.getDroneHubOverview);
+router.get('/assignments/summary', controller.getAssignmentSummary);
+router.get('/assignments/hubs/:hubId', controller.getHubAssignments);
+router.get('/assignments/orders/:orderId/hub', controller.getOrderHubDetails);
+router.post('/assignments/orders/:orderId/assign', controller.assignOrderToDrone);
+router.post('/assignments/orders/:orderId/reprocess', controller.reprocessOrderAssignment);
 router.get('/drones', controller.listAdminDrones);
 router.post('/drones', controller.createAdminDrone);
 router.put('/drones/:id', controller.updateAdminDrone);

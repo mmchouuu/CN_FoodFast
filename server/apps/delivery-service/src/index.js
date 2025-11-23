@@ -5,6 +5,7 @@ const config = require('./config');
 const deliveryRoutes = require('./routes');
 const deliveryService = require('./services/delivery.service');
 const logger = require('./logger');
+const { startOrderEventsConsumer } = require('./workers/orderEvents.consumer');
 
 const app = express();
 
@@ -44,6 +45,9 @@ const port = config.port;
 
 app.listen(port, () => {
   logger.info(`[delivery-service] Listening on port ${port}`);
+  startOrderEventsConsumer().catch((error) => {
+    logger.error('[delivery-service] Failed to initialise order events consumer:', error);
+  });
 });
 
 process.on('unhandledRejection', (reason) => {

@@ -453,23 +453,3 @@ INSERT INTO drones (
 ('DRONE-161', 'DJI Mini Pro 3', 1.50, 100, 'idle', '00000000-0000-0000-0000-000000000054', 'https://cdn2.cellphones.com.vn/insecure/rs:fill:0:358/q:90/plain/https://cellphones.com.vn/media/catalog/product/f/l/flycam-dji-mini-3-pro_1_.png', '{"lat": 10.8355, "lng": 106.5742}', now()),
 ('DRONE-162', 'DJI Matrice 30', 3.50, 100, 'idle', '00000000-0000-0000-0000-000000000054', 'https://cdn.vjshop.vn/flycam/dji/dji-matrice-30-series/dji-matrice-30-series-12-1.jpeg', '{"lat": 10.8355, "lng": 106.5742}', now());
 
--- Sample deliveries for admin tracking
-INSERT INTO deliveries (
-  id, order_id, branch_id, provider_type, drone_id, delivery_address, branch_location,
-  route, distance_meters, estimated_time_sec, current_position, progress_percent,
-  delivery_status, pickup_at, created_at
-) VALUES
-('50111111-1111-4111-8111-000000000001','60111111-1111-4111-8111-000000000001','70111111-1111-4111-8111-000000000001','drone',
- (SELECT id FROM drones WHERE code = 'DRONE-05' LIMIT 1),
- '{"address": "221 Nguyen Thi Minh Khai, District 3"}','{"lat": 10.7764, "lng": 106.7002}',
- '{"polyline": [], "waypoints": []}', 3200, 900, '{"lat": 10.7804, "lng": 106.6987}', 62, 'flying', now() - interval '8 minutes', now() - interval '10 minutes'),
-('50111111-1111-4111-8111-000000000002','60111111-1111-4111-8111-000000000002','70111111-1111-4111-8111-000000000002','drone',
- (SELECT id FROM drones WHERE code = 'DRONE-08' LIMIT 1),
- '{"address": "12 Street 2, Thu Duc City"}','{"lat": 10.7821, "lng": 106.6892}',
- '{"polyline": [], "waypoints": []}', 5100, 1200, '{"lat": 10.78144, "lng": 106.68897}', 91, 'arriving', now() - interval '12 minutes', now() - interval '15 minutes'),
-('50111111-1111-4111-8111-000000000003','60111111-1111-4111-8111-000000000003','70111111-1111-4111-8111-000000000003','drone',
- (SELECT id FROM drones WHERE code = 'DRONE-02' LIMIT 1),
- '{"address": "88 Vo Thi Sau, District 3"}','{"lat": 10.7791, "lng": 106.6987}',
- '{"polyline": [], "waypoints": []}', 2800, 840, '{"lat": 10.7879, "lng": 106.7012}', 40, 'assigned', NULL, now() - interval '5 minutes')
-ON CONFLICT (id) DO NOTHING;
-
