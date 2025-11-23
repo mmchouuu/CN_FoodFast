@@ -114,6 +114,13 @@ const resolveCustomerAddress = (shipping = {}) => {
   return '—';
 };
 
+const sanitizeOrderId = (value = '') => {
+  if (!value) return '';
+  const trimmed = value.trim();
+  if (!trimmed.length) return '';
+  return trimmed.replace(/^#+/, '');
+};
+
 const AdminAssignOrders = () => {
   const [summary, setSummary] = useState(defaultSummary);
   const [hubs, setHubs] = useState([]);
@@ -135,7 +142,7 @@ const AdminAssignOrders = () => {
       return '';
     }
   }, []);
-  const [orderLookupInput, setOrderLookupInput] = useState(queryOrderId);
+  const [orderLookupInput, setOrderLookupInput] = useState(sanitizeOrderId(queryOrderId));
   const [orderLookupLoading, setOrderLookupLoading] = useState(false);
   const [hubSuggestion, setHubSuggestion] = useState(null);
   const [toastNotice, setToastNotice] = useState(null);
@@ -213,9 +220,13 @@ const AdminAssignOrders = () => {
     return () => clearTimeout(timer);
   }, [toastNotice]);
 
+  useEffect(() => {
+    setOrderLookupInput(sanitizeOrderId(queryOrderId));
+  }, [queryOrderId]);
+
   const handleLocateOrder = useCallback(
     async (orderIdOverride) => {
-      const targetOrderId = (orderIdOverride || orderLookupInput || '').trim();
+      const targetOrderId = sanitizeOrderId(orderIdOverride || orderLookupInput || '');
       if (!targetOrderId) {
         showToast('Enter an order ID to locate its hub.');
         return;
@@ -239,7 +250,12 @@ const AdminAssignOrders = () => {
         }
       } catch (err) {
         setHubSuggestion(null);
-        showToast(err?.response?.data?.error || err?.message || 'Failed to locate order');
+        const status = err?.response?.status;
+        if (status === 404) {
+          showToast(`Could not find order #${targetOrderId.slice(0, 8)}.`);
+        } else {
+          showToast(err?.response?.data?.error || err?.message || 'Failed to locate order');
+        }
       } finally {
         setOrderLookupLoading(false);
       }
