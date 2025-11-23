@@ -259,6 +259,97 @@ const parseJsonField = (value, fallback) => {
   return fallback;
 };
 
+const toFloatOrNull = (value) => {
+  if (value === null || value === undefined) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const extractLocationFromSnapshot = (source = {}) => {
+  if (!source || typeof source !== 'object') return null;
+  const locationCandidate =
+    typeof source.location === 'object' && source.location
+      ? source.location
+      : null;
+  const latCandidates = [
+    locationCandidate?.lat,
+    locationCandidate?.latitude,
+    source.lat,
+    source.latitude,
+    Array.isArray(source.coordinates) ? source.coordinates[1] : null,
+    Array.isArray(source.center) ? source.center[1] : null,
+  ];
+  const lngCandidates = [
+    locationCandidate?.lng,
+    locationCandidate?.lon,
+    locationCandidate?.longitude,
+    source.lng,
+    source.lon,
+    source.longitude,
+    Array.isArray(source.coordinates) ? source.coordinates[0] : null,
+    Array.isArray(source.center) ? source.center[0] : null,
+  ];
+
+  const lat = latCandidates.map(toFloatOrNull).find((value) => value !== null);
+  const lng = lngCandidates.map(toFloatOrNull).find((value) => value !== null);
+  if (lat === null || lng === null) {
+    return null;
+  }
+  return { lat, lng };
+};
+
+const ensureSnapshotHasLocation = (snapshot) => {
+  if (!snapshot || typeof snapshot !== 'object') return snapshot;
+  const location = extractLocationFromSnapshot(snapshot);
+  if (location) {
+    snapshot.location = location;
+  }
+  return snapshot;
+};
+
+const resolveShippingAddressSnapshot = (payload = {}) => {
+  const candidate =
+    payload.shipping_address_snapshot ??
+    payload.shipping_address ??
+    payload.delivery_address ??
+    payload.address_snapshot ??
+    payload.selectedAddress ??
+    payload.selected_address ??
+    (payload.delivery && typeof payload.delivery === 'object'
+      ? payload.delivery.delivery_address ||
+        payload.delivery.address ||
+        payload.delivery.address_snapshot ||
+        payload.delivery.snapshot ||
+        null
+      : null);
+
+  let snapshot = null;
+  if (typeof candidate === 'string') {
+    snapshot = { formatted: candidate };
+  } else if (candidate && typeof candidate === 'object') {
+    snapshot = { ...candidate };
+  }
+  if (snapshot) {
+    ensureSnapshotHasLocation(snapshot);
+  }
+
+  const id =
+    payload.shipping_address_id ??
+    payload.shippingAddressId ??
+    payload.delivery_address_id ??
+    payload.deliveryAddressId ??
+    payload.selectedAddressId ??
+    payload.selected_address_id ??
+    (payload.selectedAddress &&
+      (payload.selectedAddress.id || payload.selectedAddress.address_id)) ??
+    (payload.selected_address &&
+      (payload.selected_address.id || payload.selected_address.address_id)) ??
+    (snapshot && (snapshot.id || snapshot.address_id)) ??
+    null;
+
+  return { snapshot, id };
+};
+
 const unique = (arr = []) => Array.from(new Set(arr));
 
 const resolveUserId = (user = {}) =>
@@ -928,6 +1019,7 @@ async function insertOrderGraph({
   payload,
   pricing,
   payment,
+  shippingAddress = {},
 }) {
   const {
     items,
@@ -953,6 +1045,12 @@ async function insertOrderGraph({
     source: 'order_created',
   });
 
+  const shippingSnapshot =
+    typeof shippingAddress.snapshot === 'object'
+      ? shippingAddress.snapshot
+      : null;
+  const shippingAddressId = shippingAddress.id || null;
+
   const orderResult = await client.query(
     `
       INSERT INTO orders (
@@ -975,11 +1073,16 @@ async function insertOrderGraph({
         promo_code,
         note,
         metadata,
-        timeline_metadata
+        timeline_metadata,
+        shipping_address_id,
+        shipping_address_snapshot,
+        assigned_hub_id,
+        assigned_hub_distance_m
       )
       VALUES (
         $1,$2,$3,$4,$5,$6,$7,
-        $8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20
+        $8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
+        $21,$22,$23,$24
       )
       RETURNING *
     `,
@@ -1004,6 +1107,10 @@ async function insertOrderGraph({
       payload.note || null,
       metadata,
       JSON.stringify(timelineMetadata),
+      shippingAddressId,
+      shippingSnapshot ? JSON.stringify(shippingSnapshot) : null,
+      null,
+      null,
     ],
   );
 
@@ -1579,6 +1686,14 @@ async function createCustomerOrder({ user, payload = {}, context = {} }) {
     paymentFlow === 'cash' ? null : normaliseUuid(paymentMethodIdRaw);
 
   const pricing = await computePricingSnapshot({ userId, payload, context });
+  const shippingAddress = resolveShippingAddressSnapshot(payload);
+  const shippingSnapshotForEvents = shippingAddress.snapshot || null;
+  if (shippingAddress.snapshot) {
+    payload.shipping_address_snapshot = shippingAddress.snapshot;
+  }
+  if (shippingAddress.id) {
+    payload.shipping_address_id = shippingAddress.id;
+  }
 
   const client = await pool.connect();
   try {
@@ -1594,6 +1709,7 @@ async function createCustomerOrder({ user, payload = {}, context = {} }) {
         status: paymentFlow === 'online' ? 'pending' : 'unpaid',
         payment_method_id: paymentMethodId,
       },
+      shippingAddress,
     });
 
     const hydrated = await fetchOrderById(order.id, {
@@ -1629,10 +1745,12 @@ async function createCustomerOrder({ user, payload = {}, context = {} }) {
         order_id: order.id,
         user_id: order.user_id,
         restaurant_id: order.restaurant_id,
+        branch_id: order.branch_id,
         total: pricing.totals.total_amount,
         payment_method: paymentMethod,
         payment_method_id: paymentMethodId,
         flow: paymentFlow,
+        shipping_address_snapshot: shippingSnapshotForEvents || null,
       },
     });
 
@@ -1641,17 +1759,25 @@ async function createCustomerOrder({ user, payload = {}, context = {} }) {
     const finalOrder = await fetchOrderById(order.id);
     await syncInventoryAfterOrder(finalOrder);
 
+    const finalShippingSnapshot =
+      parseJsonField(finalOrder?.shipping_address_snapshot, null) ||
+      finalOrder?.delivery_snapshot ||
+      shippingSnapshotForEvents ||
+      null;
+
     dispatchOrderEvent(
       'order.created',
       {
         order_id: order.id,
         user_id: order.user_id,
         restaurant_id: order.restaurant_id,
+        branch_id: order.branch_id,
         amount: pricing.totals.total_amount,
         currency: pricing.totals.currency,
         payment_method: paymentMethod,
         payment_method_id: paymentMethodId,
         flow: paymentFlow,
+        shipping_address_snapshot: finalShippingSnapshot,
       },
       'order.created',
     );
@@ -1786,6 +1912,28 @@ async function patchAdminOrder({ user, orderId, payload = {} }) {
   if (payload.fulfillment_type) {
     params.push(normaliseFulfillmentType(payload.fulfillment_type));
     updates.push(`fulfillment_type = $${params.length}`);
+  }
+
+  if (payload.assigned_hub_id !== undefined) {
+    let normalizedHubId = null;
+    if (payload.assigned_hub_id !== null) {
+      normalizedHubId = normaliseUuid(payload.assigned_hub_id);
+      if (!normalizedHubId) {
+        throw new ValidationError('assigned_hub_id must be a valid UUID or null');
+      }
+    }
+    params.push(normalizedHubId);
+    updates.push(`assigned_hub_id = $${params.length}`);
+  }
+
+  if (payload.assigned_hub_distance_m !== undefined) {
+    let distance = null;
+    if (payload.assigned_hub_distance_m !== null) {
+      const parsed = Number(payload.assigned_hub_distance_m);
+      distance = Number.isFinite(parsed) ? Math.max(0, Math.round(parsed)) : null;
+    }
+    params.push(distance);
+    updates.push(`assigned_hub_distance_m = $${params.length}`);
   }
 
   if (payload.total_amount) {
@@ -2168,6 +2316,68 @@ async function handlePaymentEvent(event = {}) {
   }
 }
 
+const ASSIGNMENT_STATUSES = ['pending', 'confirmed', 'preparing', 'ready'];
+
+async function listAssignmentOrders({ hubId, limit = 50, offset = 0 }) {
+  const normalizedHubId = normaliseUuid(hubId);
+  if (!normalizedHubId) {
+    throw new ValidationError('hubId is required');
+  }
+  const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 200);
+  const safeOffset = Math.max(Number(offset) || 0, 0);
+
+  const { rows } = await pool.query(
+    `
+      SELECT o.id,
+             o.user_id,
+             o.restaurant_id,
+             o.branch_id,
+             o.status,
+             o.payment_status,
+             o.created_at,
+             o.updated_at,
+             o.total_amount,
+             o.currency,
+             o.metadata,
+             o.shipping_address_snapshot,
+             o.assigned_hub_id,
+             o.assigned_hub_distance_m,
+             COALESCE(ic.item_count, 0)::int AS item_count
+      FROM orders o
+      LEFT JOIN (
+        SELECT order_id, COUNT(*)::int AS item_count
+        FROM order_items
+        WHERE is_priced IS NOT FALSE
+        GROUP BY order_id
+      ) ic ON ic.order_id = o.id
+      WHERE o.assigned_hub_id = $1
+        AND o.status = ANY($2)
+      ORDER BY o.created_at ASC
+      LIMIT $3 OFFSET $4
+    `,
+    [normalizedHubId, ASSIGNMENT_STATUSES, safeLimit, safeOffset],
+  );
+
+  return rows.map((row) => ({
+    id: row.id,
+    user_id: row.user_id,
+    restaurant_id: row.restaurant_id,
+    branch_id: row.branch_id,
+    status: row.status,
+    payment_status: row.payment_status,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    total_amount: row.total_amount,
+    currency: row.currency,
+    metadata: parseJsonField(row.metadata, {}) || row.metadata || {},
+    assigned_hub_id: row.assigned_hub_id,
+    assigned_hub_distance_m: row.assigned_hub_distance_m,
+    item_count: row.item_count,
+    shipping_address_snapshot:
+      parseJsonField(row.shipping_address_snapshot, null) || row.shipping_address_snapshot || null,
+  }));
+}
+
 module.exports = {
   createCustomerOrder,
   listCustomerOrders,
@@ -2188,6 +2398,8 @@ module.exports = {
   ForbiddenError,
   NotFoundError,
   syncInventoryAfterOrder,
+  listPendingAssignmentOrders,
+  listAssignmentOrders,
 };
 
 async function listCustomerOrders({ user, query = {} }) {
@@ -3374,4 +3586,60 @@ async function createOwnerOrderRevision({ user, orderId, payload = {} }) {
   } finally {
     client.release();
   }
+}
+
+async function listPendingAssignmentOrders({ limit = 50 } = {}) {
+  const normalizedLimit = Math.min(Math.max(Number(limit) || 50, 1), 500);
+  const statuses = ['confirmed', 'preparing', 'ready'];
+
+  const query = `
+    SELECT o.id,
+           o.user_id,
+           o.branch_id,
+           o.status,
+           o.created_at,
+           o.shipping_address_snapshot,
+           COALESCE(ic.item_count, 0)::int AS item_count,
+           COUNT(*) OVER() AS total_count
+    FROM orders o
+    LEFT JOIN (
+      SELECT order_id, COUNT(*)::int AS item_count
+      FROM order_items
+      WHERE is_priced IS NOT FALSE
+      GROUP BY order_id
+    ) ic ON ic.order_id = o.id
+    WHERE o.status = ANY($1)
+      AND o.fulfillment_type = 'delivery'
+    ORDER BY o.created_at ASC
+    LIMIT $2
+  `;
+
+  const { rows } = await pool.query(query, [statuses, normalizedLimit]);
+  const total =
+    rows.length && rows[0].total_count !== undefined ? Number(rows[0].total_count) : rows.length;
+  const items = rows.map((row) => {
+    const snapshot = parseJsonField(row.shipping_address_snapshot, {}) || {};
+    const location = snapshot.location || null;
+    const addressLine = snapshot.street || snapshot.address || snapshot.line1 || null;
+    return {
+      id: row.id,
+      branch_id: row.branch_id,
+      status: row.status,
+      created_at: row.created_at,
+      item_count: Number(row.item_count) || 0,
+      shipping_address_snapshot: snapshot,
+      customer: {
+        name: snapshot.full_name || snapshot.name || null,
+        phone: snapshot.phone || snapshot.contact_phone || null,
+      },
+      address: {
+        street: addressLine,
+        ward: snapshot.ward || snapshot.ward_name || null,
+        district: snapshot.district || snapshot.district_name || null,
+        city: snapshot.city || snapshot.city_name || null,
+      },
+      location,
+    };
+  });
+  return { total, items };
 }

@@ -25,5 +25,23 @@ module.exports = {
     deliveryQueue: process.env.DELIVERY_EVENTS_QUEUE || 'delivery_events',
     orderQueue: process.env.ORDER_EVENTS_QUEUE || 'order_events',
   },
+  productServiceUrl: process.env.PRODUCT_SERVICE_URL || 'http://product-service:3002',
+  orderServiceUrl: process.env.ORDER_SERVICE_URL || 'http://order-service:3003',
+  serviceAuth: {
+    userId:
+      process.env.DRONE_SERVICE_USER_ID || '11111111-1111-4111-8111-000000000099',
+    role: process.env.DRONE_SERVICE_ROLE || 'drone_operator',
+  },
+  httpTimeout: number(process.env.HTTP_TIMEOUT_MS, 8000),
+  maptiler: {
+    key:
+      process.env.MAPTILER_KEY ||
+      process.env.VITE_MAPTILER_KEY ||
+      process.env.MAPTILER_API_KEY ||
+      'YUyNgtKuEPD1fLE16S0e',
+    geocodeUrl: process.env.MAPTILER_GEOCODE_URL || 'https://api.maptiler.com/geocoding',
+    directionsUrl:
+      process.env.MAPTILER_DIRECTIONS_URL || 'https://api.maptiler.com/routing/route/v2',
+  },
   logLevel: process.env.LOG_LEVEL || 'info',
 };

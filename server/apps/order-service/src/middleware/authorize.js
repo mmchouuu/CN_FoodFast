@@ -14,15 +14,26 @@ function toRoleArray(value) {
   return [];
 }
 
+const EXTENDED_ROLE_MAP = {
+  admin: ['drone_operator'],
+  superadmin: ['drone_operator'],
+};
+
 module.exports = function requireRoles(roles) {
-  const allowed =
-    Array.isArray(roles) && roles.length
-      ? new Set(
-          roles
-            .map((role) => (typeof role === 'string' ? role.trim().toLowerCase() : null))
-            .filter(Boolean),
-        )
-      : null;
+  let allowed = null;
+  if (Array.isArray(roles) && roles.length) {
+    allowed = new Set();
+    roles.forEach((role) => {
+      if (typeof role !== 'string') return;
+      const normalized = role.trim().toLowerCase();
+      if (!normalized) return;
+      allowed.add(normalized);
+      const extras = EXTENDED_ROLE_MAP[normalized];
+      if (Array.isArray(extras)) {
+        extras.forEach((extraRole) => allowed.add(extraRole));
+      }
+    });
+  }
 
   return (req, res, next) => {
     if (!req.user) {

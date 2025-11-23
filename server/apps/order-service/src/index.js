@@ -20,7 +20,12 @@ app.use('/api/orders', ordersRouter);
 
 app.use('/customer/orders', auth, requireRoles(['customer', 'user']), customerOrderRoutes);
 app.use('/owner/orders', auth, requireRoles(['owner_main', 'owner', 'manager', 'staff']), ownerOrderRoutes);
-app.use('/admin/orders', auth, requireRoles(['admin', 'superadmin']), adminOrderRoutes);
+app.use(
+  '/admin/orders',
+  auth,
+  requireRoles(['admin', 'superadmin', 'drone_operator']),
+  adminOrderRoutes,
+);
 app.get('/health', (req, res) => res.json({ ok: true, service: 'order-service' }));
 
 // basic error handler

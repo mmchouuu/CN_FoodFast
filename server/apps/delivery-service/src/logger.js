@@ -5,13 +5,24 @@ try {
   logger = require('../../../libs/common/logger');
 } catch (error) {
   // Fallback logger for container builds where the shared libs aren't available
-  const format = (level, args) => console[level === 'error' ? 'error' : 'log'](`[delivery-service][${level.toUpperCase()}]`, ...args);
+  const write = (level, args) => {
+    const fn =
+      level === 'error'
+        ? console.error
+        : level === 'warn'
+        ? console.warn
+        : level === 'debug'
+        ? console.debug || console.log
+        : console.log;
+    fn(`[delivery-service][${level.toUpperCase()}]`, ...args);
+  };
   logger = {
-    info: (...args) => format('info', args),
-    error: (...args) => format('error', args),
+    info: (...args) => write('info', args),
+    warn: (...args) => write('warn', args),
+    error: (...args) => write('error', args),
     debug: (...args) => {
       if (process.env.DEBUG) {
-        format('debug', args);
+        write('debug', args);
       }
     },
   };

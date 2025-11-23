@@ -1,5 +1,6 @@
 const adminClient = require('../services/admin.client');
 const restaurantClient = require('../services/restaurant.client');
+const assignmentService = require('../services/assignment.service');
 
 function withRequestHeaders(req) {
   const headers = { 'x-request-id': req.id };
@@ -328,6 +329,70 @@ async function getAdminDroneLogs(req, res, next) {
   }
 }
 
+async function getAssignmentSummary(req, res, next) {
+  try {
+    const summary = await assignmentService.fetchSummary(withRequestHeaders(req));
+    res.json(summary);
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function getHubAssignments(req, res, next) {
+  try {
+    const { hubId } = req.params;
+    const { sort } = req.query || {};
+    const payload = await assignmentService.fetchHubAssignments(
+      { hubId, sortBy: sort },
+      withRequestHeaders(req),
+    );
+    res.json(payload);
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function getOrderHubDetails(req, res, next) {
+  try {
+    const { orderId } = req.params;
+    const payload = await assignmentService.fetchOrderHub(orderId, withRequestHeaders(req));
+    res.json(payload);
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function assignOrderToDrone(req, res, next) {
+  try {
+    const { orderId } = req.params;
+    const payload = req.body || {};
+    if (!payload.deliveryId || !payload.droneId) {
+      return res.status(400).json({ error: 'deliveryId and droneId are required' });
+    }
+    const result = await assignmentService.assignOrderToDrone(
+      orderId,
+      {
+        deliveryId: payload.deliveryId,
+        droneId: payload.droneId,
+      },
+      withRequestHeaders(req),
+    );
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function reprocessOrderAssignment(req, res, next) {
+  try {
+    const { orderId } = req.params;
+    const result = await assignmentService.reprocessOrder(orderId, withRequestHeaders(req));
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
   listCustomers,
   customerDetails,
@@ -351,4 +416,9 @@ module.exports = {
   updateAdminDrone,
   deleteAdminDrone,
   getAdminDroneLogs,
+  getAssignmentSummary,
+  getHubAssignments,
+  getOrderHubDetails,
+  assignOrderToDrone,
+  reprocessOrderAssignment,
 };
