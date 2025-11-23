@@ -12,13 +12,18 @@ const AdminLogin = () => {
   const [rememberMe, setRememberMe] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [accountType, setAccountType] = useState("System Administrator");
 
   useEffect(() => {
     try {
       const savedEmail = localStorage.getItem("admin_login_email");
+      const savedAccountType = localStorage.getItem("admin_account_type");
       if (savedEmail) {
         setEmail(savedEmail);
         setRememberMe(true);
+      }
+      if (savedAccountType) {
+        setAccountType(savedAccountType);
       }
     } catch {
       // ignore storage errors
@@ -34,6 +39,7 @@ const AdminLogin = () => {
         email: email.trim(),
         password,
         rememberMe,
+        accountType,
       };
       const result = await adminService.login(payload);
       if (result?.token) {
@@ -44,12 +50,18 @@ const AdminLogin = () => {
       }
       if (rememberMe) {
         localStorage.setItem("admin_login_email", payload.email);
+        localStorage.setItem("admin_account_type", accountType);
       } else {
         localStorage.removeItem("admin_login_email");
+        localStorage.removeItem("admin_account_type");
       }
       window.dispatchEvent(new CustomEvent("admin:auth-changed"));
       toast.success(result?.message || "Welcome back.");
-      const redirectTo = location.state?.redirect || "/admin";
+      // Redirect based on selected accountType unless redirected explicitly
+      let redirectTo = location.state?.redirect;
+      if (!redirectTo) {
+        redirectTo = accountType === "Drone Operations Manager" ? "/admin/drone-hubs" : "/admin";
+      }
       navigate(redirectTo, { replace: true });
     } catch (err) {
       setError(
@@ -82,6 +94,17 @@ const AdminLogin = () => {
           </div>
         ) : null}
         <form onSubmit={handleSubmit} className="space-y-5">
+          <label className="block text-sm font-medium text-neutral-600">
+            Account type
+            <select
+              value={accountType}
+              onChange={(e) => setAccountType(e.target.value)}
+              className="mt-2 w-full rounded-2xl border border-neutral-200 px-4 py-3 text-neutral-900 outline-none transition focus:border-neutral-400 focus:ring-2 focus:ring-neutral-100 bg-white"
+            >
+              <option>System Administrator</option>
+              <option>Drone Operations Manager</option>
+            </select>
+          </label>
           <label className="block text-sm font-medium text-neutral-600">
             Email address
             <input

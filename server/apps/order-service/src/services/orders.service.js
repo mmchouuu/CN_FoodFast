@@ -4,6 +4,7 @@ const { pool } = require('../db');
 const productClient = require('../clients/product.client');
 const paymentClient = require('../clients/payment.client');
 const { publishOrderEvent } = require('../utils/rabbitmq');
+const { deriveDeliveryRecord } = require('../utils/delivery');
 
 const ALLOW_CLIENT_PRICING_FALLBACK = process.env.ALLOW_CLIENT_PRICING_FALLBACK === 'true';
 const DEFAULT_CURRENCY = 'VND';
@@ -40,6 +41,77 @@ const PAYMENT_FLOWS = {
   momo: 'online',
   zalopay: 'online',
   bank_transfer: 'cash',
+};
+
+const normaliseTimelineStatus = (value) => {
+  if (value === undefined || value === null) return null;
+  const status =
+    typeof value === 'string'
+      ? value.trim().toLowerCase()
+      : typeof value.toString === 'function'
+      ? value.toString().trim().toLowerCase()
+      : '';
+  if (!status) return null;
+  if (status === 'canceled') {
+    return 'cancelled';
+  }
+  return ORDER_STATUSES.has(status) ? status : null;
+};
+
+const normaliseTimelineMetadata = (value) => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((entry) => {
+      if (!entry || typeof entry !== 'object') return null;
+      const status = normaliseTimelineStatus(entry.status || entry.code);
+      if (!status) return null;
+      const normalized = { status };
+      const timestamp =
+        entry.at || entry.timestamp || entry.created_at || entry.createdAt || null;
+      if (timestamp) {
+        normalized.at = timestamp;
+      }
+      const actorId = entry.actor_id || entry.actorId || null;
+      if (actorId) {
+        normalized.actor_id = actorId;
+      }
+      const note = entry.note || entry.reason || null;
+      if (note) {
+        normalized.note = note;
+      }
+      if (entry.source) {
+        normalized.source = entry.source;
+      }
+      return normalized;
+    })
+    .filter(Boolean);
+};
+
+const appendTimelineMetadataEntry = (timeline, status, { actorId, note, source, at } = {}) => {
+  const canonicalStatus = normaliseTimelineStatus(status);
+  if (!canonicalStatus) {
+    return normaliseTimelineMetadata(timeline);
+  }
+  const entries = normaliseTimelineMetadata(timeline).filter(
+    (entry) => entry.status !== canonicalStatus,
+  );
+  const entry = {
+    status: canonicalStatus,
+    at: at || new Date().toISOString(),
+  };
+  if (actorId) {
+    entry.actor_id = actorId;
+  }
+  if (note) {
+    entry.note = note;
+  }
+  if (source) {
+    entry.source = source;
+  }
+  entries.push(entry);
+  return entries;
 };
 
 const hasClientPricingHint = (metadata) => {
@@ -168,6 +240,23 @@ const toCurrency = (currency) => {
 const ensureArray = (value) => {
   if (!value) return [];
   return Array.isArray(value) ? value : [value];
+};
+
+const parseJsonField = (value, fallback) => {
+  if (value === null || value === undefined) {
+    return fallback;
+  }
+  if (typeof value === 'object') {
+    return value;
+  }
+  if (typeof value === 'string') {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return fallback;
+    }
+  }
+  return fallback;
 };
 
 const unique = (arr = []) => Array.from(new Set(arr));
@@ -774,19 +863,63 @@ const enrichMetadata = ({ payload, pricing, payment, user }) => {
     });
   }
 
-  return {
+  const deliveryMeta =
+    base.delivery && typeof base.delivery === 'object' ? { ...base.delivery } : {};
+  const applyDeliverySource = (source) => {
+    if (!source || typeof source !== 'object') return;
+    if (source.delivery_status || source.status) {
+      deliveryMeta.delivery_status = source.delivery_status || source.status;
+    }
+    if (source.estimated_at || source.estimatedAt) {
+      deliveryMeta.estimated_at = source.estimated_at || source.estimatedAt;
+    }
+    if (source.delivered_at || source.deliveredAt) {
+      deliveryMeta.delivered_at = source.delivered_at || source.deliveredAt;
+    }
+    if (source.delivery_address || source.address || source.location) {
+      deliveryMeta.delivery_address =
+        source.delivery_address || source.address || source.location;
+    }
+    if (source.contact_name || source.contactName) {
+      deliveryMeta.contact_name = source.contact_name || source.contactName;
+    }
+    if (source.contact_phone || source.contactPhone) {
+      deliveryMeta.contact_phone = source.contact_phone || source.contactPhone;
+    }
+    if (source.proof) {
+      deliveryMeta.proof = ensureJson(source.proof);
+    }
+    if (source.provider) {
+      deliveryMeta.provider = source.provider;
+    }
+  };
+  applyDeliverySource(pricing.delivery);
+  applyDeliverySource(payload.delivery);
+
+  if (!base.delivery_address && deliveryMeta.delivery_address) {
+    base.delivery_address = deliveryMeta.delivery_address;
+  }
+
+  const result = {
     ...base,
     payment: paymentMeta,
     pricing: pricingMeta,
     timeline,
     delivery_address:
       base.delivery_address ||
+      deliveryMeta.delivery_address ||
       pricing.delivery?.delivery_address ||
       payload.delivery_address ||
       payload.delivery?.delivery_address ||
       null,
     placed_at: base.placed_at || placedAt,
   };
+
+  if (Object.keys(deliveryMeta).length) {
+    result.delivery = deliveryMeta;
+  }
+
+  return result;
 };
 
 async function insertOrderGraph({
@@ -814,6 +947,11 @@ async function insertOrderGraph({
   });
 
   const paymentStatus = payment.flow === 'online' ? 'pending' : 'unpaid';
+  const timelineMetadata = appendTimelineMetadataEntry([], 'pending', {
+    actorId: userId,
+    at: new Date().toISOString(),
+    source: 'order_created',
+  });
 
   const orderResult = await client.query(
     `
@@ -836,11 +974,12 @@ async function insertOrderGraph({
         currency,
         promo_code,
         note,
-        metadata
+        metadata,
+        timeline_metadata
       )
       VALUES (
         $1,$2,$3,$4,$5,$6,$7,
-        $8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19
+        $8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20
       )
       RETURNING *
     `,
@@ -864,6 +1003,7 @@ async function insertOrderGraph({
       payload.promo_code || payload.promoCode || null,
       payload.note || null,
       metadata,
+      JSON.stringify(timelineMetadata),
     ],
   );
 
@@ -999,38 +1139,6 @@ async function insertOrderGraph({
     );
   }
 
-  if (delivery) {
-    await client.query(
-      `
-        INSERT INTO deliveries (
-          order_id,
-          delivery_status,
-          delivery_address,
-          contact_name,
-          contact_phone,
-          estimated_at,
-          delivered_at,
-          provider,
-          proof
-        )
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-      `,
-      [
-        order.id,
-        delivery.delivery_status || 'preparing',
-        typeof delivery.delivery_address === 'object'
-          ? JSON.stringify(delivery.delivery_address)
-          : delivery.delivery_address,
-        delivery.contact_name || null,
-        delivery.contact_phone || null,
-        delivery.estimated_at || null,
-        delivery.delivered_at || null,
-        delivery.provider || null,
-        delivery.proof || {},
-      ],
-    );
-  }
-
   return order;
 }
 
@@ -1108,16 +1216,6 @@ async function fetchOrdersByIds(orderIds, { client, includeEvents = false, inclu
     `
       SELECT * FROM order_promotions
       WHERE order_id = ANY($1::uuid[])
-    `,
-    [orderIds],
-  );
-
-  const deliveryRes = await client.query(
-    `
-      SELECT DISTINCT ON (order_id) *
-      FROM deliveries
-      WHERE order_id = ANY($1::uuid[])
-      ORDER BY order_id, created_at DESC
     `,
     [orderIds],
   );
@@ -1220,32 +1318,6 @@ async function fetchOrdersByIds(orderIds, { client, includeEvents = false, inclu
     promotionsByOrder.set(promotion.order_id, list);
   }
 
-  const deliveryByOrder = new Map();
-  for (const delivery of deliveryRes.rows) {
-    let parsedAddress = delivery.delivery_address;
-    if (typeof parsedAddress === 'string') {
-      try {
-        parsedAddress = JSON.parse(parsedAddress);
-      } catch (err) {
-        parsedAddress = parsedAddress;
-      }
-    }
-    deliveryByOrder.set(delivery.order_id, {
-      id: delivery.id,
-      order_id: delivery.order_id,
-      delivery_status: delivery.delivery_status,
-      delivery_address: parsedAddress,
-      contact_name: delivery.contact_name,
-      contact_phone: delivery.contact_phone,
-      estimated_at: delivery.estimated_at,
-      delivered_at: delivery.delivered_at,
-      provider: delivery.provider,
-      proof: delivery.proof || {},
-      created_at: delivery.created_at,
-      updated_at: delivery.updated_at,
-    });
-  }
-
   const eventsByOrder = new Map();
   for (const event of eventsRes.rows) {
     const list = eventsByOrder.get(event.order_id) || [];
@@ -1299,14 +1371,18 @@ async function fetchOrdersByIds(orderIds, { client, includeEvents = false, inclu
       taxes: itemTaxesByItem.get(item.id) || [],
     }));
 
+    const metadata = parseJsonField(orderRow.metadata, {}) || {};
+    const shippingSnapshot =
+      parseJsonField(orderRow.shipping_address_snapshot, null) || orderRow.shipping_address_snapshot || null;
     const order = {
       ...orderRow,
+      metadata,
       items: enrichedItems,
       discounts: discountsByOrder.get(orderId) || [],
       surcharges: surchargesByOrder.get(orderId) || [],
       promotions: promotionsByOrder.get(orderId) || [],
       tax_breakdowns: orderTaxesByOrder.get(orderId) || [],
-      delivery: deliveryByOrder.get(orderId) || null,
+      delivery: deriveDeliveryRecord(orderRow, metadata, shippingSnapshot),
     };
 
     if (includeEvents) {
@@ -1684,9 +1760,11 @@ async function getAdminOrder({ orderId }) {
 async function patchAdminOrder({ user, orderId, payload = {} }) {
   const updates = [];
   const params = [];
+  const actorId = resolveUserId(user);
 
-  if (payload.status) {
-    params.push(normaliseOrderStatus(payload.status));
+  const normalizedStatus = payload.status ? normaliseOrderStatus(payload.status) : null;
+  if (normalizedStatus) {
+    params.push(normalizedStatus);
     updates.push(`status = $${params.length}`);
   }
 
@@ -1739,11 +1817,38 @@ async function patchAdminOrder({ user, orderId, payload = {} }) {
     throw new ValidationError('no valid fields to update');
   }
 
-  params.push(orderId);
-
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+
+    if (normalizedStatus) {
+      const existingRes = await client.query(
+        `
+          SELECT timeline_metadata
+          FROM orders
+          WHERE id = $1
+          FOR UPDATE
+        `,
+        [orderId],
+      );
+      const existingOrder = existingRes.rows[0];
+      if (!existingOrder) {
+        throw new NotFoundError('order not found');
+      }
+      const timelineMetadata = appendTimelineMetadataEntry(
+        existingOrder.timeline_metadata,
+        normalizedStatus,
+        {
+          actorId,
+          note: payload.note || null,
+          source: 'admin_patch',
+        },
+      );
+      updates.push(`timeline_metadata = $${params.length + 1}`);
+      params.push(JSON.stringify(timelineMetadata));
+    }
+
+    params.push(orderId);
 
     const result = await client.query(
       `
@@ -1763,7 +1868,7 @@ async function patchAdminOrder({ user, orderId, payload = {} }) {
     await logOrderEvent(client, {
       orderId,
       eventType: 'OrderAdminUpdated',
-      actorId: resolveUserId(user),
+      actorId,
       payload: {
         updates: payload,
       },
@@ -1776,7 +1881,7 @@ async function patchAdminOrder({ user, orderId, payload = {} }) {
       payload: {
         order_id: orderId,
         updates: payload,
-        actor: resolveUserId(user),
+        actor: actorId,
       },
     });
 
@@ -1796,25 +1901,41 @@ async function deleteAdminOrder({ user, orderId, payload = {} }) {
   try {
     await client.query('BEGIN');
 
-    const result = await client.query(
+    const orderRes = await client.query(
       `
-        UPDATE orders
-        SET status = 'cancelled', updated_at = now()
+        SELECT timeline_metadata
+        FROM orders
         WHERE id = $1
-        RETURNING *
+        FOR UPDATE
       `,
       [orderId],
     );
 
-    const order = result.rows[0];
+    const order = orderRes.rows[0];
     if (!order) {
       throw new NotFoundError('order not found');
     }
 
+    const actorId = resolveUserId(user);
+    const timelineMetadata = appendTimelineMetadataEntry(order.timeline_metadata, 'cancelled', {
+      actorId,
+      note: payload.reason || 'admin_cancel',
+      source: 'admin_delete',
+    });
+
+    await client.query(
+      `
+        UPDATE orders
+        SET status = 'cancelled', updated_at = now(), timeline_metadata = $2
+        WHERE id = $1
+      `,
+      [orderId, JSON.stringify(timelineMetadata)],
+    );
+
     await logOrderEvent(client, {
       orderId,
       eventType: 'OrderAdminCancelled',
-      actorId: resolveUserId(user),
+      actorId,
       payload: {
         reason: payload.reason || 'admin_cancel',
       },
@@ -1827,7 +1948,7 @@ async function deleteAdminOrder({ user, orderId, payload = {} }) {
       payload: {
         order_id: orderId,
         status: 'cancelled',
-        actor: resolveUserId(user),
+        actor: actorId,
       },
     });
 
@@ -1931,15 +2052,53 @@ async function handlePaymentEvent(event = {}) {
         payload,
       });
     } else if (eventType === 'RefundCompleted') {
+      const amount = Number(payload?.amount) || 0;
+      const refundId = payload?.refund_id || null;
+      const paymentId = payload?.payment_id || null;
+      const processedAt =
+        payload?.processed_at || new Date().toISOString();
+
+      const orderRowRes = await client.query(
+        `
+          SELECT metadata, timeline_metadata
+          FROM orders
+          WHERE id = $1
+          FOR UPDATE
+        `,
+        [orderId],
+      );
+      const orderRow = orderRowRes.rows[0] || {};
+      const metadata = parseJsonField(orderRow.metadata, {}) || {};
+      const metadataTimeline = Array.isArray(metadata.timeline) ? [...metadata.timeline] : [];
+      metadataTimeline.push({
+        type: 'refund_succeeded',
+        amount,
+        refund_id: refundId,
+        at: processedAt,
+      });
+      metadata.timeline = metadataTimeline;
+
+      const timelineMetadataRaw = parseJsonField(orderRow.timeline_metadata, []);
+      const nextTimelineMetadata = Array.isArray(timelineMetadataRaw)
+        ? [...timelineMetadataRaw]
+        : [];
+      nextTimelineMetadata.push({
+        type: 'refund_succeeded',
+        amount,
+        at: processedAt,
+      });
+
       await client.query(
         `
           UPDATE orders
           SET payment_status = 'refunded',
               status = CASE WHEN status = 'completed' THEN 'cancelled' ELSE status END,
+              metadata = $2,
+              timeline_metadata = $3,
               updated_at = now()
           WHERE id = $1
         `,
-        [orderId],
+        [orderId, JSON.stringify(metadata), JSON.stringify(nextTimelineMetadata)],
       );
 
       await logOrderEvent(client, {
@@ -1948,14 +2107,54 @@ async function handlePaymentEvent(event = {}) {
         payload,
       });
 
+      await logOrderEvent(client, {
+        orderId,
+        eventType: 'refund_succeeded',
+        payload: {
+          amount,
+          refund_id: refundId,
+          payment_id: paymentId,
+          processed_at: processedAt,
+        },
+      });
+
+      const refundRequestRes = await client.query(
+        `
+          WITH target AS (
+            SELECT id
+            FROM order_refund_requests
+            WHERE order_id = $1
+              AND status IN ('requested','approved','processing')
+            ORDER BY updated_at DESC
+            LIMIT 1
+          )
+          UPDATE order_refund_requests
+             SET status = 'succeeded',
+                 updated_at = now()
+          WHERE id IN (SELECT id FROM target)
+          RETURNING id
+        `,
+        [orderId],
+      );
+      const refundRequestId = refundRequestRes.rows[0]?.id || null;
+      if (refundRequestId) {
+        await client.query(
+          `
+            INSERT INTO order_refund_events (refund_request_id, event_type, actor_id, payload)
+            VALUES ($1,'succeeded',NULL,$2)
+          `,
+          [refundRequestId, JSON.stringify({ amount, refund_id: refundId })],
+        );
+      }
+
       await enqueueOutbox(client, {
         aggregateType: 'Order',
         aggregateId: orderId,
         eventType: 'order.refunded',
         payload: {
           order_id: orderId,
-          refund_id: payload.refund_id || null,
-          amount: payload.amount || 0,
+          refund_id: refundId,
+          amount,
         },
       });
     }
@@ -1978,6 +2177,7 @@ module.exports = {
   listOwnerOrders,
   getOwnerOrder,
   updateOwnerOrderStatus,
+  respondOwnerCancelRequest,
   createOwnerOrderRevision,
   listAdminOrders,
   getAdminOrder,
@@ -2102,17 +2302,208 @@ async function cancelCustomerOrder({ user, orderId, payload = {} }) {
       throw new NotFoundError('order not found');
     }
 
-    if (!['pending', 'confirmed'].includes(order.status) || order.payment_status === 'paid') {
+    const metadata =
+      order.metadata && typeof order.metadata === 'object' ? { ...order.metadata } : {};
+    const existingRequest =
+      metadata.cancel_request && typeof metadata.cancel_request === 'object'
+        ? metadata.cancel_request
+        : null;
+    if (existingRequest?.status === 'pending') {
+      throw new ValidationError('cancellation request already pending');
+    }
+
+    const cancelReason = payload.reason || 'customer_request';
+    const nowIso = new Date().toISOString();
+
+    if (order.status === 'preparing') {
+      metadata.cancel_request = {
+        status: 'pending',
+        reason: cancelReason,
+        requested_by: userId,
+        requested_at: nowIso,
+      };
+
+      const metadataTimeline = Array.isArray(metadata.timeline) ? [...metadata.timeline] : [];
+      metadataTimeline.push({
+        type: 'cancel_requested',
+        by: payload?.initiator || 'customer',
+        reason: cancelReason,
+        amount: Number(toNumber(order.total_amount, 0).toFixed(2)) || 0,
+        at: nowIso,
+      });
+      metadata.timeline = metadataTimeline;
+      const timelineMetadataRaw = parseJsonField(order.timeline_metadata, []);
+      const nextTimelineMetadata = Array.isArray(timelineMetadataRaw) ? [...timelineMetadataRaw] : [];
+      nextTimelineMetadata.push({
+        type: 'cancel_requested',
+        by: payload?.initiator || 'customer',
+        reason: cancelReason,
+        amount: Number(toNumber(order.total_amount, 0).toFixed(2)) || 0,
+        at: nowIso,
+      });
+
+      const refundAmount = Number(toNumber(order.total_amount, 0).toFixed(2));
+      const refundRequestRes = await client.query(
+        `
+          INSERT INTO order_refund_requests (
+            order_id,
+            user_id,
+            restaurant_id,
+            branch_id,
+            status,
+            refund_amount,
+            reason,
+            images,
+            admin_id,
+            admin_comment,
+            created_at,
+            updated_at
+          )
+          VALUES ($1,$2,$3,$4,'requested',$5,$6,'[]'::jsonb,NULL,NULL,now(),now())
+          RETURNING id
+        `,
+        [orderId, order.user_id, order.restaurant_id || null, order.branch_id || null, refundAmount, cancelReason],
+      );
+      const refundRequestId = refundRequestRes.rows[0]?.id || null;
+      if (refundRequestId) {
+        await client.query(
+          `
+            INSERT INTO order_refund_events (refund_request_id, event_type, actor_id, payload)
+            VALUES ($1,'requested',$2,$3)
+          `,
+          [refundRequestId, userId, JSON.stringify({ reason: cancelReason, amount: refundAmount })],
+        );
+      }
+
+      await client.query(
+        `
+          UPDATE orders
+          SET metadata = $2,
+              timeline_metadata = $3,
+              updated_at = now()
+          WHERE id = $1
+        `,
+        [orderId, JSON.stringify(metadata), JSON.stringify(nextTimelineMetadata)],
+      );
+
+      await logOrderEvent(client, {
+        orderId,
+        eventType: 'OrderCancelRequested',
+        actorId: userId,
+        payload: {
+          reason: cancelReason,
+        },
+      });
+
+      await logOrderEvent(client, {
+        orderId,
+        eventType: 'cancel_requested_by_customer',
+        actorId: userId,
+        payload: {
+          reason: cancelReason,
+          amount: refundAmount,
+        },
+      });
+
+      await enqueueOutbox(client, {
+        aggregateType: 'Order',
+        aggregateId: orderId,
+        eventType: 'order.cancel_requested',
+        payload: {
+          order_id: orderId,
+          reason: cancelReason,
+          actor: userId,
+        },
+      });
+
+      await client.query('COMMIT');
+
+      const updatedOrder = await fetchOrderById(orderId);
+
+      dispatchOrderEvent(
+        'order.cancel_requested',
+        {
+          order_id: orderId,
+          reason: cancelReason,
+          actor: userId,
+        },
+        'customer-cancel-request',
+      );
+
+      return updatedOrder;
+    }
+
+    if (!['pending', 'confirmed'].includes(order.status)) {
       throw new ValidationError('order cannot be cancelled at this stage');
+    }
+
+    const timelineMetadata = appendTimelineMetadataEntry(order.timeline_metadata, 'cancelled', {
+      actorId: userId,
+      note: cancelReason,
+      source: 'customer_cancel',
+    });
+
+    const metadataTimeline = Array.isArray(metadata.timeline) ? [...metadata.timeline] : [];
+    metadataTimeline.push({
+      type: 'order_cancelled',
+      by: payload?.initiator || 'customer',
+      reason: cancelReason,
+      amount: Number(order.total_amount) || 0,
+      at: nowIso,
+    });
+    metadata.timeline = metadataTimeline;
+
+    const refundAmount = Number(toNumber(order.total_amount, 0).toFixed(2));
+    const refundRequestRes = await client.query(
+      `
+        INSERT INTO order_refund_requests (
+          order_id,
+          user_id,
+          restaurant_id,
+          branch_id,
+          status,
+          refund_amount,
+          reason,
+          images,
+          admin_id,
+          admin_comment,
+          created_at,
+          updated_at
+        )
+        VALUES ($1,$2,$3,$4,'approved',$5,$6,'[]'::jsonb,NULL,NULL,now(),now())
+        RETURNING id
+      `,
+      [orderId, order.user_id, order.restaurant_id || null, order.branch_id || null, refundAmount, cancelReason],
+    );
+    const refundRequestId = refundRequestRes.rows[0]?.id || null;
+    if (refundRequestId) {
+      const requestedPayload = JSON.stringify({
+        reason: cancelReason,
+        amount: refundAmount,
+        by: payload?.initiator || 'customer',
+      });
+      const approvedPayload = JSON.stringify({
+        auto: true,
+        note: 'auto-approve (pending/confirmed)',
+      });
+      await client.query(
+        `
+          INSERT INTO order_refund_events (refund_request_id, event_type, actor_id, payload)
+          VALUES
+            ($1,'requested',$2,$3),
+            ($1,'approved',NULL,$4)
+        `,
+        [refundRequestId, userId, requestedPayload, approvedPayload],
+      );
     }
 
     await client.query(
       `
         UPDATE orders
-        SET status = 'cancelled', updated_at = now()
+        SET status = 'cancelled', metadata = $2, updated_at = now(), timeline_metadata = $3
         WHERE id = $1
       `,
-      [orderId],
+      [orderId, JSON.stringify(metadata), JSON.stringify(timelineMetadata)],
     );
 
     await logOrderEvent(client, {
@@ -2120,9 +2511,21 @@ async function cancelCustomerOrder({ user, orderId, payload = {} }) {
       eventType: 'OrderCancelled',
       actorId: userId,
       payload: {
-        reason: payload.reason || 'customer_request',
+        reason: cancelReason,
       },
     });
+
+    if (refundRequestId) {
+      await logOrderEvent(client, {
+        orderId,
+        eventType: 'RefundInitiated',
+        actorId: userId,
+        payload: {
+          refund_request_id: refundRequestId,
+          amount: refundAmount,
+        },
+      });
+    }
 
     await enqueueOutbox(client, {
       aggregateType: 'Order',
@@ -2195,24 +2598,28 @@ async function confirmCustomerOrderDelivery({ user, orderId, payload = {} }) {
       throw new ValidationError('order is not ready to be confirmed by customer');
     }
 
-    await client.query(
-      `
-        UPDATE orders
-        SET status = 'completed', updated_at = now()
-        WHERE id = $1
-      `,
-      [orderId],
-    );
+    const timelineMetadata = appendTimelineMetadataEntry(order.timeline_metadata, 'completed', {
+      actorId: userId,
+      source: 'customer_confirm_delivery',
+    });
+    const metadata = parseJsonField(order.metadata, {}) || {};
+    const deliveryMeta =
+      metadata.delivery && typeof metadata.delivery === 'object' ? { ...metadata.delivery } : {};
+    const deliveredAt = new Date().toISOString();
+    deliveryMeta.delivery_status = 'delivered';
+    deliveryMeta.delivered_at = deliveryMeta.delivered_at || deliveredAt;
+    metadata.delivery = deliveryMeta;
 
     await client.query(
       `
-        UPDATE deliveries
-        SET delivery_status = 'delivered',
-            delivered_at = COALESCE(delivered_at, now()),
-            updated_at = now()
-        WHERE order_id = $1
+        UPDATE orders
+        SET status = 'completed',
+            metadata = $2,
+            updated_at = now(),
+            timeline_metadata = $3
+        WHERE id = $1
       `,
-      [orderId],
+      [orderId, JSON.stringify(metadata), JSON.stringify(timelineMetadata)],
     );
 
     await logOrderEvent(client, {
@@ -2502,19 +2909,26 @@ async function updateOwnerOrderStatus({ user, orderId, payload = {} }) {
       }
     }
 
+    const actorId = resolveUserId(user);
+    const timelineMetadata = appendTimelineMetadataEntry(order.timeline_metadata, nextStatus, {
+      actorId,
+      note: payload.note || null,
+      source: 'owner_status_update',
+    });
+
     await client.query(
       `
         UPDATE orders
-        SET status = $1, updated_at = now()
+        SET status = $1, updated_at = now(), timeline_metadata = $3
         WHERE id = $2
       `,
-      [nextStatus, orderId],
+      [nextStatus, orderId, JSON.stringify(timelineMetadata)],
     );
 
     await logOrderEvent(client, {
       orderId,
       eventType: 'OrderStatusUpdated',
-      actorId: resolveUserId(user),
+      actorId,
       payload: {
         previous: order.status,
         next: nextStatus,
@@ -2530,7 +2944,7 @@ async function updateOwnerOrderStatus({ user, orderId, payload = {} }) {
         order_id: orderId,
         previous: order.status,
         next: nextStatus,
-        actor: resolveUserId(user),
+        actor: actorId,
       },
     });
 
@@ -2544,12 +2958,327 @@ async function updateOwnerOrderStatus({ user, orderId, payload = {} }) {
         order_id: orderId,
         previous: order.status,
         next: nextStatus,
-        actor: resolveUserId(user),
+        actor: actorId,
       },
       'owner-status-update',
     );
 
     return updated;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function respondOwnerCancelRequest({ user, orderId, payload = {} }) {
+  const restaurantScope = await resolveOwnerRestaurantScope(user);
+  const branchScope = await resolveOwnerBranchScope(user);
+  const staffAccount = isStaffAccount(user);
+  if (!restaurantScope.length && !branchScope.length) {
+    throw new ForbiddenError('owner does not manage any restaurants or branches');
+  }
+
+  const actionRaw = typeof payload.action === 'string' ? payload.action.trim().toLowerCase() : '';
+  const action = actionRaw.startsWith('approve')
+    ? 'approve'
+    : actionRaw.startsWith('reject') || actionRaw.startsWith('decline')
+    ? 'reject'
+    : null;
+  if (!action) {
+    throw new ValidationError('action must be approve or reject');
+  }
+  const note =
+    typeof payload.note === 'string' && payload.note.trim().length ? payload.note.trim() : null;
+
+  const branchScopeSet = new Set(branchScope.map((value) => String(value)));
+  const enforceBranch = (!restaurantScope.length && branchScope.length) || staffAccount;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const params = [orderId];
+    const clauses = ['id = $1'];
+
+    if (restaurantScope.length) {
+      params.push(restaurantScope);
+      clauses.push(`restaurant_id = ANY($${params.length}::uuid[])`);
+    }
+
+    if (enforceBranch) {
+      params.push(branchScope);
+      clauses.push(`branch_id = ANY($${params.length}::uuid[])`);
+    }
+
+    const orderRes = await client.query(
+      `
+        SELECT *
+        FROM orders
+        WHERE ${clauses.join(' AND ')}
+        FOR UPDATE
+      `,
+      params,
+    );
+
+    const order = orderRes.rows[0];
+    if (!order) {
+      throw new NotFoundError('order not found');
+    }
+
+    if (staffAccount) {
+      const branchId = order.branch_id ? String(order.branch_id) : null;
+      if (!branchId || !branchScopeSet.has(branchId)) {
+        throw new ForbiddenError('staff can only manage orders in their assigned branches');
+      }
+    }
+
+    const currentStatus = typeof order.status === 'string' ? order.status.toLowerCase() : '';
+    if (currentStatus !== 'preparing') {
+      throw new ValidationError('cancel requests can only be handled for preparing orders');
+    }
+
+    const metadata =
+      order.metadata && typeof order.metadata === 'object' ? { ...order.metadata } : {};
+    const metadataTimeline = Array.isArray(metadata.timeline) ? [...metadata.timeline] : [];
+    const cancelRequest =
+      metadata.cancel_request && typeof metadata.cancel_request === 'object'
+        ? { ...metadata.cancel_request }
+        : null;
+
+    if (!cancelRequest || cancelRequest.status !== 'pending') {
+      throw new ValidationError('no pending cancel request for this order');
+    }
+
+    const refundRequestRes = await client.query(
+      `
+        SELECT *
+        FROM order_refund_requests
+        WHERE order_id = $1
+        ORDER BY created_at DESC
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [orderId],
+    );
+    const refundRequest = refundRequestRes.rows[0] || null;
+    if (!refundRequest || refundRequest.status !== 'requested') {
+      throw new ValidationError('no pending refund request to approve/reject');
+    }
+
+    const actorId = resolveUserId(user);
+    const nowIso = new Date().toISOString();
+    let approvedRefundContext = null;
+
+    let updatedOrder;
+    if (action === 'approve') {
+      const timelineMetadata = appendTimelineMetadataEntry(order.timeline_metadata, 'cancelled', {
+        actorId,
+        note: note || cancelRequest.reason || 'owner_cancel',
+        source: 'owner_cancel_request',
+      });
+      const refundAmount = toNumber(
+        refundRequest.refund_amount ?? order.total_amount ?? 0,
+        2,
+      );
+      metadata.cancel_request = {
+        ...cancelRequest,
+        status: 'approved',
+        responded_at: nowIso,
+        responded_by: actorId,
+        response_note: note || null,
+      };
+      metadataTimeline.push({
+        status: 'cancelled',
+        by: 'owner',
+        note: note || cancelRequest.reason || null,
+        amount: refundAmount,
+        at: nowIso,
+      });
+      metadata.timeline = metadataTimeline;
+
+      await client.query(
+        `
+          UPDATE orders
+          SET status = 'cancelled',
+              metadata = $2,
+              timeline_metadata = $3,
+              updated_at = now()
+          WHERE id = $1
+        `,
+        [orderId, JSON.stringify(metadata), JSON.stringify(timelineMetadata)],
+      );
+
+      await client.query(
+        `
+          UPDATE order_refund_requests
+             SET status = 'approved',
+                 admin_id = $2,
+                 admin_comment = $3,
+                 updated_at = now()
+           WHERE id = $1
+        `,
+        [refundRequest.id, actorId, note || null],
+      );
+
+      await client.query(
+        `
+          INSERT INTO order_refund_events (refund_request_id, event_type, actor_id, payload)
+          VALUES ($1,'approved',$2,$3)
+        `,
+        [refundRequest.id, actorId, JSON.stringify({ comment: note || null, approved_amount: refundAmount })],
+      );
+
+      await logOrderEvent(client, {
+        orderId,
+        eventType: 'OrderStatusUpdated',
+        actorId,
+        payload: {
+          previous: order.status,
+          next: 'cancelled',
+          note: note || cancelRequest.reason || null,
+        },
+      });
+
+      await enqueueOutbox(client, {
+        aggregateType: 'Order',
+        aggregateId: orderId,
+        eventType: 'order.status_updated',
+        payload: {
+          order_id: orderId,
+          previous: order.status,
+          next: 'cancelled',
+          actor: actorId,
+        },
+      });
+
+      await logOrderEvent(client, {
+        orderId,
+        eventType: 'cancel_approved_by_owner',
+        actorId,
+        payload: {
+          reason: note || cancelRequest.reason || null,
+          refund_amount: refundAmount,
+        },
+      });
+
+      approvedRefundContext = {
+        amount: refundAmount,
+        reason: note || cancelRequest.reason || 'owner_cancel',
+      };
+    } else {
+      metadata.cancel_request = {
+        ...cancelRequest,
+        status: 'rejected',
+        responded_at: nowIso,
+        responded_by: actorId,
+        response_note: note || null,
+      };
+
+      await client.query(
+        `
+          UPDATE orders
+          SET metadata = $2,
+              updated_at = now()
+          WHERE id = $1
+        `,
+        [orderId, JSON.stringify(metadata)],
+      );
+
+      await logOrderEvent(client, {
+        orderId,
+        eventType: 'OrderCancelRequestRejected',
+        actorId,
+        payload: {
+          note: note || null,
+        },
+      });
+
+      await logOrderEvent(client, {
+        orderId,
+        eventType: 'cancel_rejected_by_owner',
+        actorId,
+        payload: {
+          reason: note || cancelRequest.reason || null,
+          refund_amount: refundRequest.refund_amount ?? null,
+        },
+      });
+
+      await client.query(
+        `
+          UPDATE order_refund_requests
+             SET status = 'rejected',
+                 admin_id = $2,
+                 admin_comment = $3,
+                 updated_at = now()
+           WHERE id = $1
+        `,
+        [refundRequest.id, actorId, note || null],
+      );
+
+      await client.query(
+        `
+          INSERT INTO order_refund_events (refund_request_id, event_type, actor_id, payload)
+          VALUES ($1,'rejected',$2,$3)
+        `,
+        [
+          refundRequest.id,
+          actorId,
+          JSON.stringify({
+            comment: note || null,
+            requested_amount: refundRequest.refund_amount ?? null,
+          }),
+        ],
+      );
+
+      await enqueueOutbox(client, {
+        aggregateType: 'Order',
+        aggregateId: orderId,
+        eventType: 'order.cancel_request_rejected',
+        payload: {
+          order_id: orderId,
+          actor: actorId,
+        },
+      });
+    }
+
+    await client.query('COMMIT');
+
+    updatedOrder = await fetchOrderById(orderId);
+
+    if (approvedRefundContext) {
+      paymentClient
+        .createRefund({
+          orderId,
+          amount: approvedRefundContext.amount,
+          reason: approvedRefundContext.reason,
+        })
+        .catch((error) => {
+          console.error(
+            '[order-service] Failed to dispatch owner-approved refund:',
+            error?.message || error,
+          );
+        });
+    }
+
+    const dispatchEventType =
+      action === 'approve' ? 'order.status_updated' : 'order.cancel_request_rejected';
+    const dispatchPayload =
+      action === 'approve'
+        ? {
+            order_id: orderId,
+            previous: order.status,
+            next: 'cancelled',
+            actor: actorId,
+          }
+        : {
+            order_id: orderId,
+            actor: actorId,
+          };
+
+    dispatchOrderEvent(dispatchEventType, dispatchPayload, 'owner-cancel-request');
+
+    return updatedOrder;
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;

@@ -1,6 +1,7 @@
 const { pool } = require('../db');
 const advancedOrdersService = require('./orders.service');
 const paymentClient = require('../clients/payment.client');
+const { deriveDeliveryRecord } = require('../utils/delivery');
 
 class OrderValidationError extends Error {
   constructor(message) {
@@ -176,6 +177,7 @@ const buildOrderMetadata = ({
   shippingAddressId,
   restaurantId,
   items,
+  delivery,
 }) => {
   const pricing = {
     subtotal: itemsSubtotal,
@@ -238,7 +240,11 @@ const buildOrderMetadata = ({
     },
     restaurant_ids: restaurantIds,
     delivery_address:
-      baseMetadata.delivery_address || selectedAddressCandidate || shippingAddressSnapshot || null,
+      baseMetadata.delivery_address ||
+      (delivery && delivery.snapshot) ||
+      selectedAddressCandidate ||
+      shippingAddressSnapshot ||
+      null,
     delivery_address_id:
       baseMetadata.delivery_address_id ??
       baseMetadata.selected_address_id ??
@@ -312,6 +318,73 @@ const buildOrderMetadata = ({
 
   if (!mergedMetadata.created_by && payload.user_id) {
     mergedMetadata.created_by = payload.user_id;
+  }
+
+  const baseDeliveryMeta =
+    baseMetadata.delivery && typeof baseMetadata.delivery === 'object'
+      ? { ...baseMetadata.delivery }
+      : {};
+  const mergedDelivery = { ...baseDeliveryMeta };
+
+  const incomingDeliveryStatus =
+    (delivery && delivery.status) ||
+    payload.delivery_status ||
+    payload.deliveryStatus ||
+    payload.delivery_state ||
+    baseDeliveryMeta.delivery_status ||
+    baseDeliveryMeta.status ||
+    null;
+  if (incomingDeliveryStatus) {
+    mergedDelivery.delivery_status =
+      typeof incomingDeliveryStatus === 'string'
+        ? incomingDeliveryStatus.toLowerCase()
+        : incomingDeliveryStatus;
+  }
+
+  const incomingEstimated =
+    (delivery && delivery.estimatedAt) ||
+    payload.delivery_estimated_at ||
+    payload.estimated_delivery_at ||
+    baseDeliveryMeta.estimated_at ||
+    null;
+  if (incomingEstimated) {
+    mergedDelivery.estimated_at = incomingEstimated;
+  }
+
+  const incomingDelivered =
+    (delivery && delivery.deliveredAt) ||
+    payload.delivered_at ||
+    payload.deliveredAt ||
+    baseDeliveryMeta.delivered_at ||
+    null;
+  if (incomingDelivered) {
+    mergedDelivery.delivered_at = incomingDelivered;
+  }
+
+  const incomingProof =
+    (delivery && delivery.proof) ||
+    payload.delivery_proof ||
+    baseDeliveryMeta.proof ||
+    null;
+  if (incomingProof) {
+    mergedDelivery.proof = incomingProof;
+  }
+
+  const deliveryAddressCandidate =
+    (delivery && delivery.snapshot) ||
+    mergedMetadata.delivery_address ||
+    mergedMetadata.selected_address ||
+    shippingAddressSnapshot ||
+    null;
+  if (deliveryAddressCandidate) {
+    mergedDelivery.delivery_address = deliveryAddressCandidate;
+    if (!mergedMetadata.delivery_address) {
+      mergedMetadata.delivery_address = deliveryAddressCandidate;
+    }
+  }
+
+  if (Object.keys(mergedDelivery).length) {
+    mergedMetadata.delivery = mergedDelivery;
   }
 
   return mergedMetadata;
@@ -523,21 +596,6 @@ const resolveShippingAddress = (payload, normalizedDelivery) => {
   return { snapshot, id };
 };
 
-const parseDeliveryRow = (row) => {
-  if (!row) return null;
-  return {
-    id: row.id,
-    order_id: row.order_id,
-    delivery_status: row.delivery_status,
-    estimated_at: row.estimated_at,
-    delivered_at: row.delivered_at,
-    proof: parseJson(row.proof),
-    delivery_address: parseJson(row.delivery_address) || row.delivery_address || null,
-    created_at: row.created_at,
-    updated_at: row.updated_at,
-  };
-};
-
 const parseItemRow = (row) => ({
   id: row.id,
   order_id: row.order_id,
@@ -567,35 +625,20 @@ const attachOrderRelations = async (orderRows) => {
 
   const ids = orderRows.map((order) => order.id);
 
-  const [itemsRes, deliveriesRes] = await Promise.all([
-    pool.query(
-      `SELECT id, order_id, parent_item_id, item_kind, is_priced, product_id, branch_product_id,
-              branch_category_id, title, image, category_id, unit_price, quantity, addons_total, line_subtotal,
-              line_discount, line_tax, line_total, product_snapshot
-       FROM order_items
-       WHERE order_id = ANY($1::uuid[])`,
-      [ids],
-    ),
-    pool.query(
-      `SELECT DISTINCT ON (order_id) id, order_id, delivery_status, delivery_address,
-              estimated_at, delivered_at, proof, created_at, updated_at
-       FROM deliveries
-       WHERE order_id = ANY($1::uuid[])
-       ORDER BY order_id, created_at DESC`,
-      [ids],
-    ),
-  ]);
+  const itemsRes = await pool.query(
+    `SELECT id, order_id, parent_item_id, item_kind, is_priced, product_id, branch_product_id,
+            branch_category_id, title, image, category_id, unit_price, quantity, addons_total, line_subtotal,
+            line_discount, line_tax, line_total, product_snapshot
+     FROM order_items
+     WHERE order_id = ANY($1::uuid[])`,
+    [ids],
+  );
 
   const itemsByOrder = new Map();
   for (const row of itemsRes.rows) {
     const current = itemsByOrder.get(row.order_id) || [];
     current.push(parseItemRow(row));
     itemsByOrder.set(row.order_id, current);
-  }
-
-  const deliveriesByOrder = new Map();
-  for (const row of deliveriesRes.rows) {
-    deliveriesByOrder.set(row.order_id, parseDeliveryRow(row));
   }
 
   return orderRows.map((order) => {
@@ -605,9 +648,9 @@ const attachOrderRelations = async (orderRows) => {
         : parseJson(order.metadata);
     const paymentFromMeta =
       meta && meta.payment && typeof meta.payment === 'object' ? meta.payment.method : null;
-    const deliveryRecord = deliveriesByOrder.get(order.id) || null;
     const shippingSnapshot =
       parseJson(order.shipping_address_snapshot) || order.shipping_address_snapshot || null;
+    const deliveryRecord = deriveDeliveryRecord(order, meta || {}, shippingSnapshot);
     const deliverySnapshot =
       (deliveryRecord && deliveryRecord.delivery_address) ||
       (meta && meta.delivery_address) ||
@@ -858,6 +901,7 @@ const createOrder = async (payload, userContext = null) => {
       shippingAddressId,
       restaurantId,
       items,
+      delivery: normalizedDelivery,
     });
 
     const hasMetadataColumn = await ensureMetadataColumn(client);
@@ -981,28 +1025,6 @@ const createOrder = async (payload, userContext = null) => {
           item.line_tax,
           item.line_total,
           item.product_snapshot || null,
-        ],
-      );
-    }
-
-    if (normalizedDelivery) {
-      await client.query(
-        `INSERT INTO deliveries (
-          order_id,
-          delivery_address,
-          delivery_status,
-          estimated_at,
-          delivered_at,
-          proof
-        )
-        VALUES ($1,$2,$3,$4,$5,$6)`,
-        [
-          orderRow.id,
-          normalizedDelivery.serializedAddress,
-          normalizedDelivery.status,
-          normalizedDelivery.estimatedAt,
-          normalizedDelivery.deliveredAt,
-          normalizedDelivery.proof || null,
         ],
       );
     }

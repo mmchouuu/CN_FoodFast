@@ -39,6 +39,27 @@ const resolveItemTotal = (item) => {
   return qty * unit;
 };
 
+// Extract a cancel/refund request from order metadata and normalise fields
+const pickCancelOrRefundRequest = (metadata) => {
+  if (!metadata || typeof metadata !== 'object') return null;
+  const raw = metadata.cancel_request || metadata.order_refund_request || metadata.refund_request || null;
+  if (!raw || typeof raw !== 'object') return null;
+  const rawStatus = (raw.status || '').toLowerCase();
+  const normalisedStatus = rawStatus === 'requested' ? 'pending' : rawStatus;
+  const requestedAt = raw.requested_at || raw.created_at || raw.at || null;
+  const respondedAt = raw.responded_at || raw.updated_at || null;
+  const reason = raw.reason || raw.note || raw.description || '';
+  const source = metadata.order_refund_request ? 'refund' : 'cancel';
+  return {
+    ...raw,
+    status: normalisedStatus,
+    requested_at: requestedAt,
+    responded_at: respondedAt,
+    reason,
+    source,
+  };
+};
+
 const normaliseAddress = (address) => {
   if (!address) {
     return {
@@ -277,6 +298,7 @@ const adaptOwnerOrder = (order, lookups) => {
     customerName,
     customerPhone,
     items,
+    metadata,
   };
 };
 
@@ -347,6 +369,7 @@ const Orders = () => {
   const [selectedRestaurantId, setSelectedRestaurantId] = useState("all");
   const [selectedBranchId, setSelectedBranchId] = useState("all");
   const [statusUpdatingMap, setStatusUpdatingMap] = useState({});
+  const [cancelRequestActionMap, setCancelRequestActionMap] = useState({});
 
 
   const lookups = useMemo(
@@ -450,6 +473,76 @@ const Orders = () => {
     loadOrders();
   }, [loadOrders]);
 
+  const handleCancelRequestAction = useCallback(
+    async (order, action) => {
+      if (!order?.id) return;
+      const normalized =
+        action === "approve"
+          ? "approve"
+          : action === "reject"
+            ? "reject"
+            : null;
+      if (!normalized) return;
+
+      if (
+        typeof window !== "undefined" &&
+        !window.confirm(
+          normalized === "approve"
+            ? "Approve this cancellation request?"
+            : "Reject the customer's cancellation request?",
+        )
+      ) {
+        return;
+      }
+
+      let note = "";
+      if (normalized === "reject" && typeof window !== "undefined") {
+        const input = window.prompt(
+          "Enter reason (optional) for rejecting the cancellation",
+          "The order is already being prepared",
+        );
+        if (input) {
+          note = input.trim();
+        }
+      }
+
+      setCancelRequestActionMap((prev) => ({ ...prev, [order.id]: normalized }));
+      try {
+        const body = { action: normalized };
+        // Tag the type for backends expecting refund vs cancel
+        if (order?.metadata?.order_refund_request) body.type = 'refund';
+        else if (order?.metadata?.cancel_request) body.type = 'cancel';
+        if (note) {
+          body.note = note;
+        }
+        const updated = await ownerOrdersService.respondCancelRequest(order.id, body);
+        setRawOrders((prev) => {
+          if (!Array.isArray(prev) || !prev.length) return prev;
+          return prev.map((item) => (item.id === order.id ? updated || item : item));
+        });
+        toast.success(
+          normalized === "approve"
+            ? "Cancellation approved."
+            : "Cancellation request rejected.",
+        );
+      } catch (err) {
+        console.error("[owner-orders] failed to respond to cancel request", err);
+        const message =
+          err?.response?.data?.error ||
+          err?.message ||
+          "Unable to update cancellation request. Please try again.";
+        toast.error(message);
+      } finally {
+        setCancelRequestActionMap((prev) => {
+          const next = { ...prev };
+          delete next[order.id];
+          return next;
+        });
+      }
+    },
+    [setRawOrders],
+  );
+
   const handleStatusChange = useCallback(
     async (order, nextStatusRaw) => {
       if (!order?.id) return;
@@ -475,9 +568,15 @@ const Orders = () => {
         .join(" ");
 
       const currentStatus = (order.status || "").toLowerCase();
+      const rq = pickCancelOrRefundRequest(order.metadata);
+      const hasPendingCancelRequest = rq && rq.status === 'pending';
       let payload = { status: nextStatus };
       if (nextStatus === "cancelled") {
         const isPendingOrConfirmed = ["pending", "confirmed"].includes(currentStatus);
+        if (currentStatus === "preparing" && hasPendingCancelRequest) {
+          handleCancelRequestAction(order, "approve");
+          return;
+        }
         if (!isPendingOrConfirmed) {
           toast.error("Chỉ có thể huỷ đơn ở trạng thái Pending hoặc Confirmed.");
           return;
@@ -528,7 +627,7 @@ const Orders = () => {
         });
       }
     },
-    [getAllowedStatusesForOrder, isStaff, setRawOrders],
+    [getAllowedStatusesForOrder, handleCancelRequestAction, isStaff, setRawOrders],
   );
 
   const staffMembershipBranches = useMemo(() => {
@@ -871,6 +970,10 @@ const Orders = () => {
           const allowedStatuses = getAllowedStatusesForOrder(order);
           const statusControlDisabled =
             isStatusUpdating || (isStaff && !allowedStatuses.length);
+          const cancelRequest = pickCancelOrRefundRequest(order?.metadata);
+          const cancelRequestStatus = cancelRequest?.status || "";
+          const isPreparingStatus = (order.status || "").toLowerCase() === "preparing";
+          const cancelActionLoading = Boolean(cancelRequestActionMap[order.id]);
           return (
             <article
               key={order.id}
@@ -910,6 +1013,74 @@ const Orders = () => {
                   />
                 </div>
               </header>
+
+              {cancelRequest && isPreparingStatus ? (
+                <div
+                  className={`px-6 py-4 border-b ${
+                    cancelRequestStatus === "pending"
+                      ? "border-amber-100 bg-amber-50"
+                      : cancelRequestStatus === "rejected"
+                        ? "border-rose-100 bg-rose-50"
+                        : "border-emerald-100 bg-emerald-50"
+                  }`}
+                >
+                  {cancelRequestStatus === "pending" ? (
+                    <>
+                      <p className="text-sm font-semibold text-amber-800">
+                        Customer requested to cancel order.
+                      </p>
+                      <p className="text-sm text-amber-700">
+                        Reason: {cancelRequest.reason || "Không có"} •{" "}
+                        {cancelRequest.requested_at
+                          ? new Date(cancelRequest.requested_at).toLocaleString()
+                          : "Vừa xong"}
+                      </p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleCancelRequestAction(order, "approve")}
+                          disabled={cancelActionLoading}
+                          className={`rounded-lg px-4 py-2 text-sm font-semibold ${
+                            cancelActionLoading
+                              ? "bg-emerald-200 text-emerald-900"
+                              : "bg-emerald-500 text-white hover:bg-emerald-600"
+                          }`}
+                        >
+                          {cancelActionLoading && cancelRequestActionMap[order.id] === "approve"
+                            ? "Cancelling..."
+                            : "Confirm cancellation"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleCancelRequestAction(order, "reject")}
+                          disabled={cancelActionLoading}
+                          className={`rounded-lg px-4 py-2 text-sm font-semibold ${
+                            cancelActionLoading
+                              ? "bg-slate-200 text-slate-500"
+                              : "bg-white text-slate-700 border border-slate-200 hover:border-slate-300"
+                          }`}
+                        >
+                          {cancelActionLoading && cancelRequestActionMap[order.id] === "reject"
+                            ? "Refusing..."
+                            : "Refuse to cancel"}
+                        </button>
+                      </div>
+                    </>
+                  ) : cancelRequestStatus === "rejected" ? (
+                    <p className="text-sm font-medium text-rose-700">
+                      Cancellation request was denied{" "}
+                      {cancelRequest.responded_at
+                        ? `(${new Date(cancelRequest.responded_at).toLocaleString()})`
+                        : ""}
+                      .
+                    </p>
+                  ) : (
+                    <p className="text-sm font-medium text-emerald-700">
+                      Confirmed cancellation of order as requested by customer.
+                    </p>
+                  )}
+                </div>
+              ) : null}
 
               <div className="px-6 py-4 grid grid-cols-1 gap-6 lg:grid-cols-3">
                 <div className="space-y-3 lg:col-span-2">

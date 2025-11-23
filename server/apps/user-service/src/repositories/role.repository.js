@@ -4,6 +4,7 @@ const GLOBAL_ROLES = [
   { code: 'customer', description: 'Customer account' },
   { code: 'owner', description: 'Restaurant owner' },
   { code: 'admin', description: 'Platform administrator' },
+  { code: 'drone_operator', description: 'Drone operations manager' },
 ];
 
 async function ensureGlobalRoles(client) {

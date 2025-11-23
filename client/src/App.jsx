@@ -95,7 +95,7 @@ import OwnerLayout from './layouts/OwnerLayout';
 import OwnerDashboard from './pages/owner/Dashboard';
 import MenuManagement from './pages/owner/MenuManagement';
 import Orders from './pages/owner/Orders';
-import ShipperManagement from './pages/owner/ShipperManagement';
+import DroneManagement from './pages/owner/DroneManagement';
 import AssignOrders from './pages/owner/AssignOrders';
 import DeliveryTracking from './pages/owner/DeliveryTracking';
 import RestaurantProfile from './pages/owner/RestaurantProfile';
@@ -119,7 +119,13 @@ import AdminActivity from './pages/admin/AdminActivity';
 import PayoutManagement from './pages/admin/PayoutManagement';
 import CODSettlements from './pages/admin/CODSettlements';
 import AdminLogin from './pages/admin/AdminLogin';
+
 import AdminOrders from './pages/admin/AdminOrders';
+import AdminDroneManagement from './pages/admin/AdminDroneManagement';
+import AdminAssignOrders from './pages/admin/AdminAssignOrders';
+import AdminDeliveryTracking from './pages/admin/AdminDeliveryTracking';
+import AdminDroneMaintenance from './pages/admin/AdminDroneMaintenance';
+
 
 const App = () => {
   const { pathname } = useLocation();
@@ -168,7 +174,7 @@ const App = () => {
           <Route path="orders" element={<Orders />} />
           <Route path="settlements" element={<SettlementReports />} />
           <Route path="cash-settlement" element={<CashSettlement />} />
-          <Route path="shippers" element={<ShipperManagement />} />
+          <Route path="shippers" element={<DroneManagement />} />
           <Route path="assignments" element={<AssignOrders />} />
           <Route path="tracking" element={<DeliveryTracking />} />
           <Route path="profile" element={<RestaurantProfile />} />
@@ -187,6 +193,10 @@ const App = () => {
           <Route path="orders" element={<AdminOrders />} />
           <Route path="payouts" element={<PayoutManagement />} />
           <Route path="cod-settlements" element={<CODSettlements />} />
+          <Route path="drone-hubs" element={<AdminDroneManagement />} />
+          <Route path="assignments" element={<AdminAssignOrders />} />
+          <Route path="delivery-tracking" element={<AdminDeliveryTracking />} />
+          <Route path="maintenance" element={<AdminDroneMaintenance />} />
           <Route path="authorization" element={<AdminAuthorization />} />
           <Route path="complaints" element={<AdminComplaints />} />
           <Route path="promotions" element={<AdminPromotions />} />

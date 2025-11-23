@@ -1,0 +1,35 @@
+# Stage 1: Base image
+FROM node:20-bullseye
+
+# Set working directory
+WORKDIR /app
+
+# Install PostgreSQL client
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy package files
+COPY package*.json ./
+
+# Use npm install to avoid lock mismatch errors when package.json changes
+RUN npm install --only=production --no-audit --no-fund
+
+COPY . .
+COPY ./src ./src
+
+# Set environment
+ENV NODE_ENV=production
+
+# Expose port
+EXPOSE 3006
+
+# Entrypoint
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+ENTRYPOINT ["/entrypoint.sh"]
+
+# Default command
+CMD ["node", "server.js"]
+

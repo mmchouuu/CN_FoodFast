@@ -18,6 +18,7 @@
     "axios": "^1.12.2",
     "chart.js": "^4.5.0",
     "framer-motion": "^12.23.24",
+    "maplibre-gl": "^4.4.2",
     "react": "^19.1.1",
     "react-chartjs-2": "^5.3.0",
     "react-dom": "^19.1.1",

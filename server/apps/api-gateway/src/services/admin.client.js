@@ -16,6 +16,11 @@ const paymentAdminClient = createAxiosInstance({
   timeout: config.requestTimeout,
 });
 
+const deliveryAdminClient = createAxiosInstance({
+  baseURL: `${config.deliveryServiceUrl}/api/deliveries`,
+  timeout: config.requestTimeout,
+});
+
 async function login(payload = {}, opts = {}) {
   const res = await userAdminClient.post('/login', payload, { headers: opts.headers });
   return res.data;
@@ -104,6 +109,63 @@ async function listSettlementOrders(settlementId, opts = {}) {
   return res.data;
 }
 
+async function getDroneSystemSummary(opts = {}) {
+  const res = await deliveryAdminClient.get('/admin/drone-hubs/system-summary', {
+    headers: opts.headers,
+  });
+  return res.data;
+}
+
+async function listDroneHubs(opts = {}) {
+  const res = await deliveryAdminClient.get('/admin/drone-hubs', {
+    headers: opts.headers,
+  });
+  return res.data;
+}
+
+async function getDroneHubOverview(hubId, opts = {}) {
+  const res = await deliveryAdminClient.get(`/admin/drone-hubs/${hubId}/overview`, {
+    headers: opts.headers,
+  });
+  return res.data;
+}
+
+async function listDeliveryDrones(params = {}, opts = {}) {
+  const res = await deliveryAdminClient.get('/drones', {
+    params,
+    headers: opts.headers,
+  });
+  return res.data;
+}
+
+async function createDeliveryDrone(payload = {}, opts = {}) {
+  const res = await deliveryAdminClient.post('/drones', payload, {
+    headers: opts.headers,
+  });
+  return res.data;
+}
+
+async function updateDeliveryDrone(id, payload = {}, opts = {}) {
+  const res = await deliveryAdminClient.put(`/drones/${id}`, payload, {
+    headers: opts.headers,
+  });
+  return res.data;
+}
+
+async function deleteDeliveryDrone(id, opts = {}) {
+  const res = await deliveryAdminClient.delete(`/drones/${id}`, {
+    headers: opts.headers,
+  });
+  return res.data;
+}
+
+async function getDeliveryDroneLogs(id, opts = {}) {
+  const res = await deliveryAdminClient.get(`/drones/${id}/logs`, {
+    headers: opts.headers,
+  });
+  return res.data;
+}
+
 module.exports = {
   listCustomers,
   customerDetails,
@@ -119,4 +181,12 @@ module.exports = {
   listPayoutRestaurants,
   listPayoutBranches,
   listSettlementOrders,
+  getDroneSystemSummary,
+  listDroneHubs,
+  getDroneHubOverview,
+  listDeliveryDrones,
+  createDeliveryDrone,
+  updateDeliveryDrone,
+  deleteDeliveryDrone,
+  getDeliveryDroneLogs,
 };

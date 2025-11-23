@@ -18,6 +18,7 @@ exports.createRefund = async (req, res) => {
   try {
     const refund = await refundsService.processRefund({
       paymentId: body.payment_id || body.paymentId,
+      orderId: body.order_id || body.orderId,
       amount: body.amount,
       reason: body.reason,
       idempotencyKey: body.idempotency_key || body.idempotencyKey,

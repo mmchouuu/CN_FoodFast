@@ -122,6 +122,15 @@ const ownerOrdersService = {
     return data;
   },
 
+  async respondCancelRequest(orderId, payload = {}) {
+    if (!orderId) {
+      throw new Error('orderId is required');
+    }
+    const config = withOwnerAuth();
+    const { data } = await api.patch(`${basePath}/${orderId}/cancel-request`, payload, config);
+    return data;
+  },
+
   async createRevision(orderId, payload = {}) {
     if (!orderId) {
       throw new Error('orderId is required');

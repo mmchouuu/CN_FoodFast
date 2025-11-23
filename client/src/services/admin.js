@@ -82,11 +82,12 @@ const fetchOwners = async () => {
 };
 
 const adminService = {
-  async login({ email, password, rememberMe } = {}) {
+  async login({ email, password, rememberMe, accountType } = {}) {
     const payload = {
       email: email?.trim(),
       password,
       rememberMe: Boolean(rememberMe),
+      accountType,
     };
     const { data } = await api.post(`${basePath}/login`, payload);
     return data;

@@ -1,7 +1,6 @@
 version: "3.9"
 
 services:
-  # API Gateway
   api-gateway:
     build: ./apps/api-gateway
     env_file: ./apps/api-gateway/.env
@@ -23,8 +22,6 @@ services:
       timeout: 5s
       retries: 5
 
-
-  # User Service
   user-service:
     build: ./apps/user-service
     env_file: ./apps/user-service/.env
@@ -61,8 +58,6 @@ services:
       timeout: 5s
       retries: 5
 
-
-  # Order Service
   order-service:
     build: ./apps/order-service
     env_file: ./apps/order-service/.env
@@ -82,7 +77,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # Payment Service
   payment-service:
     build: ./apps/payment-service
     env_file: ./apps/payment-service/.env
@@ -100,8 +94,25 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-  
-    # Email Service
+
+  delivery-service:
+    build: ./apps/delivery-service
+    env_file: ./apps/delivery-service/.env
+    ports:
+      - "3006:3006"
+    depends_on:
+      deliverydb:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - backend_net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3006/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   email-service:
     build: ./apps/email-service
     env_file: ./apps/email-service/.env
@@ -117,8 +128,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-  
-    # Socket Gateway (WebSocket Realtime)
+
   socket-gateway:
     build: ./apps/socket-gateway
     env_file: ./apps/socket-gateway/.env
@@ -135,7 +145,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # PostgreSQL Databases
   userdb:
     image: postgres:15
     environment:
@@ -212,15 +221,33 @@ services:
       timeout: 5s
       retries: 5
 
-  # RabbitMQ Message Broker
+  deliverydb:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 123
+      POSTGRES_DB: deliverydb
+    volumes:
+      - deliverydbdb_data:/var/lib/postgresql/data
+      - ./db/deliverydb/deliveries_init.sql:/docker-entrypoint-initdb.d/1_deliveries.sql:ro
+    ports:
+      - "5437:5432"
+    networks:
+      - backend_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d deliverydb"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   rabbitmq:
     image: rabbitmq:3.11-management
     environment:
       RABBITMQ_DEFAULT_USER: guest
       RABBITMQ_DEFAULT_PASS: guest
     ports:
-      - "5672:5672"    # amqp
-      - "15672:15672"  # management UI
+      - "5672:5672"
+      - "15672:15672"
     networks:
       - backend_net
     healthcheck:
@@ -229,7 +256,6 @@ services:
       timeout: 5s
       retries: 5
 
-# ocker Network
 networks:
   backend_net:
     driver: bridge
@@ -239,3 +265,4 @@ volumes:
   productdb_data:
   orderdb_data:
   paymentdb_data:
+  deliverydbdb_data:

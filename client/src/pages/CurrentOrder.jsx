@@ -28,7 +28,7 @@ const ORDER_STATUS_STEPS = [
   { key: "completed", label: "Completed" },
 ];
 
-const CANCELLABLE_STATUSES = new Set(["pending", "confirmed"]);
+const CANCELLABLE_STATUSES = new Set(["pending", "confirmed", "preparing"]);
 
 const CONFIRMABLE_STATUSES = new Set(["ready", "delivering"]);
 const ORDER_HISTORY_STATUSES = new Set(["delivered", "completed", "cancelled"]);
@@ -40,8 +40,16 @@ const SUGGESTED_CANCEL_REASONS = [
 ];
 
 
-const normaliseStatus = (value) =>
-  typeof value === "string" ? value.trim().toLowerCase() : "";
+const normaliseStatus = (value) => {
+  if (typeof value !== "string") {
+    return "";
+  }
+  const key = value.trim().toLowerCase();
+  if (!key) {
+    return "";
+  }
+  return key.startsWith("cancel") ? "cancelled" : key;
+};
 
 const buildTrackingSteps = (status, placedAt, updatedAt) => {
   const normalisedStatus = normaliseStatus(status);
@@ -262,6 +270,67 @@ const CurrentOrder = () => {
     restaurantSnapshot?.image ||
     restaurantPlaceholderImage;
   const deliveryAddress = order.deliveryAddress || {};
+  const deliveryDetails = order?.delivery || (order?.metadata?.delivery ?? null);
+  const droneDetails =
+    deliveryDetails?.drone_snapshot ||
+    deliveryDetails?.drone ||
+    deliveryDetails?.droneInfo ||
+    null;
+  const droneCode = droneDetails?.code || droneDetails?.identifier || droneDetails?.name || null;
+  const droneModel = droneDetails?.model || droneDetails?.drone_model || null;
+  const rawBattery =
+    droneDetails?.battery_level ?? droneDetails?.batteryLevel ?? null;
+  const droneBatteryLevel =
+    typeof rawBattery === "number" ? Math.max(0, Math.min(100, rawBattery)) : null;
+  const droneStatus =
+    deliveryDetails?.delivery_status ||
+    droneDetails?.status ||
+    (normalisedStatus === "delivering" ? "flying" : null);
+  const droneDistanceMeters =
+    typeof deliveryDetails?.distance_meters === "number"
+      ? deliveryDetails.distance_meters
+      : null;
+  const droneEtaSeconds =
+    typeof deliveryDetails?.estimated_time_sec === "number"
+      ? deliveryDetails.estimated_time_sec
+      : null;
+  const droneProgress =
+    typeof deliveryDetails?.progress_percent === "number"
+      ? Math.max(0, Math.min(100, deliveryDetails.progress_percent))
+      : null;
+  const lastKnownPosition =
+    deliveryDetails?.current_position ||
+    deliveryDetails?.last_known_position ||
+    droneDetails?.last_known_position ||
+    null;
+  const friendlyDroneStatus = droneStatus
+    ? droneStatus
+      .replace(/_/g, " ")
+      .replace(/\b\w/g, (char) => char.toUpperCase())
+    : null;
+  const droneDistanceLabel =
+    typeof droneDistanceMeters === "number"
+      ? droneDistanceMeters >= 1000
+        ? `${(droneDistanceMeters / 1000).toFixed(1)} km`
+        : `${Math.round(droneDistanceMeters)} m`
+      : null;
+  const droneEtaLabel =
+    typeof droneEtaSeconds === "number"
+      ? `${Math.max(1, Math.round(droneEtaSeconds / 60))} min`
+      : null;
+  const dronePositionLabel =
+    lastKnownPosition && typeof lastKnownPosition === "object"
+      ? lastKnownPosition.formatted ||
+      lastKnownPosition.address ||
+      (Array.isArray(lastKnownPosition.coordinates)
+        ? `${lastKnownPosition.coordinates[0]}, ${lastKnownPosition.coordinates[1]}`
+        : null)
+      : null;
+  const showDroneTracking = normalisedStatus === "delivering";
+  const fallbackEtaLabel =
+    typeof order?.etaMinutes === "number"
+      ? `${order.etaMinutes} min`
+      : "Updating";
   const trackingSteps = useMemo(() => {
     const normalised = normaliseStatus(order.status);
     const fallbackSteps = buildTrackingSteps(order.status, order.placedAt, order.updatedAt);
@@ -288,11 +357,40 @@ const CurrentOrder = () => {
       }));
     }
 
-    return steps.map((step) => ({
+    let mapped = steps.map((step) => ({
       ...step,
       variant: step.variant || "default",
     }));
-  }, [order.timeline, order.status, order.placedAt, order.updatedAt]);
+
+    // Insert a "Request Cancel" row if customer has requested cancellation
+    const cancelReqRaw = order?.metadata?.cancel_request || order?.metadata?.order_refund_request || null;
+    const rawStatus = cancelReqRaw && typeof cancelReqRaw.status === 'string' ? cancelReqRaw.status.toLowerCase() : '';
+    const pendingCancel = rawStatus === 'pending' || rawStatus === 'requested';
+    if (pendingCancel) {
+      const reqAt = cancelReqRaw?.created_at || cancelReqRaw?.at || cancelReqRaw?.requested_at;
+      const time = reqAt
+        ? new Date(reqAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+        : "Pending";
+      const preparingIndex = mapped.findIndex(
+        (s) => normaliseStatus(s.status || s.label) === "preparing",
+      );
+      const insertAt = preparingIndex >= 0 ? preparingIndex + 1 : mapped.length;
+      mapped = [
+        ...mapped.slice(0, insertAt),
+        {
+          id: "status-request-cancel",
+          label: "Request Cancel",
+          status: "request-cancel",
+          completed: false,
+          timestamp: time,
+          variant: "cancelled",
+        },
+        ...mapped.slice(insertAt),
+      ];
+    }
+
+    return mapped;
+  }, [order.timeline, order.status, order.placedAt, order.updatedAt, order?.metadata]);
   const totals = useMemo(() => resolveTotals(order), [order]);
   const paymentSummary = useMemo(
     () => resolvePaymentSummary(order),
@@ -307,7 +405,17 @@ const CurrentOrder = () => {
     .filter(Boolean)
     .join(", ");
 
-  const canCancel = CANCELLABLE_STATUSES.has(normalisedStatus);
+  const cancelRequest = order.metadata?.cancel_request || order.metadata?.order_refund_request || null;
+  const cancelRequestStatus =
+    cancelRequest && typeof cancelRequest.status === "string"
+      ? (cancelRequest.status.toLowerCase() === 'requested' ? 'pending' : cancelRequest.status.toLowerCase())
+      : "";
+  const isCancelRequestPending = cancelRequestStatus === "pending";
+  const isCancelRequestRejected = cancelRequestStatus === "rejected";
+  const canCancel =
+    CANCELLABLE_STATUSES.has(normalisedStatus) &&
+    !isCancelRequestPending &&
+    !isCancelRequestRejected;
   const canConfirm = CONFIRMABLE_STATUSES.has(normalisedStatus);
 
 
@@ -507,6 +615,25 @@ const CurrentOrder = () => {
           )}
         </header>
 
+        {cancelRequestStatus === "pending" ? (
+          <div className="rounded-3xl border border-amber-200 bg-amber-50 p-6 shadow-sm">
+            <p className="text-sm font-semibold text-amber-800">
+              Cancellation request sent, please wait for restaurant confirmation.
+            </p>
+            <p className="text-sm text-amber-700">
+              We will notify you as soon as your request is processed.
+            </p>
+          </div>
+        ) : null}
+
+        {cancelRequestStatus === "rejected" ? (
+          <div className="rounded-3xl border border-red-200 bg-red-50 p-6 shadow-sm">
+            <p className="text-sm font-semibold text-red-700">
+              Notice: “Cancellation request denied, application is still being prepared”.
+            </p>
+          </div>
+        ) : null}
+
         <div className="rounded-3xl bg-white p-8 shadow-sm">
           <h2 className="text-lg font-semibold text-gray-900">
             Live order tracking
@@ -635,14 +762,86 @@ const CurrentOrder = () => {
               Note: {deliveryAddress.instructions}
             </p>
           ) : null}
-          <p className="mt-4 text-xs uppercase text-orange-500">
-            Real time map preview
-          </p>
-          <div className="mt-2 h-40 w-full rounded-2xl bg-gradient-to-br from-gray-100 to-gray-200 text-center text-xs font-semibold uppercase text-gray-400">
-            <div className="flex h-full items-center justify-center">
-              Map preview placeholder
+          {showDroneTracking ? (
+            <div className="mt-6 grid gap-4 lg:grid-cols-2">
+              <div>
+                <p className="text-xs uppercase text-orange-500">
+                  Real time map preview
+                </p>
+                <div className="mt-2 h-48 w-full rounded-2xl bg-gradient-to-br from-gray-100 to-gray-200 text-center text-xs font-semibold uppercase text-gray-400">
+                  <div className="flex h-full items-center justify-center">
+                    Map preview placeholder
+                  </div>
+                </div>
+              </div>
+              <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-400">
+                  Assigned drone
+                </p>
+                <h4 className="mt-2 text-lg font-semibold text-gray-900">
+                  {droneCode || "Awaiting dispatch"}
+                </h4>
+                <p className="text-sm text-gray-500">
+                  {droneModel || "Drone details will appear once dispatched."}
+                </p>
+                <dl className="mt-4 space-y-2 text-sm text-gray-600">
+                  <div className="flex justify-between">
+                    <span>Status</span>
+                    <span className="font-semibold">
+                      {friendlyDroneStatus || "Updating"}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Battery</span>
+                    <span className="font-semibold">
+                      {droneBatteryLevel !== null ? `${droneBatteryLevel}%` : "Updating"}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>ETA</span>
+                    <span className="font-semibold">
+                      {droneEtaLabel || `${order.etaMinutes} min`}
+                    </span>
+                  </div>
+                  {droneDistanceLabel ? (
+                    <div className="flex justify-between">
+                      <span>Distance</span>
+                      <span className="font-semibold">{droneDistanceLabel}</span>
+                    </div>
+                  ) : null}
+                  {dronePositionLabel ? (
+                    <div className="flex justify-between">
+                      <span>Last seen</span>
+                      <span className="text-right font-semibold">
+                        {dronePositionLabel}
+                      </span>
+                    </div>
+                  ) : null}
+                </dl>
+                {droneProgress !== null ? (
+                  <div className="mt-4">
+                    <div className="flex items-center justify-between text-xs text-gray-500">
+                      <span>Flight progress</span>
+                      <span>{droneProgress}%</span>
+                    </div>
+                    <div className="mt-1 h-2 rounded-full bg-gray-100">
+                      <div
+                        className="h-full rounded-full bg-emerald-500 transition-all"
+                        style={{ width: `${droneProgress}%` }}
+                      />
+                    </div>
+                  </div>
+                ) : null}
+                <button className="mt-4 w-full rounded-full border border-gray-200 px-4 py-2 text-xs font-semibold text-gray-600 transition hover:border-emerald-300 hover:text-emerald-600">
+                  View flight logs
+                </button>
+              </div>
             </div>
-          </div>
+          ) : (
+            <p className="mt-4 text-xs text-gray-400">
+              Drone tracking will appear once your order is out for delivery.
+            </p>
+          )}
         </div>
       </section>
 

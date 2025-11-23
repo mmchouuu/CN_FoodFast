@@ -7,7 +7,7 @@ import {
 } from "../utils/imageHelpers";
 import { buildRestaurantLink } from "../utils/orderHelpers";
 
-const CUSTOMER_CANCELLABLE_STATUSES = new Set(["pending", "confirmed"]);
+const CUSTOMER_CANCELLABLE_STATUSES = new Set(["pending", "confirmed", "preparing"]);
 
 const OrderHistory = () => {
   const {
@@ -85,10 +85,19 @@ const OrderHistory = () => {
             "";
           const normalisedStatus = (order.status || "").toLowerCase();
           const fallbackCanCancel = CUSTOMER_CANCELLABLE_STATUSES.has(normalisedStatus);
+          const cancelRequestStatus =
+            order.metadata?.cancel_request?.status &&
+            typeof order.metadata.cancel_request.status === "string"
+              ? order.metadata.cancel_request.status.toLowerCase()
+              : "";
+          const isCancelRequestPending = cancelRequestStatus === "pending";
+          const isCancelRequestRejected = cancelRequestStatus === "rejected";
           const canCancel =
-            order.customerCanCancel !== undefined
+            (order.customerCanCancel !== undefined
               ? order.customerCanCancel
-              : fallbackCanCancel;
+              : fallbackCanCancel) &&
+            !isCancelRequestPending &&
+            !isCancelRequestRejected;
           return (
             <div
               key={order.id}

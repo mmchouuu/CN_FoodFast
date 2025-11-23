@@ -154,23 +154,23 @@ CREATE INDEX IF NOT EXISTS idx_oprom_order ON order_promotions(order_id);
 -- =========================================================
 -- 6) DELIVERIES (tối giản)
 -- =========================================================
-CREATE TABLE IF NOT EXISTS deliveries (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  order_id UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
-  delivery_status VARCHAR(30) NOT NULL DEFAULT 'pending'
-    CHECK (delivery_status IN ('pending','preparing','dispatched','arriving','delivered','failed','cancelled')),
-  delivery_address TEXT,
-  contact_name VARCHAR(150),
-  contact_phone VARCHAR(30),
-  estimated_at TIMESTAMPTZ,
-  delivered_at TIMESTAMPTZ,
-  provider VARCHAR(100),
-  proof JSONB,
-  created_at TIMESTAMPTZ DEFAULT now(),
-  updated_at TIMESTAMPTZ DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS idx_deliveries_order  ON deliveries(order_id);
-CREATE INDEX IF NOT EXISTS idx_deliveries_status ON deliveries(delivery_status);
+-- CREATE TABLE IF NOT EXISTS deliveries (
+--   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+--   order_id UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+--   delivery_status VARCHAR(30) NOT NULL DEFAULT 'pending'
+--     CHECK (delivery_status IN ('pending','preparing','dispatched','arriving','delivered','failed','cancelled')),
+--   delivery_address TEXT,
+--   contact_name VARCHAR(150),
+--   contact_phone VARCHAR(30),
+--   estimated_at TIMESTAMPTZ,
+--   delivered_at TIMESTAMPTZ,
+--   provider VARCHAR(100),
+--   proof JSONB,
+--   created_at TIMESTAMPTZ DEFAULT now(),
+--   updated_at TIMESTAMPTZ DEFAULT now()
+-- );
+-- CREATE INDEX IF NOT EXISTS idx_deliveries_order  ON deliveries(order_id);
+-- CREATE INDEX IF NOT EXISTS idx_deliveries_status ON deliveries(delivery_status);
 
 -- =========================================================
 -- 7) EVENTS / REVISIONS / IDEMPOTENCY
@@ -225,22 +225,22 @@ CREATE INDEX IF NOT EXISTS idx_outbox_processed ON outbox(processed);
 -- 9) DELIVERIES
 -- =========================================================
 
-CREATE TABLE IF NOT EXISTS deliveries (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  order_id UUID NOT NULL,             -- soft ref: orders.id
-  branch_id UUID NOT NULL,            -- soft ref: product-service.restaurant_branches.id
-  shipper_id UUID,                    -- soft ref: product-service.shippers.id
-  delivery_status VARCHAR(30) DEFAULT 'delivering'
-    CHECK (delivery_status IN ('delivering', 'completed', 'cancelled')),
-  driver_snapshot JSONB,              -- lấy từ product-service khi assign
-  delivery_address JSONB,             -- từ order snapshot
-  tracking_data JSONB,                -- optional
-  pickup_at TIMESTAMPTZ,
-  delivered_at TIMESTAMPTZ,
-  failed_reason TEXT,
-  created_at TIMESTAMPTZ DEFAULT now(),
-  updated_at TIMESTAMPTZ DEFAULT now()
-);
+-- CREATE TABLE IF NOT EXISTS deliveries (
+--   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+--   order_id UUID NOT NULL,             -- soft ref: orders.id
+--   branch_id UUID NOT NULL,            -- soft ref: product-service.restaurant_branches.id
+--   shipper_id UUID,                    -- soft ref: product-service.shippers.id
+--   delivery_status VARCHAR(30) DEFAULT 'delivering'
+--     CHECK (delivery_status IN ('delivering', 'completed', 'cancelled')),
+--   driver_snapshot JSONB,              -- lấy từ product-service khi assign
+--   delivery_address JSONB,             -- từ order snapshot
+--   tracking_data JSONB,                -- optional
+--   pickup_at TIMESTAMPTZ,
+--   delivered_at TIMESTAMPTZ,
+--   failed_reason TEXT,
+--   created_at TIMESTAMPTZ DEFAULT now(),
+--   updated_at TIMESTAMPTZ DEFAULT now()
+-- );
 
 
 -- ========================================================

@@ -251,6 +251,83 @@ async function listPayoutSettlementOrders(req, res, next) {
   }
 }
 
+async function getDroneSystemSummary(req, res, next) {
+  try {
+    const summary = await adminClient.getDroneSystemSummary(withRequestHeaders(req));
+    res.json(summary);
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function listDroneHubs(req, res, next) {
+  try {
+    const hubs = await adminClient.listDroneHubs(withRequestHeaders(req));
+    res.json(hubs);
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function getDroneHubOverview(req, res, next) {
+  try {
+    const overview = await adminClient.getDroneHubOverview(
+      req.params.hubId,
+      withRequestHeaders(req),
+    );
+    res.json(overview);
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function listAdminDrones(req, res, next) {
+  try {
+    const result = await adminClient.listDeliveryDrones(req.query || {}, withRequestHeaders(req));
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function createAdminDrone(req, res, next) {
+  try {
+    const payload = req.body || {};
+    const data = await adminClient.createDeliveryDrone(payload, withRequestHeaders(req));
+    res.status(201).json(data);
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function updateAdminDrone(req, res, next) {
+  try {
+    const payload = req.body || {};
+    const data = await adminClient.updateDeliveryDrone(req.params.id, payload, withRequestHeaders(req));
+    res.json(data);
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function deleteAdminDrone(req, res, next) {
+  try {
+    const data = await adminClient.deleteDeliveryDrone(req.params.id, withRequestHeaders(req));
+    res.json(data);
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function getAdminDroneLogs(req, res, next) {
+  try {
+    const result = await adminClient.getDeliveryDroneLogs(req.params.id, withRequestHeaders(req));
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
   listCustomers,
   customerDetails,
@@ -266,4 +343,12 @@ module.exports = {
   listPayoutRestaurants,
   listPayoutBranches,
   listPayoutSettlementOrders,
+  getDroneSystemSummary,
+  listDroneHubs,
+  getDroneHubOverview,
+  listAdminDrones,
+  createAdminDrone,
+  updateAdminDrone,
+  deleteAdminDrone,
+  getAdminDroneLogs,
 };

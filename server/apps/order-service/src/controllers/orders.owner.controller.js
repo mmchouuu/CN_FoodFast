@@ -63,6 +63,20 @@ exports.updateStatus = async (req, res) => {
   }
 };
 
+exports.respondCancelRequest = async (req, res) => {
+  try {
+    const result = await ordersService.respondOwnerCancelRequest({
+      user: req.user,
+      orderId: req.params.id,
+      payload: req.body,
+    });
+    return res.json(result);
+  } catch (error) {
+    console.error('[order-service] owner respondCancelRequest failed:', error);
+    return mapError(res, error);
+  }
+};
+
 exports.createRevision = async (req, res) => {
   try {
     const revision = await ordersService.createOwnerOrderRevision({

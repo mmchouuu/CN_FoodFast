@@ -220,6 +220,26 @@ async function hasAdminProfile(userId, client) {
   }
 }
 
+async function getAdminProfile(userId, client) {
+  if (!userId) return null;
+  const executor = getExecutor(client);
+  try {
+    const result = await executor.query(
+      `
+        SELECT user_id, full_name, position, permissions
+        FROM admin_profiles
+        WHERE user_id = $1
+        LIMIT 1
+      `,
+      [userId],
+    );
+    return result.rows[0] || null;
+  } catch (error) {
+    // schema might not have admin profile table yet
+    return null;
+  }
+}
+
 async function createCustomerProfile(userId, client) {
   const executor = getExecutor(client);
   await executor.query(
@@ -437,6 +457,7 @@ module.exports = {
   getCredential,
   getAnyCredential,
   hasAdminProfile,
+  getAdminProfile,
   createCustomerProfile,
   getCustomerProfile,
   createOwnerProfile,
