@@ -141,6 +141,8 @@ const adminOrderRoutes = require('./routes/orders.admin.routes');
 const ownerSettlementsRoutes = require('./routes/settlements.owner.routes');
 const ownerRestaurantsRoutes = require('./routes/owner.restaurants.routes');
 const ownerDronesRoutes = require('./routes/drones.owner.routes');
+const customerDeliveriesRoutes = require('./routes/deliveries.customer.routes');
+const mapsRoutes = require('./routes/maps.routes');
 const app = express();
 
 // ======================================================
@@ -192,6 +194,7 @@ app.use('/api/restaurants', restaurantsRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/orders', ordersRoutes);
 app.use('/api/payments', paymentsRoutes);
+app.use('/api/maps', mapsRoutes);
 app.use('/customer/orders', customerOrderRoutes);
 app.use('/customer/cart', customerCartRoutes);
 app.use('/owner/orders', ownerOrderRoutes);
@@ -199,6 +202,7 @@ app.use('/owner/settlements', ownerSettlementsRoutes);
 app.use('/owner/restaurants', ownerRestaurantsRoutes);
 app.use('/owner/drones', ownerDronesRoutes);
 app.use('/admin/orders', adminOrderRoutes);
+app.use('/api/customer/deliveries', customerDeliveriesRoutes);
 app.get('/health', health);
 app.use(errorHandler);
 

@@ -1,8 +1,9 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import api from '../../services/api';
+import mapConfig from '../../config/mapConfig';
 
 const mapLegend = [
   {
@@ -11,14 +12,29 @@ const mapLegend = [
     indicator: 'bg-sky-500',
   },
   {
-    label: 'Route Polylines',
-    description: 'OSRM optimized routes',
+    label: 'Drone → Restaurant',
+    description: 'Straight dashed path for pickup leg',
+    indicator: 'bg-cyan-400',
+  },
+  {
+    label: 'Restaurant → Customer',
+    description: 'Active delivery leg',
+    indicator: 'bg-orange-500',
+  },
+  {
+    label: 'Customer → Hub',
+    description: 'Return flight',
     indicator: 'bg-emerald-500',
   },
   {
     label: 'Hub Location',
     description: 'Origin hub pin',
     indicator: 'bg-indigo-500',
+  },
+  {
+    label: 'Restaurant Location',
+    description: 'Branch pickup pin',
+    indicator: 'bg-yellow-400',
   },
   {
     label: 'Customer Location',
@@ -48,14 +64,52 @@ const formatEta = (seconds) => {
   return `${mins} min`;
 };
 
+const formatStageLabel = (stage, fallbackStatus) => {
+  if (!stage && !fallbackStatus) return 'Active';
+  const normalized = (stage || fallbackStatus || '').toLowerCase();
+  switch (normalized) {
+    case 'to_restaurant':
+      return 'Heading to restaurant';
+    case 'arriving':
+      return 'Arriving at restaurant';
+    case 'to_customer':
+      return 'Delivering to customer';
+    case 'delivered':
+      return 'Delivered';
+    case 'returning':
+      return 'Returning to hub';
+    case 'landed':
+      return 'At hub';
+    default:
+      return (fallbackStatus || normalized || 'Active')
+        .replace(/_/g, ' ')
+        .replace(/\b\w/g, (char) => char.toUpperCase());
+  }
+};
+
+const stageBadgeClass = (stage) => {
+  const normalized = (stage || '').toLowerCase();
+  if (normalized === 'arriving') return 'bg-amber-100 text-amber-700';
+  if (normalized === 'to_customer') return 'bg-orange-100 text-orange-700';
+  if (normalized === 'delivered') return 'bg-emerald-100 text-emerald-700';
+  if (normalized === 'returning' || normalized === 'landed') return 'bg-indigo-100 text-indigo-700';
+  if (normalized === 'to_restaurant') return 'bg-sky-100 text-sky-700';
+  return 'bg-neutral-100 text-neutral-600';
+};
+
+const deriveStageFromStatus = (status) => {
+  const normalized = (status || '').toLowerCase();
+  if (normalized === 'arriving') return 'arriving';
+  if (normalized === 'delivering' || normalized === 'flying') return 'to_customer';
+  if (normalized === 'assigned' || normalized === 'pending') return 'to_restaurant';
+  if (normalized === 'returning') return 'returning';
+  if (normalized === 'completed') return 'delivered';
+  return normalized || null;
+};
+
 const SOCKET_GATEWAY_URL = import.meta.env.VITE_SOCKET_GATEWAY_URL || 'http://localhost:4000';
-const MAPTILER_KEY = import.meta.env.VITE_MAPTILER_KEY || '';
 const CUSTOM_MAP_STYLE = import.meta.env.VITE_MAP_STYLE_URL || '';
-const MAP_STYLE =
-  CUSTOM_MAP_STYLE ||
-  (MAPTILER_KEY
-    ? `https://api.maptiler.com/maps/dataviz-light/style.json?key=${MAPTILER_KEY}`
-    : 'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json');
+const MAP_STYLE = CUSTOM_MAP_STYLE || mapConfig.styleUrl;
 const MAX_DRONE_EVENTS = 20;
 
 const formatCoordinate = (value) => {
@@ -172,13 +226,63 @@ const resolveCustomerCoordinate = (delivery, routeCoords = []) => {
   return fallback;
 };
 
-const buildDeliveryFeatures = (deliveries = []) => {
+const buildDeliveryFeatures = (deliveries = [], telemetry = []) => {
   const routeFeatures = [];
   const pointFeatures = [];
+  const telemetryByDeliveryId = new Map();
+  const telemetryByDroneId = new Map();
+
+  telemetry.forEach((entry) => {
+    if (!entry) return;
+    const deliveryId = entry.deliveryId ? String(entry.deliveryId) : null;
+    const droneId = entry.droneId ? String(entry.droneId) : null;
+    if (deliveryId && !telemetryByDeliveryId.has(deliveryId)) {
+      telemetryByDeliveryId.set(deliveryId, entry);
+    }
+    if (droneId && !telemetryByDroneId.has(droneId)) {
+      telemetryByDroneId.set(droneId, entry);
+    }
+  });
+
+  const pushRouteFeature = (coordinates, segmentType, properties = {}) => {
+    if (!Array.isArray(coordinates) || coordinates.length < 2) return;
+    const normalized = coordinates
+      .map((coord) => {
+        if (!Array.isArray(coord) || coord.length < 2) return null;
+        const lng = Number(coord[0]);
+        const lat = Number(coord[1]);
+        if (!isNumber(lng) || !isNumber(lat)) return null;
+        return [lng, lat];
+      })
+      .filter(Boolean);
+    if (normalized.length < 2) return;
+    routeFeatures.push({
+      type: 'Feature',
+      geometry: {
+        type: 'LineString',
+        coordinates: normalized,
+      },
+      properties: {
+        segmentType,
+        ...properties,
+      },
+    });
+  };
 
   deliveries.forEach((delivery) => {
     const deliveryIdRaw = delivery.id || delivery.order_id || `delivery-${Math.random()}`;
     const deliveryId = deliveryIdRaw ? String(deliveryIdRaw) : null;
+    const deliveryStatus = delivery.delivery_status || delivery.status || 'active';
+    const droneId = delivery?.drone?.id || delivery?.drone_id || null;
+    const telemetryEntry =
+      (deliveryId && telemetryByDeliveryId.get(deliveryId)) ||
+      (droneId && telemetryByDroneId.get(String(droneId))) ||
+      null;
+    const normalizedStage =
+      telemetryEntry?.stage ||
+      deriveStageFromStatus(telemetryEntry?.status) ||
+      deriveStageFromStatus(deliveryStatus) ||
+      'to_restaurant';
 
     const hubCoord = toLngLat(delivery?.drone?.hub?.location);
     const shopCoord = toLngLat(delivery?.branch_location);
@@ -186,30 +290,91 @@ const buildDeliveryFeatures = (deliveries = []) => {
     const customerCoord = resolveCustomerCoordinate(delivery, routeCoords);
 
     if (routeCoords.length < 2) {
-      const currentCoord = toLngLat(delivery?.current_position);
-      const droneCoord = toLngLat(delivery?.drone?.last_known_position);
-      const startCoord = shopCoord || hubCoord || currentCoord || droneCoord || null;
-      const endCoord = customerCoord || currentCoord || null;
-      if (
-        startCoord &&
-        endCoord &&
-        (startCoord[0] !== endCoord[0] || startCoord[1] !== endCoord[1])
-      ) {
-        routeCoords = [startCoord, endCoord];
+      const fallbackPath = [hubCoord, shopCoord, customerCoord].filter(Boolean);
+      if (fallbackPath.length >= 2) {
+        routeCoords = fallbackPath.reduce((acc, point) => {
+          if (!acc.length) return [point];
+          const prev = acc[acc.length - 1];
+          if (prev[0] !== point[0] || prev[1] !== point[1]) {
+            acc.push(point);
+          }
+          return acc;
+        }, []);
+      } else {
+        const currentCoord = toLngLat(delivery?.current_position);
+        const droneCoord = toLngLat(delivery?.drone?.last_known_position);
+        const startCoord = hubCoord || shopCoord || currentCoord || droneCoord || null;
+        const endCoord = customerCoord || currentCoord || null;
+        if (
+          startCoord &&
+          endCoord &&
+          (startCoord[0] !== endCoord[0] || startCoord[1] !== endCoord[1])
+        ) {
+          routeCoords = [startCoord, endCoord];
+        }
       }
     }
 
     if (routeCoords.length >= 2) {
-      routeFeatures.push({
-        type: 'Feature',
-        geometry: {
-          type: 'LineString',
-          coordinates: routeCoords,
-        },
-        properties: {
-          deliveryId,
-          status: delivery.delivery_status || delivery.status || 'active',
-        },
+      pushRouteFeature(routeCoords, 'restaurant-to-customer', {
+        deliveryId,
+        status: deliveryStatus,
+      });
+    }
+
+    const telemetryCoord = toLngLat(telemetryEntry?.position);
+    const droneCoord =
+      telemetryCoord ||
+      toLngLat(delivery?.current_position) ||
+      toLngLat(delivery?.drone?.last_known_position);
+    if (
+      droneCoord &&
+      shopCoord &&
+      (droneCoord[0] !== shopCoord[0] || droneCoord[1] !== shopCoord[1])
+    ) {
+      pushRouteFeature([droneCoord, shopCoord], 'drone-to-restaurant', {
+        deliveryId,
+        status: deliveryStatus,
+      });
+    }
+
+    if (
+      droneCoord &&
+      hubCoord &&
+      normalizedStage === 'returning' &&
+      (droneCoord[0] !== hubCoord[0] || droneCoord[1] !== hubCoord[1])
+    ) {
+      pushRouteFeature([droneCoord, hubCoord], 'return-to-hub', {
+        deliveryId,
+        status: normalizedStage,
+      });
+    }
+
+    const directTarget =
+      normalizedStage === 'returning'
+        ? hubCoord
+        : normalizedStage === 'to_customer' || normalizedStage === 'delivered'
+        ? customerCoord
+        : normalizedStage === 'arriving' || normalizedStage === 'to_restaurant'
+        ? shopCoord
+        : null;
+    const directType =
+      normalizedStage === 'returning'
+        ? 'drone-direct-return'
+        : normalizedStage === 'to_customer' || normalizedStage === 'delivered'
+        ? 'drone-direct-delivery'
+        : normalizedStage === 'arriving' || normalizedStage === 'to_restaurant'
+        ? 'drone-direct-pickup'
+        : null;
+    if (
+      droneCoord &&
+      directTarget &&
+      directType &&
+      (droneCoord[0] !== directTarget[0] || droneCoord[1] !== directTarget[1])
+    ) {
+      pushRouteFeature([droneCoord, directTarget], directType, {
+        deliveryId,
+        status: normalizedStage || deliveryStatus,
       });
     }
 
@@ -223,7 +388,7 @@ const buildDeliveryFeatures = (deliveries = []) => {
     };
 
     pushPoint(hubCoord, 'hub', delivery?.drone?.hub?.name || 'Hub');
-    pushPoint(shopCoord, 'shop', 'Restaurant / Hub');
+    pushPoint(shopCoord, 'restaurant', 'Restaurant Branch');
     pushPoint(customerCoord, 'customer', 'Customer');
   });
 
@@ -237,7 +402,13 @@ const toDeliveryDroneEntry = (delivery) => {
   if (!delivery || !delivery.drone) return null;
   const droneId = delivery.drone.id || delivery.drone_id || null;
   if (!droneId) return null;
-  const position = delivery.current_position || delivery.drone.last_known_position;
+  const position =
+    delivery.current_position ||
+    delivery.drone.last_known_position ||
+    delivery.branch_location ||
+    delivery.delivery_address ||
+    delivery.drone?.hub?.location ||
+    null;
   if (!position) return null;
   const battery = Number.isFinite(Number(delivery.drone.battery_level))
     ? Number(delivery.drone.battery_level)
@@ -274,8 +445,158 @@ const AdminDeliveryTracking = () => {
   const HIGHLIGHT_CLEAR = '__never__';
 
   const deliveryGeo = useMemo(
-    () => buildDeliveryFeatures(deliveries),
-    [deliveries],
+    () => buildDeliveryFeatures(deliveries, droneTelemetry),
+    [deliveries, droneTelemetry],
+  );
+
+  const liveDroneStream = useMemo(() => {
+    const entries = [];
+    const seen = new Set();
+    const deliveryMap = new Map(
+      deliveries
+        .filter((delivery) => delivery?.id)
+        .map((delivery) => [String(delivery.id), delivery]),
+    );
+
+    droneTelemetry.forEach((entry) => {
+      if (!entry?.deliveryId) return;
+      const deliveryId = String(entry.deliveryId);
+      const delivery = deliveryMap.get(deliveryId);
+      const stageOverride = deriveStageFromStatus(
+        delivery?.delivery_status || delivery?.status || entry.status,
+      );
+      const resolvedStage =
+        entry.stage || deriveStageFromStatus(entry.deliveryStatus || entry.status);
+      entries.push({
+        ...entry,
+        stage: resolvedStage || stageOverride || null,
+      });
+      seen.add(deliveryId);
+    });
+
+    deliveries.forEach((delivery) => {
+      const deliveryId = delivery?.id ? String(delivery.id) : null;
+      if (!deliveryId || seen.has(deliveryId)) return;
+      const stage = deriveStageFromStatus(delivery.delivery_status || delivery.status);
+      if (!stage || stage === 'delivered') return;
+      const fallback = toDeliveryDroneEntry(delivery);
+      entries.push({
+        droneId: fallback?.droneId || delivery?.drone?.id || deliveryId,
+        code: fallback?.code || delivery?.drone?.code || deliveryId,
+        position: fallback?.position || delivery?.current_position || null,
+        batteryLevel:
+          fallback?.batteryLevel ?? delivery?.drone?.battery_level ?? delivery?.drone_snapshot?.battery_level ?? null,
+        status: stage,
+        deliveryId,
+        stage,
+        etaSeconds: delivery?.estimated_time_sec ?? null,
+        progressPercent: delivery?.progress_percent ?? null,
+        receivedAt: delivery?.updated_at || new Date().toISOString(),
+        recordedAt: delivery?.pickup_at || delivery?.created_at || '',
+      });
+      seen.add(deliveryId);
+    });
+
+    return entries.filter((entry) => entry.deliveryId && entry.stage && entry.stage !== 'landed');
+  }, [droneTelemetry, deliveries]);
+
+  const sidebarDeliveries = useMemo(() => {
+    const allowed = new Set(['assigned', 'flying', 'arriving', 'to_restaurant', 'to_customer', 'returning']);
+    return deliveries
+      .filter((delivery) => {
+        const status = (delivery.delivery_status || delivery.status || '').toLowerCase();
+        return allowed.has(status);
+      })
+      .map((delivery) => {
+        const telemetryMatch = liveDroneStream.find(
+          (entry) =>
+            entry?.deliveryId &&
+            delivery.id &&
+            String(entry.deliveryId) === String(delivery.id),
+        );
+        if (!telemetryMatch) return delivery;
+        const override = { ...delivery };
+        if (typeof telemetryMatch.progressPercent === 'number') {
+          override.progress_percent = telemetryMatch.progressPercent;
+        }
+        if (typeof telemetryMatch.etaSeconds === 'number') {
+          override.estimated_time_sec = telemetryMatch.etaSeconds;
+        }
+        if (typeof telemetryMatch.batteryLevel === 'number') {
+          if (!override.drone) override.drone = {};
+          override.drone.battery_level = telemetryMatch.batteryLevel;
+        }
+        if (telemetryMatch.stage) {
+          override.delivery_status = telemetryMatch.stage;
+        }
+        return override;
+      });
+  }, [deliveries, liveDroneStream]);
+
+  const handleViewRoute = useCallback(
+    (delivery) => {
+      if (!delivery) return;
+      const rawId = delivery.id || delivery.order_id;
+      if (!rawId) return;
+      const deliveryId = String(rawId);
+      setSelectedDeliveryId(deliveryId);
+
+      if (!mapReadyRef.current || !mapRef.current) return;
+      const map = mapRef.current;
+
+      const coords = [];
+      deliveryGeo.routeFeatures.forEach((feature) => {
+        if (feature?.properties?.deliveryId === deliveryId && feature.geometry?.coordinates) {
+          feature.geometry.coordinates.forEach((coord) => {
+            if (Array.isArray(coord) && coord.length >= 2) {
+              coords.push(coord);
+            }
+          });
+        }
+      });
+      deliveryGeo.pointFeatures.forEach((feature) => {
+        if (feature?.properties?.deliveryId === deliveryId && feature.geometry?.coordinates) {
+          coords.push(feature.geometry.coordinates);
+        }
+      });
+      const telemetryMatch = droneTelemetry.find(
+        (entry) =>
+          entry?.deliveryId &&
+          String(entry.deliveryId) === deliveryId &&
+          toLngLat(entry.position),
+      );
+      if (telemetryMatch) {
+        coords.push(toLngLat(telemetryMatch.position));
+      } else {
+        const fallbackCoord =
+          toLngLat(delivery.current_position) ||
+          toLngLat(delivery.drone?.last_known_position) ||
+          toLngLat(delivery.branch_location) ||
+          toLngLat(delivery.drone?.hub?.location);
+        if (fallbackCoord) {
+          coords.push(fallbackCoord);
+        }
+      }
+
+      if (!coords.length) return;
+
+      try {
+        const bounds = coords.reduce(
+          (acc, coord) =>
+            acc ? acc.extend(coord) : new maplibregl.LngLatBounds(coord, coord),
+          null,
+        );
+        if (bounds) {
+          map.fitBounds(bounds, { padding: 80, maxZoom: 15, duration: 800 });
+        }
+      } catch (err) {
+        const first = coords[0];
+        if (Array.isArray(first)) {
+          map.flyTo({ center: first, zoom: 13 });
+        }
+      }
+    },
+    [deliveryGeo, droneTelemetry],
   );
 
   const loadDeliveries = () => {
@@ -405,13 +726,86 @@ const AdminDeliveryTracking = () => {
         type: 'line',
         source: 'deliveries-routes',
         paint: {
-          'line-color': '#10b981',
+          'line-color': '#f97316',
           'line-width': 4,
           'line-opacity': 0.95,
           'line-blur': 0.2,
         },
         layout: {
-          visibility: 'none',
+          visibility: 'visible',
+        },
+        filter: [
+          'any',
+          ['!', ['has', 'segmentType']],
+          ['==', ['get', 'segmentType'], 'restaurant-to-customer'],
+        ],
+      });
+
+      map.addLayer({
+        id: 'deliveries-routes-approach',
+        type: 'line',
+        source: 'deliveries-routes',
+        paint: {
+          'line-color': '#06b6d4',
+          'line-width': 3,
+          'line-opacity': 0.85,
+          'line-dasharray': [0.8, 1.2],
+        },
+        layout: {
+          visibility: 'visible',
+        },
+        filter: ['==', ['get', 'segmentType'], 'drone-to-restaurant'],
+      });
+
+      map.addLayer({
+        id: 'deliveries-routes-return',
+        type: 'line',
+        source: 'deliveries-routes',
+        paint: {
+          'line-color': '#10b981',
+          'line-width': 3,
+          'line-opacity': 0.8,
+          'line-dasharray': [1, 1.2],
+        },
+        layout: {
+          visibility: 'visible',
+        },
+        filter: ['==', ['get', 'segmentType'], 'return-to-hub'],
+      });
+
+      map.addLayer({
+        id: 'deliveries-routes-direct',
+        type: 'line',
+        source: 'deliveries-routes',
+        filter: [
+          'match',
+          ['get', 'segmentType'],
+          ['drone-direct-pickup', 'drone-direct-delivery', 'drone-direct-return'],
+          true,
+          false,
+        ],
+        paint: {
+          'line-color': [
+            'match',
+            ['get', 'segmentType'],
+            'drone-direct-pickup',
+            '#38bdf8',
+            'drone-direct-return',
+            '#10b981',
+            'drone-direct-delivery',
+            '#fb923c',
+            '#f97316',
+          ],
+          'line-width': 4,
+          'line-opacity': 0.95,
+          'line-dasharray': [
+            'case',
+            ['==', ['get', 'segmentType'], 'drone-direct-pickup'],
+            ['literal', [0.5, 0.8]],
+            ['==', ['get', 'segmentType'], 'drone-direct-return'],
+            ['literal', [0.8, 1.2]],
+            ['literal', [1, 0]],
+          ],
         },
       });
 
@@ -428,8 +822,8 @@ const AdminDeliveryTracking = () => {
             ['get', 'pointType'],
             'hub',
             '#6366f1',
-            'shop',
-            '#0ea5e9',
+            'restaurant',
+            '#facc15',
             'customer',
             '#f59e0b',
             '#6b7280',
@@ -447,8 +841,8 @@ const AdminDeliveryTracking = () => {
             ['get', 'pointType'],
             'hub',
             'H',
-            'shop',
-            'S',
+            'restaurant',
+            'R',
             'customer',
             'C',
             '',
@@ -470,9 +864,34 @@ const AdminDeliveryTracking = () => {
         type: 'line',
         source: 'deliveries-routes',
         paint: {
-          'line-color': '#f97316',
+          'line-color': [
+            'case',
+            ['==', ['get', 'segmentType'], 'drone-to-restaurant'],
+            '#06b6d4',
+            ['==', ['get', 'segmentType'], 'return-to-hub'],
+            '#10b981',
+            ['==', ['get', 'segmentType'], 'drone-direct-pickup'],
+            '#38bdf8',
+            ['==', ['get', 'segmentType'], 'drone-direct-return'],
+            '#10b981',
+            ['==', ['get', 'segmentType'], 'drone-direct-delivery'],
+            '#fb923c',
+            '#f97316',
+          ],
           'line-width': 6,
           'line-opacity': 0.9,
+          'line-dasharray': [
+            'case',
+            ['==', ['get', 'segmentType'], 'drone-to-restaurant'],
+            ['literal', [0.8, 1.2]],
+            ['==', ['get', 'segmentType'], 'return-to-hub'],
+            ['literal', [1, 1.2]],
+            ['==', ['get', 'segmentType'], 'drone-direct-pickup'],
+            ['literal', [0.5, 0.8]],
+            ['==', ['get', 'segmentType'], 'drone-direct-return'],
+            ['literal', [0.8, 1.2]],
+            ['literal', [1, 0]],
+          ],
         },
         layout: {
           visibility: 'none',
@@ -485,9 +904,24 @@ const AdminDeliveryTracking = () => {
         type: 'circle',
         source: 'drones-live',
         paint: {
-          'circle-radius': 8,
-          'circle-color': '#0f172a',
-          'circle-stroke-color': '#e2e8f0',
+          'circle-radius': 9,
+          'circle-color': [
+            'match',
+            ['downcase', ['coalesce', ['get', 'status'], '']],
+            'flying',
+            '#0ea5e9', // bright sky for active flight
+            'assigned',
+            '#0ea5e9',
+            'arriving',
+            '#14b8a6', // teal for approaching
+            'charging',
+            '#a855f7', // purple while charging
+            'idle',
+            '#94a3b8', // grey for idle
+            '#0ea5e9',
+          ],
+          'circle-opacity': 0.95,
+          'circle-stroke-color': '#ffffff',
           'circle-stroke-width': 2,
         },
       });
@@ -507,6 +941,15 @@ const AdminDeliveryTracking = () => {
         const battery =
           Number.isFinite(batteryValue) && batteryValue >= 0 ? `${batteryValue}%` : '--';
         const status = props.status || 'unknown';
+        const stage = props.stage || null;
+        const etaSeconds = Number(props.etaSeconds);
+        const etaLabel =
+          Number.isFinite(etaSeconds) && etaSeconds > 0
+            ? `${Math.max(1, Math.round(etaSeconds / 60))} min`
+            : '--';
+        const progressValue = Number(props.progressPercent);
+        const progressLabel =
+          Number.isFinite(progressValue) && progressValue >= 0 ? `${progressValue}%` : '--';
         const deliveryId =
           props.deliveryId && props.deliveryId !== 'null' ? String(props.deliveryId) : null;
         const recordedAt = props.recordedAt || '';
@@ -521,7 +964,10 @@ const AdminDeliveryTracking = () => {
           <div class="space-y-1 text-sm">
             <div class="font-semibold text-neutral-900">${code}</div>
             <div class="text-xs text-neutral-500">Status: ${status}</div>
+            <div class="text-xs text-neutral-500">Stage: ${formatStageLabel(stage, status)}</div>
             <div class="text-xs text-neutral-500">Battery: ${battery}</div>
+            <div class="text-xs text-neutral-500">Progress: ${progressLabel}</div>
+            <div class="text-xs text-neutral-500">ETA: ${etaLabel}</div>
             <div class="text-xs text-neutral-500">Delivery: ${deliveryId || '--'}</div>
             ${recordedAt ? `<div class="text-[11px] text-neutral-400">Recorded: ${recordedAt}</div>` : ''}
           </div>
@@ -622,6 +1068,13 @@ const AdminDeliveryTracking = () => {
             ? entry.batteryLevel
             : fallback?.batteryLevel ?? null;
         const mergedPosition = entry.position || fallback?.position || null;
+        const mergedStage = entry.stage || fallback?.stage || null;
+        const mergedProgress =
+          entry.progressPercent ?? fallback?.progressPercent ?? null;
+        const mergedEta = entry.etaSeconds ?? fallback?.etaSeconds ?? null;
+        const mergedDeliveryStatus =
+          entry.deliveryStatus || fallback?.deliveryStatus || mergedStatus;
+        const mergedSpeed = entry.speed ?? fallback?.speed ?? null;
         return {
           ...entry,
           position: mergedPosition,
@@ -629,6 +1082,11 @@ const AdminDeliveryTracking = () => {
           recordedAt: mergedRecordedAt,
           status: mergedStatus,
           batteryLevel: mergedBattery,
+          stage: mergedStage,
+          progressPercent: mergedProgress,
+          etaSeconds: mergedEta,
+          deliveryStatus: mergedDeliveryStatus,
+          speed: mergedSpeed,
         };
       });
 
@@ -652,6 +1110,11 @@ const AdminDeliveryTracking = () => {
             status: entry.status,
             deliveryId: entry.deliveryId ? String(entry.deliveryId) : null,
             recordedAt: entry.recordedAt || entry.receivedAt || '',
+            etaSeconds: entry.etaSeconds ?? null,
+            progressPercent: entry.progressPercent ?? null,
+            stage: entry.stage || null,
+            deliveryStatus: entry.deliveryStatus || entry.status || null,
+            speed: entry.speed ?? null,
           },
         })),
     };
@@ -708,7 +1171,11 @@ const AdminDeliveryTracking = () => {
           </p>
         </div>
         <div className="flex flex-wrap gap-3">
-          <button className="rounded-xl border border-neutral-200 px-4 py-2 text-sm font-semibold text-neutral-600 hover:border-neutral-300">
+          <button
+            className="rounded-xl border border-neutral-200 px-4 py-2 text-sm font-semibold text-neutral-600 hover:border-neutral-300"
+            type="button"
+            onClick={loadDeliveries}
+          >
             Refresh Live View
           </button>
           <button className="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-emerald-600">
@@ -853,55 +1320,88 @@ const AdminDeliveryTracking = () => {
                 <p className="text-sm font-semibold uppercase tracking-wide">
                   Live Drone Stream
                 </p>
-                {droneTelemetry.length === 0 ? (
+                {liveDroneStream.length === 0 ? (
                   <div className="mt-4 rounded-xl border border-neutral-100 bg-white/70 p-4 text-xs text-neutral-500">
-                    Waiting for telemetry... Use the new telemetry API to push coordinates and this feed will update in real-time.
+                    Waiting for in-flight drones... Assign a drone to an order and start telemetry to see live updates.
                   </div>
                 ) : (
                   <div className="mt-4 grid gap-3 text-left text-xs text-neutral-600">
-                    {droneTelemetry.map((entry) => (
-                      <div
-                        key={`${entry.droneId}-${entry.recordedAt}-${entry.receivedAt}`}
-                        className="rounded-xl border border-neutral-100 bg-white/90 p-4 shadow-sm"
-                      >
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <div>
-                            <p className="text-sm font-semibold text-neutral-900">
-                              {entry.code || entry.droneId}
-                            </p>
-                            <p className="text-[11px] text-neutral-400">
-                              Received {new Date(entry.receivedAt).toLocaleTimeString()}
-                            </p>
+                    {liveDroneStream.map((entry) => {
+                      const stageText = formatStageLabel(entry.stage, entry.status);
+                      const etaLabel =
+                        typeof entry.etaSeconds === 'number' && entry.etaSeconds > 0
+                          ? formatEta(entry.etaSeconds)
+                          : '--';
+                      const progressLabel =
+                        typeof entry.progressPercent === 'number'
+                          ? `${Math.round(entry.progressPercent)}%`
+                          : '--';
+                      return (
+                        <div
+                          key={`${entry.droneId}-${entry.recordedAt}-${entry.receivedAt}`}
+                          className="rounded-xl border border-neutral-100 bg-white/90 p-4 shadow-sm"
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div>
+                              <p className="text-sm font-semibold text-neutral-900">
+                                {entry.code || entry.droneId}
+                              </p>
+                              <p className="text-[11px] text-neutral-400">
+                                Received {new Date(entry.receivedAt).toLocaleTimeString()}
+                              </p>
+                            </div>
+                            <span
+                              className={`rounded-full px-3 py-1 text-[11px] font-semibold ${stageBadgeClass(entry.stage)}`}
+                            >
+                              {stageText}
+                            </span>
                           </div>
-                          <span className="rounded-full bg-sky-100 px-3 py-1 text-[11px] font-semibold uppercase text-sky-700">
-                            {entry.status || 'unknown'}
-                          </span>
+                          <div className="mt-3 grid grid-cols-2 gap-3 text-[11px] md:grid-cols-6">
+                            <div>
+                              <p className="font-semibold text-neutral-700">Lat</p>
+                              <p>{formatCoordinate(entry.position?.lat)}</p>
+                            </div>
+                            <div>
+                              <p className="font-semibold text-neutral-700">Lng</p>
+                              <p>{formatCoordinate(entry.position?.lng)}</p>
+                            </div>
+                            <div>
+                              <p className="font-semibold text-neutral-700">Battery</p>
+                              <p>
+                                {typeof entry.batteryLevel === 'number' ? `${entry.batteryLevel}%` : '--'}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="font-semibold text-neutral-700">Delivery</p>
+                              <p>{entry.deliveryId ?? '--'}</p>
+                            </div>
+                            <div>
+                              <p className="font-semibold text-neutral-700">ETA</p>
+                              <p>{etaLabel}</p>
+                            </div>
+                            <div>
+                              <p className="font-semibold text-neutral-700">Progress</p>
+                              <p>{progressLabel}</p>
+                            </div>
+                          </div>
+                          <div className="mt-2 flex flex-wrap gap-4 text-[11px] text-neutral-400">
+                            <span>Heading: {entry.heading ?? '--'}</span>
+                            <span>Speed: {entry.speed ? `${entry.speed} m/s` : '--'}</span>
+                            <span>Recorded: {entry.recordedAt || '--'}</span>
+                          </div>
+                          {typeof entry.progressPercent === 'number' ? (
+                            <div className="mt-3 h-1.5 rounded-full bg-neutral-100">
+                              <div
+                                className="h-full rounded-full bg-orange-500 transition-all"
+                                style={{
+                                  width: `${Math.min(100, Math.max(0, entry.progressPercent))}%`,
+                                }}
+                              />
+                            </div>
+                          ) : null}
                         </div>
-                        <div className="mt-3 grid grid-cols-2 gap-3 text-[11px] md:grid-cols-4">
-                          <div>
-                            <p className="font-semibold text-neutral-700">Lat</p>
-                            <p>{formatCoordinate(entry.position?.lat)}</p>
-                          </div>
-                          <div>
-                            <p className="font-semibold text-neutral-700">Lng</p>
-                            <p>{formatCoordinate(entry.position?.lng)}</p>
-                          </div>
-                          <div>
-                            <p className="font-semibold text-neutral-700">Battery</p>
-                            <p>{typeof entry.batteryLevel === 'number' ? `${entry.batteryLevel}%` : '--'}</p>
-                          </div>
-                          <div>
-                            <p className="font-semibold text-neutral-700">Speed</p>
-                            <p>{entry.speed ? `${entry.speed} m/s` : '--'}</p>
-                          </div>
-                        </div>
-                        <div className="mt-2 flex flex-wrap gap-4 text-[11px] text-neutral-400">
-                          <span>Heading: {entry.heading ?? '--'}</span>
-                          <span>Delivery: {entry.deliveryId ?? '--'}</span>
-                          <span>Recorded: {entry.recordedAt || '--'}</span>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -927,10 +1427,12 @@ const AdminDeliveryTracking = () => {
             {loadingDeliveries && (
               <div className="px-6 py-4 text-xs text-neutral-500">Loading deliveries…</div>
             )}
-            {!loadingDeliveries && deliveries.length === 0 && (
-              <div className="px-6 py-4 text-xs text-neutral-500">No active deliveries yet.</div>
+            {!loadingDeliveries && sidebarDeliveries.length === 0 && (
+              <div className="px-6 py-4 text-xs text-neutral-500">
+                No assigned or in-flight drones yet.
+              </div>
             )}
-            {deliveries.map((delivery) => {
+            {sidebarDeliveries.map((delivery) => {
               const battery = delivery.drone?.battery_level ?? null;
               const progress = Number.isFinite(Number(delivery.progress_percent))
                 ? Number(delivery.progress_percent)
@@ -987,7 +1489,11 @@ const AdminDeliveryTracking = () => {
                   </div>
 
                   <div className="flex flex-wrap gap-2 pt-2">
-                    <button className="rounded-lg border border-neutral-200 px-3 py-1.5 text-xs font-semibold text-neutral-600 hover:border-neutral-300">
+                    <button
+                      type="button"
+                      onClick={() => handleViewRoute(delivery)}
+                      className="rounded-lg border border-neutral-200 px-3 py-1.5 text-xs font-semibold text-neutral-600 hover:border-neutral-300"
+                    >
                       View Route
                     </button>
                     <button className="rounded-lg border border-neutral-200 px-3 py-1.5 text-xs font-semibold text-neutral-600 hover:border-neutral-300">

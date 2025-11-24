@@ -68,14 +68,17 @@ async function resolveCoordinates(snapshot = {}) {
 
 async function getRouteMetrics(origin, destination) {
   if (!origin || !destination) return null;
-  const baseUrl = (config.osrmBaseUrl || '').replace(/\/$/, '');
+  if (!config.mapTilerKey) return null;
+  const baseUrl = (config.mapTilerDirectionsUrl || '').replace(/\/$/, '');
+  if (!baseUrl) return null;
   const path = `${origin.lng},${origin.lat};${destination.lng},${destination.lat}`;
-  const url = `${baseUrl}/route/v1/driving/${path}`;
+  const url = `${baseUrl}/driving/${path}`;
   try {
     const { data } = await axios.get(url, {
       params: {
+        key: config.mapTilerKey,
         overview: 'false',
-        annotations: 'duration,distance',
+        geometries: 'polyline',
       },
       timeout: config.requestTimeout,
     });

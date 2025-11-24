@@ -44,5 +44,9 @@ module.exports = {
     directionsUrl:
       process.env.MAPTILER_DIRECTIONS_URL || 'https://api.maptiler.com/routing/route/v2',
   },
+  osrm: {
+    baseUrl: process.env.OSRM_BASE_URL || '',
+  },
+  cacheTtlMs: Number(process.env.ROUTE_CACHE_TTL_MS || 5 * 60 * 1000),
   logLevel: process.env.LOG_LEVEL || 'info',
 };

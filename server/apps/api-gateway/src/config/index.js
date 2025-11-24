@@ -10,7 +10,9 @@ module.exports = {
   mapTilerKey: process.env.MAPTILER_KEY || process.env.VITE_MAPTILER_KEY || 'YUyNgtKuEPD1fLE16S0e',
   mapTilerGeocodeUrl:
     process.env.MAPTILER_GEOCODE_URL || 'https://api.maptiler.com/geocoding',
-  osrmBaseUrl: process.env.OSRM_BASE_URL || 'https://router.project-osrm.org',
+  mapTilerDirectionsUrl:
+    process.env.MAPTILER_DIRECTIONS_URL || 'https://api.maptiler.com/routing/route/v2',
+  osrmBaseUrl: process.env.OSRM_BASE_URL || '',
   requestTimeout: parseInt(process.env.REQUEST_TIMEOUT_MS || '5000', 10),
   longRequestTimeout: parseInt(process.env.LONG_REQUEST_TIMEOUT_MS || '30000', 10),
   jwtPublicKey: process.env.JWT_PUBLIC_KEY || 'change_me',

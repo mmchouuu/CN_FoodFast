@@ -205,6 +205,15 @@ async function getDeliveryDroneLogs(id, opts = {}) {
   return res.data;
 }
 
+async function listDeliveries(params = {}, opts = {}) {
+  const res = await deliveryAdminClient.get('/', {
+    params,
+    headers: opts.headers,
+  });
+  return res.data;
+}
+
+
 async function listDeliveriesByOrders(params = {}, opts = {}) {
   const res = await deliveryAdminClient.get('/admin/deliveries', {
     params,
@@ -212,6 +221,7 @@ async function listDeliveriesByOrders(params = {}, opts = {}) {
   });
   return res.data;
 }
+
 
 async function assignDelivery(deliveryId, payload = {}, opts = {}) {
   const res = await deliveryAdminClient.post(`/admin/deliveries/${deliveryId}/assign`, payload, {
@@ -256,6 +266,7 @@ module.exports = {
   updateDeliveryDrone,
   deleteDeliveryDrone,
   getDeliveryDroneLogs,
+  listDeliveries,
   listDeliveriesByOrders,
   assignDelivery,
   reprocessOrderAssignment,

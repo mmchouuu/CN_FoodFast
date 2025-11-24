@@ -3,6 +3,7 @@ const config = require('../config');
 const logger = require('../logger');
 
 const EARTH_RADIUS_M = 6371000;
+const routeCache = new Map();
 
 const toNumberOrNull = (value) => {
   if (value === null || value === undefined) return null;
@@ -92,38 +93,186 @@ async function geocodeAddress(parts = {}) {
   return null;
 }
 
-async function getRouteMetrics(origin, destination) {
+const decodePolyline = (str) => {
+  if (!str || typeof str !== 'string') return [];
+  let index = 0;
+  const len = str.length;
+  const coordinates = [];
+  let lat = 0;
+  let lng = 0;
+
+  while (index < len) {
+    let b;
+    let shift = 0;
+    let result = 0;
+    do {
+      b = str.charCodeAt(index++) - 63;
+      result |= (b & 0x1f) << shift;
+      shift += 5;
+    } while (b >= 0x20);
+    const deltaLat = (result & 1) ? ~(result >> 1) : result >> 1;
+    lat += deltaLat;
+
+    shift = 0;
+    result = 0;
+    do {
+      b = str.charCodeAt(index++) - 63;
+      result |= (b & 0x1f) << shift;
+      shift += 5;
+    } while (b >= 0x20);
+    const deltaLng = (result & 1) ? ~(result >> 1) : result >> 1;
+    lng += deltaLng;
+
+    coordinates.push([lng * 1e-5, lat * 1e-5]);
+  }
+  return coordinates;
+};
+
+const encodeCacheKey = (origin, destination) => {
+  const safe = (coord) => {
+    if (!coord) return 'na,na';
+    const lat = Number(coord.lat ?? coord.latitude ?? coord[1] ?? 0);
+    const lng = Number(coord.lng ?? coord.lon ?? coord.longitude ?? coord[0] ?? 0);
+    return `${lat.toFixed(5)},${lng.toFixed(5)}`;
+  };
+  return `${safe(origin)}|${safe(destination)}`;
+};
+
+const setCache = (key, value) => {
+  const ttl = config.cacheTtlMs || 300000;
+  routeCache.set(key, { value, expiresAt: Date.now() + ttl });
+};
+
+const getCache = (key) => {
+  const cached = routeCache.get(key);
+  if (!cached) return null;
+  if (cached.expiresAt && cached.expiresAt < Date.now()) {
+    routeCache.delete(key);
+    return null;
+  }
+  return cached.value;
+};
+
+async function fetchOsrmRoute(origin, destination) {
+  const base = (config.osrm?.baseUrl || '').replace(/\/$/, '');
+  if (!base) return null;
+  const path = `${origin.lng},${origin.lat};${destination.lng},${destination.lat}`;
+  const url = `${base}/route/v1/driving/${path}`;
+  const params = {
+    overview: 'full',
+    geometries: 'geojson',
+  };
+  const { data } = await axios.get(url, {
+    params,
+    timeout: config.httpTimeout,
+  });
+  const route = data?.routes?.[0];
+  if (!route) return null;
+  return {
+    distanceMeters:
+      typeof route.distance === 'number'
+        ? route.distance
+        : haversineDistanceMeters(origin, destination),
+    durationSeconds: typeof route.duration === 'number' ? route.duration : null,
+    geometry: route.geometry || null,
+    provider: 'osrm',
+  };
+}
+
+async function fetchMaptilerRoute(origin, destination) {
   const key = config.maptiler.key;
   if (!key) return null;
-  if (!origin || !destination) return null;
   const base = config.maptiler.directionsUrl.replace(/\/$/, '');
   const path = `driving/${origin.lng},${origin.lat};${destination.lng},${destination.lat}`;
   const url = `${base}/${path}`;
+  const { data } = await axios.get(url, {
+    params: {
+      key,
+      overview: 'full',
+      geometries: 'polyline',
+    },
+    timeout: config.httpTimeout,
+  });
+  const route = data?.routes?.[0];
+  if (!route) return null;
+  const coordinates = Array.isArray(route.geometry)
+    ? route.geometry
+    : decodePolyline(route.geometry || '');
+  return {
+    distanceMeters:
+      typeof route.distance === 'number'
+        ? route.distance
+        : haversineDistanceMeters(origin, destination),
+    durationSeconds: typeof route.duration === 'number' ? route.duration : null,
+    geometry: {
+      type: 'LineString',
+      coordinates,
+    },
+    provider: 'maptiler',
+  };
+}
+
+const sanitizeMetrics = (origin, destination, metrics) => {
+  if (!metrics) return null;
+  const fallback = haversineDistanceMeters(origin, destination);
+  const distance = Number(metrics.distanceMeters);
+  const duration = Number(metrics.durationSeconds);
+  const tooLarge =
+    Number.isFinite(distance) &&
+    Number.isFinite(fallback) &&
+    (distance > fallback * 3 || distance > 1_000_000); // cap at 1,000 km
+
+  if (tooLarge && fallback) {
+    return {
+      distanceMeters: fallback,
+      durationSeconds: Number.isFinite(duration) ? duration : null,
+      geometry: metrics.geometry || null,
+      provider: metrics.provider || 'sanitized',
+    };
+  }
+  return metrics;
+};
+
+async function getRouteMetrics(origin, destination) {
+  if (!origin || !destination) return null;
+  const key = encodeCacheKey(origin, destination);
+  const cached = getCache(key);
+  if (cached) {
+    return cached;
+  }
+
   try {
-    const { data } = await axios.get(url, {
-      params: {
-        key,
-        overview: 'full',
-        geometries: 'polyline',
-      },
-      timeout: config.httpTimeout,
-    });
-    const route = data?.routes?.[0];
-    if (route) {
-      return {
-        distanceMeters:
-          typeof route.distance === 'number' ? route.distance : haversineDistanceMeters(origin, destination),
-        durationSeconds: typeof route.duration === 'number' ? route.duration : null,
-        geometry: route.geometry || null,
-      };
+    const maptilerRoute = sanitizeMetrics(
+      origin,
+      destination,
+      await fetchMaptilerRoute(origin, destination),
+    );
+    if (maptilerRoute) {
+      setCache(key, maptilerRoute);
+      return maptilerRoute;
     }
   } catch (error) {
     if (error.response && error.response.status === 404) {
-      logger.debug?.('[delivery-service] Routing 404 (using fallback distance).');
-      return null;
+      logger.debug?.('[delivery-service] MapTiler routing 404 (using fallback distance).');
+    } else {
+      logger.warn('[delivery-service] MapTiler routing failed:', error.message);
     }
-    logger.warn('[delivery-service] Routing failed:', error.message);
   }
+
+  try {
+    const fallback = sanitizeMetrics(origin, destination, await fetchOsrmRoute(origin, destination));
+    if (fallback) {
+      setCache(key, fallback);
+      return fallback;
+    }
+  } catch (error) {
+    if (error.response && error.response.status === 404) {
+      logger.debug?.('[delivery-service] OSRM routing 404 (using fallback distance).');
+    } else {
+      logger.warn('[delivery-service] OSRM routing failed:', error.message);
+    }
+  }
+
   return null;
 }
 

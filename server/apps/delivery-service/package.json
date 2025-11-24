@@ -7,7 +7,8 @@
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
     "test": "echo \"No tests defined for delivery-service\" && exit 0",
-    "simulate:drones": "node scripts/drone-simulator.js"
+    "simulate:drones": "node scripts/drone-simulator.js",
+    "backfill:routes": "node scripts/backfill-routes.js"
   },
   "license": "ISC",
   "dependencies": {

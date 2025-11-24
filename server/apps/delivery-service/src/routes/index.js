@@ -15,6 +15,11 @@ router.get('/admin/assignments/metrics', assignmentController.getMetrics);
 router.get('/admin/deliveries', deliveryController.listAdminDeliveries);
 router.post('/admin/deliveries/:deliveryId/assign', deliveryController.assignDelivery);
 router.post('/admin/orders/:orderId/reprocess-hub', deliveryController.reprocessOrderAssignment);
+router.get('/customer/orders/:orderId', deliveryController.getCustomerDelivery);
+router.get(
+  '/customer/orders/:orderId/logs',
+  deliveryController.getCustomerDeliveryLogs,
+);
 router.get('/drones/summary', droneController.getSummary);
 router.get('/drones', droneController.listDrones);
 router.post('/drones', droneController.createDrone);

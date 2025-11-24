@@ -1,6 +1,7 @@
 const { pool } = require('../db');
 const geo = require('../utils/geo');
 const logger = require('../logger');
+const orderClient = require('../clients/order.client');
 
 const normalizeUuid = (value) => {
   if (!value || typeof value !== 'string') return null;
@@ -22,6 +23,49 @@ async function deliveryExists(orderId) {
 const roundOrNull = (value) =>
   typeof value === 'number' && Number.isFinite(value) ? Math.round(value) : null;
 
+const parseNumeric = (value) => {
+  if (value === null || value === undefined) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const toComparableId = (value) => {
+  if (value === null || value === undefined) return null;
+  return String(value).trim();
+};
+
+async function ensureCustomerAccess(orderId, customerId) {
+  if (!customerId) return;
+  const normalizedCustomerId = toComparableId(customerId);
+  if (!normalizedCustomerId) return;
+
+  const order = await orderClient.getOrder(orderId);
+  if (!order) {
+    const err = new Error('ORDER_NOT_FOUND');
+    err.status = 404;
+    throw err;
+  }
+
+  const candidateIds = [
+    order.user_id,
+    order.userId,
+    order.customer_id,
+    order.customerId,
+    order.customer?.id,
+    order.user?.id,
+  ].map(toComparableId);
+
+  const matching = candidateIds.find(
+    (candidate) => candidate && candidate === normalizedCustomerId,
+  );
+
+  if (!matching) {
+    const err = new Error('FORBIDDEN_DELIVERY_ACCESS');
+    err.status = 403;
+    throw err;
+  }
+}
+
 async function buildRoute({ hubCoordinate, branchCoordinate, customerCoordinate }) {
   const legs = [];
   const waypoints = [];
@@ -31,26 +75,26 @@ async function buildRoute({ hubCoordinate, branchCoordinate, customerCoordinate 
 
   let totalDistance = 0;
   let totalDuration = 0;
-  const polylineSegments = [];
 
   const addLeg = async (from, to, label) => {
     if (!from || !to) return;
     const metrics = await geo.getRouteMetrics(from, to);
-    const distance = metrics?.distanceMeters ?? geo.haversineDistanceMeters(from, to) ?? null;
+    const distance =
+      metrics?.distanceMeters ??
+      geo.haversineDistanceMeters(from, to) ??
+      null;
     const duration = metrics?.durationSeconds ?? null;
-    if (distance) {
-      totalDistance += distance;
-    }
-    if (duration) {
-      totalDuration += duration;
-    }
-    if (metrics?.geometry) {
-      polylineSegments.push(metrics.geometry);
-    }
+    if (distance) totalDistance += distance;
+    if (duration) totalDuration += duration;
     legs.push({
       label,
       distance_meters: distance,
       duration_seconds: duration,
+      geometry:
+        metrics?.geometry && Array.isArray(metrics.geometry.coordinates)
+          ? metrics.geometry
+          : null,
+      provider: metrics?.provider || null,
     });
   };
 
@@ -63,9 +107,6 @@ async function buildRoute({ hubCoordinate, branchCoordinate, customerCoordinate 
     total_distance_meters: totalDistance || null,
     total_duration_seconds: totalDuration || null,
   };
-  if (polylineSegments.length) {
-    routePayload.polyline = polylineSegments.join('|');
-  }
   return routePayload;
 }
 
@@ -157,6 +198,9 @@ async function getDeliveriesByOrderIds(orderIds = []) {
              updated_at
       FROM deliveries
       WHERE order_id = ANY($1::uuid[])
+      ORDER BY
+        CASE WHEN drone_id IS NULL THEN 1 ELSE 0 END,
+        updated_at DESC
     `,
     [normalized],
   );
@@ -218,6 +262,7 @@ async function assignDelivery({ deliveryId, orderId, droneId, assignedBy }) {
   }
 
   const client = await pool.connect();
+  let orderIdForStatusUpdate = null;
   try {
     await client.query('BEGIN');
     const deliveryRes = normalizedDeliveryId
@@ -250,12 +295,16 @@ async function assignDelivery({ deliveryId, orderId, droneId, assignedBy }) {
       hub_id: drone.hub_id,
     };
 
+    orderIdForStatusUpdate = delivery.order_id || null;
+
     const updatedDeliveryRes = await client.query(
       `
         UPDATE deliveries
         SET drone_id = $1,
             drone_snapshot = $2,
-            delivery_status = 'assigned',
+            delivery_status = 'to_restaurant',
+            progress_percent = 0,
+            pickup_at = NOW(),
             updated_at = now()
         WHERE id = $3
         RETURNING *
@@ -266,8 +315,9 @@ async function assignDelivery({ deliveryId, orderId, droneId, assignedBy }) {
     const updatedDroneRes = await client.query(
       `
         UPDATE drones
-        SET status = 'assigned',
-            last_active_at = now()
+        SET status = 'to_restaurant',
+            last_active_at = now(),
+            updated_at = now()
         WHERE id = $1
         RETURNING *
       `,
@@ -284,6 +334,18 @@ async function assignDelivery({ deliveryId, orderId, droneId, assignedBy }) {
 
     await client.query('COMMIT');
 
+    if (orderIdForStatusUpdate) {
+      orderClient
+        .updateOrder(orderIdForStatusUpdate, { status: 'delivering' })
+        .catch((error) => {
+          logger.warn(
+            '[delivery-service] Failed to push order delivering status for %s: %s',
+            orderIdForStatusUpdate,
+            error.message,
+          );
+        });
+    }
+
     return {
       delivery: updatedDeliveryRes.rows[0],
       drone: updatedDroneRes.rows[0],
@@ -296,8 +358,92 @@ async function assignDelivery({ deliveryId, orderId, droneId, assignedBy }) {
   }
 }
 
+async function getCustomerDelivery(orderId, customerId) {
+  const normalizedOrderId = normalizeUuid(orderId);
+  if (!normalizedOrderId) {
+    const err = new Error('Invalid order id');
+    err.status = 400;
+    throw err;
+  }
+
+  try {
+    await ensureCustomerAccess(normalizedOrderId, customerId);
+  } catch (error) {
+    if (error.status === 404) {
+      return null;
+    }
+    throw error;
+  }
+
+  const deliveries = await getDeliveriesByOrderIds([normalizedOrderId]);
+  if (!deliveries.length) {
+    return null;
+  }
+  const withDrone = deliveries.find(
+    (item) =>
+      item?.drone_id ||
+      (item?.drone_snapshot && typeof item.drone_snapshot === 'object'),
+  );
+  if (withDrone) {
+    return withDrone;
+  }
+  return deliveries[0];
+}
+
+async function getCustomerDeliveryLogs(orderId, customerId, { limit = 50 } = {}) {
+  const delivery = await getCustomerDelivery(orderId, customerId);
+  if (!delivery) {
+    return { deliveryId: null, logs: [] };
+  }
+
+  const parsedLimit = Number(limit);
+  const safeLimit = Number.isFinite(parsedLimit) ? Math.max(1, Math.min(200, parsedLimit)) : 50;
+
+  const { rows } = await pool.query(
+    `
+      SELECT id,
+             drone_id,
+             delivery_id,
+             lat,
+             lng,
+             battery,
+             speed,
+             heading,
+             status,
+             created_at
+      FROM drone_tracking_logs
+      WHERE delivery_id = $1
+      ORDER BY created_at DESC
+      LIMIT $2
+    `,
+    [delivery.id, safeLimit],
+  );
+
+  const logs = rows.map((row) => ({
+    id: row.id,
+    deliveryId: row.delivery_id,
+    droneId: row.drone_id,
+    position:
+      row.lat != null && row.lng != null
+        ? { lat: Number(row.lat), lng: Number(row.lng) }
+        : null,
+    batteryLevel: parseNumeric(row.battery),
+    speed: parseNumeric(row.speed),
+    heading: parseNumeric(row.heading),
+    status: row.status || null,
+    recordedAt: row.created_at,
+  }));
+
+  return {
+    deliveryId: delivery.id,
+    logs,
+  };
+}
+
 module.exports = {
   createDeliveryRecord,
   getDeliveriesByOrderIds,
   assignDelivery,
+  getCustomerDelivery,
+  getCustomerDeliveryLogs,
 };

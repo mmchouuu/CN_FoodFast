@@ -11,6 +11,7 @@ import ordersService from '../services/orders';
 import paymentsService from '../services/payments';
 import cartService from '../services/cart';
 import reviewsService from '../services/reviews';
+import osrmService from '../services/osrm';
 import { searchAddress as geocodeSearch } from '../services/maptiler';
 import { restaurantPlaceholderImage, dishPlaceholderImage } from '../utils/imageHelpers';
 import { formatPaymentMethodLabel, formatPaymentStatusLabel } from '../utils/paymentDisplay';
@@ -170,6 +171,63 @@ const computeShippingFee = (distanceKm) => {
 };
 
 const geocodeCache = new Map();
+const routeDistanceCache = new Map();
+const pendingRouteDistance = new Map();
+
+const encodeDistanceCachePoint = (coord) => {
+    if (!coord) return 'na,na';
+    const lat = Number(coord.lat ?? coord.latitude);
+    const lng = Number(coord.lng ?? coord.lon ?? coord.longitude);
+    const safeLat = Number.isFinite(lat) ? lat.toFixed(5) : 'na';
+    const safeLng = Number.isFinite(lng) ? lng.toFixed(5) : 'na';
+    return `${safeLat},${safeLng}`;
+};
+
+const buildDistanceCacheKey = (origin, destination) => {
+    if (!origin || !destination) {
+        return 'invalid';
+    }
+    return `${encodeDistanceCachePoint(origin)}|${encodeDistanceCachePoint(destination)}`;
+};
+
+const fetchRouteDistanceKm = async (originInput, destinationInput) => {
+    const origin = normaliseCoordinate(originInput);
+    const destination = normaliseCoordinate(destinationInput);
+    if (!origin || !destination) return null;
+    const cacheKey = buildDistanceCacheKey(origin, destination);
+    if (routeDistanceCache.has(cacheKey)) {
+        return routeDistanceCache.get(cacheKey);
+    }
+    if (pendingRouteDistance.has(cacheKey)) {
+        return pendingRouteDistance.get(cacheKey);
+    }
+
+    const requestPromise = (async () => {
+        try {
+            const response = await osrmService.buildRoute(
+                { longitude: origin.lng, latitude: origin.lat },
+                { longitude: destination.lng, latitude: destination.lat },
+                { overview: 'false', annotations: 'duration,distance' },
+            );
+            const route = response?.routes?.[0];
+            const distanceKm =
+                route && typeof route.distance === 'number'
+                    ? route.distance / 1000
+                    : null;
+            routeDistanceCache.set(cacheKey, distanceKm);
+            return distanceKm;
+        } catch (error) {
+            console.warn('[distance] Unable to fetch OSRM route', error?.message || error);
+            routeDistanceCache.set(cacheKey, null);
+            return null;
+        } finally {
+            pendingRouteDistance.delete(cacheKey);
+        }
+    })();
+
+    pendingRouteDistance.set(cacheKey, requestPromise);
+    return requestPromise;
+};
 
 const buildAddressQuery = (address = {}) => {
     const parts = [
@@ -857,59 +915,70 @@ function buildBranchCatalog(brands = []) {
     return { branches, branchProducts };
 }
 
-const attachDistancesToCatalog = (brands = [], customerCoord = null) => {
+const attachDistancesToCatalog = async (brands = [], customerCoord = null) => {
     if (!customerCoord) return brands;
-    return brands.map((brand) => {
+    const enriched = await Promise.all(
+        brands.map(async (brand) => {
             const branchList = Array.isArray(brand.branches) ? brand.branches : [];
-            let minDistance = null;
-            let minDeliveryFee = null;
-            const branchesWithDistance = branchList.map((branch) => {
-                const rawServerDistance = branch.distanceKm ?? branch.distance_km;
-                const serverDistance = Number(rawServerDistance);
-                const hasServerDistance = Number.isFinite(serverDistance);
-                const serverDeliveryFee =
-                    branch.delivery_fee ?? branch.deliveryFee ?? branch.shipping_fee ?? branch.shippingFee;
-            const branchCoord =
-                normaliseCoordinate(branch.location) ||
-                normaliseCoordinate({
-                    lat: branch.latitude ?? branch.lat,
-                    lng: branch.longitude ?? branch.lng ?? branch.lon,
-                });
-            const computedDistance =
-                branchCoord && customerCoord ? haversineDistanceKm(branchCoord, customerCoord) : null;
-            let distanceKm = null;
-            const distances = [serverDistance, computedDistance].filter((d) => Number.isFinite(d));
-            if (distances.length) {
-                distanceKm = Math.min(...distances);
-            }
-            if (Number.isFinite(distanceKm)) {
-                minDistance = minDistance === null ? distanceKm : Math.min(minDistance, distanceKm);
-            }
-            let deliveryFee = null;
-            const serverFeeNumber = Number(serverDeliveryFee);
-            if (Number.isFinite(serverFeeNumber) && serverFeeNumber > 0 && serverFeeNumber < 1000000) {
-                deliveryFee = serverFeeNumber;
-            }
-            if (Number.isFinite(deliveryFee)) {
-                minDeliveryFee =
-                    minDeliveryFee === null ? deliveryFee : Math.min(minDeliveryFee, deliveryFee);
-            }
+            const branchesWithDistance = await Promise.all(
+                branchList.map(async (branch) => {
+                    const rawServerDistance = branch.distanceKm ?? branch.distance_km;
+                    const serverDistance = Number(rawServerDistance);
+                    const branchCoord =
+                        normaliseCoordinate(branch.location) ||
+                        normaliseCoordinate({
+                            lat: branch.latitude ?? branch.lat,
+                            lng: branch.longitude ?? branch.lng ?? branch.lon,
+                        });
+                    let osrmDistance = null;
+                    let straightLineDistance = null;
+                    if (branchCoord && customerCoord) {
+                        straightLineDistance = haversineDistanceKm(branchCoord, customerCoord);
+                        osrmDistance = await fetchRouteDistanceKm(branchCoord, customerCoord);
+                    }
+                    const distanceCandidates = [osrmDistance, serverDistance, straightLineDistance];
+                    const distanceKm =
+                        distanceCandidates.find(
+                            (value) => Number.isFinite(value) && value > 0 && value < 200,
+                        ) ?? null;
+                    const serverDeliveryFee =
+                        branch.delivery_fee ??
+                        branch.deliveryFee ??
+                        branch.shipping_fee ??
+                        branch.shippingFee;
+                    let deliveryFee = null;
+                    const serverFeeNumber = Number(serverDeliveryFee);
+                    if (Number.isFinite(serverFeeNumber) && serverFeeNumber > 0 && serverFeeNumber < 1000000) {
+                        deliveryFee = serverFeeNumber;
+                    }
+                    return {
+                        ...branch,
+                        distanceKm,
+                        deliveryFee,
+                    };
+                }),
+            );
+            const branchDistances = branchesWithDistance
+                .map((branch) => (Number.isFinite(branch.distanceKm) ? branch.distanceKm : null))
+                .filter((value) => Number.isFinite(value) && value >= 0);
+            const branchFees = branchesWithDistance
+                .map((branch) => (Number.isFinite(branch.deliveryFee) ? branch.deliveryFee : null))
+                .filter((value) => Number.isFinite(value) && value > 0);
+            const minDistance =
+                branchDistances.length ? Math.min(...branchDistances) : brand.distanceKm ?? brand.distance_km ?? null;
+            const minDeliveryFee =
+                branchFees.length
+                    ? Math.min(...branchFees)
+                    : brand.deliveryFee ?? brand.delivery_fee ?? null;
             return {
-                ...branch,
-                distanceKm,
-                deliveryFee,
+                ...brand,
+                branches: branchesWithDistance,
+                distanceKm: minDistance,
+                deliveryFee: minDeliveryFee,
             };
-        });
-        return {
-            ...brand,
-            branches: branchesWithDistance,
-            distanceKm: minDistance !== null ? minDistance : brand.distanceKm ?? brand.distance_km ?? null,
-            deliveryFee:
-                minDeliveryFee !== null
-                    ? minDeliveryFee
-                    : brand.deliveryFee ?? brand.delivery_fee ?? null,
-        };
-    });
+        }),
+    );
+    return enriched;
 };
 
 const adaptAddressFromApi = (address) => {
@@ -1617,7 +1686,7 @@ export const AppContextProvider = ({ children }) => {
                 ? restaurantData.map(adaptRestaurantFromApi).filter(Boolean)
                 : [];
             const adaptedRestaurants = coord
-                ? attachDistancesToCatalog(adaptedRestaurantsRaw, coord)
+                ? await attachDistancesToCatalog(adaptedRestaurantsRaw, coord)
                 : adaptedRestaurantsRaw;
 
             const { branches: flattenedBranches, branchProducts } = buildBranchCatalog(adaptedRestaurants);
@@ -2543,35 +2612,46 @@ const [restaurantProfile, setRestaurantProfile] = useState(() => {
 
             let minDistanceKm = null;
             const feeCandidates = [];
-            candidateBranchIds.forEach((branchId) => {
-                const branchEntry = restaurants.find((entry) => {
-                    const candidate = entry.branchId || entry.id;
-                    return candidate && String(candidate) === String(branchId);
-                });
-                const distances = [];
-                const serverDistance = branchEntry ? Number(branchEntry.distanceKm) : null;
-                if (Number.isFinite(serverDistance) && serverDistance > 0 && serverDistance < 200) {
-                    distances.push(serverDistance);
-                }
-                const serverDeliveryFee =
-                    branchEntry?.deliveryFee ?? branchEntry?.delivery_fee ?? null;
-                const branchCoord =
-                    normaliseCoordinate(branchEntry?.location) ||
-                    normaliseCoordinate({
-                        lat: branchEntry?.latitude,
-                        lng: branchEntry?.longitude,
+
+            const branchDistanceResults = await Promise.all(
+                candidateBranchIds.map(async (branchId) => {
+                    const branchEntry = restaurants.find((entry) => {
+                        const candidate = entry.branchId || entry.id;
+                        return candidate && String(candidate) === String(branchId);
                     });
-                if (branchCoord && customerCoord) {
-                        const computed = haversineDistanceKm(branchCoord, customerCoord);
-                    if (Number.isFinite(computed) && computed > 0 && computed < 200) {
-                        distances.push(computed);
+                    if (!branchEntry) {
+                        return { branchDistance: null, branchFee: null };
                     }
-                }
-                const branchDistance = distances.length ? Math.min(...distances) : null;
-                let branchFee = null;
-                if (Number.isFinite(serverDeliveryFee) && serverDeliveryFee > 0 && serverDeliveryFee < 1000000) {
-                    branchFee = serverDeliveryFee;
-                }
+                    const serverDistance = Number(branchEntry.distanceKm);
+                    const serverDeliveryFee =
+                        branchEntry?.deliveryFee ?? branchEntry?.delivery_fee ?? null;
+                    const branchCoord =
+                        normaliseCoordinate(branchEntry?.location) ||
+                        normaliseCoordinate({
+                            lat: branchEntry?.latitude,
+                            lng: branchEntry?.longitude,
+                        });
+                    let osrmDistance = null;
+                    let fallbackDistance = null;
+                    if (branchCoord && customerCoord) {
+                        fallbackDistance = haversineDistanceKm(branchCoord, customerCoord);
+                        osrmDistance = await fetchRouteDistanceKm(branchCoord, customerCoord);
+                    }
+                    const distanceCandidates = [osrmDistance, serverDistance, fallbackDistance];
+                    const branchDistance =
+                        distanceCandidates.find(
+                            (value) => Number.isFinite(value) && value > 0 && value < 200,
+                        ) ?? null;
+                    let branchFee = null;
+                    const serverFeeNumber = Number(serverDeliveryFee);
+                    if (Number.isFinite(serverFeeNumber) && serverFeeNumber > 0 && serverFeeNumber < 1000000) {
+                        branchFee = serverFeeNumber;
+                    }
+                    return { branchDistance, branchFee };
+                }),
+            );
+
+            branchDistanceResults.forEach(({ branchDistance, branchFee }) => {
                 if (Number.isFinite(branchDistance)) {
                     minDistanceKm =
                         minDistanceKm === null

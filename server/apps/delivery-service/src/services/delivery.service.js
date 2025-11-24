@@ -7,7 +7,20 @@ const parseLimit = (value) => {
   return Math.min(parsed, 100);
 };
 
-const ACTIVE_STATUSES = ['pending', 'assigned', 'flying', 'arriving'];
+const ACTIVE_STATUSES = ['pending', 'assigned', 'flying', 'arriving', 'to_restaurant', 'to_customer', 'returning'];
+
+const parseMaybeJson = (value) => {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'object') return value;
+  if (typeof value === 'string') {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  return null;
+};
 
 const mapDeliveryRow = (row) => {
   if (!row) return null;
@@ -25,9 +38,9 @@ const mapDeliveryRow = (row) => {
     progress_percent: safeNumber(row.progress_percent) ?? 0,
     estimated_time_sec: safeNumber(row.estimated_time_sec),
     distance_meters: safeNumber(row.distance_meters),
-    current_position: row.current_position,
-    delivery_address: row.delivery_address,
-    branch_location: row.branch_location,
+    current_position: parseMaybeJson(row.current_position),
+    delivery_address: parseMaybeJson(row.delivery_address),
+    branch_location: parseMaybeJson(row.branch_location),
     pickup_at: row.pickup_at,
     delivered_at: row.delivered_at,
     created_at: row.created_at,
@@ -38,6 +51,7 @@ const mapDeliveryRow = (row) => {
           code: row.drone_code,
           battery_level: safeNumber(row.drone_battery_level),
           status: row.drone_status,
+          last_known_position: parseMaybeJson(row.drone_last_known_position),
           image_url: row.drone_image_url,
           hub: row.hub_id
             ? {
@@ -81,6 +95,7 @@ async function listDeliveries({ limit, status } = {}) {
       dr.image_url AS drone_image_url,
       dr.battery_level AS drone_battery_level,
       dr.status AS drone_status,
+      dr.last_known_position AS drone_last_known_position,
       dr.hub_id,
       h.name AS hub_name,
       h.location AS hub_location
