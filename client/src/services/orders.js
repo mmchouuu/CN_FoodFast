@@ -4,6 +4,11 @@ const basePath = '/api/orders';
 const ownerBasePath = '/owner/orders';
 const customerBasePath = '/customer/orders';
 
+const normalizeCartResponse = (payload = {}) => ({
+  cartItems: payload.cartItems || payload.cart_items || {},
+  cartItemDetails: payload.cartItemDetails || payload.cart_item_details || {},
+  updatedAt: payload.updatedAt || payload.updated_at || null,
+});
 
 const unwrapCollection = (payload) => {
   if (Array.isArray(payload)) return payload;
@@ -270,6 +275,31 @@ export async function updateOwnerOrderStatus(orderId, payload) {
   return data;
 }
 
+export async function fetchCustomerCart() {
+  try {
+    const { data } = await api.get(`${customerBasePath}/cart`);
+    if (!data) {
+      return normalizeCartResponse();
+    }
+    return normalizeCartResponse(data);
+  } catch (error) {
+    if (error?.response?.status === 404) {
+      return normalizeCartResponse();
+    }
+    throw error;
+  }
+}
+
+export async function saveCustomerCart(payload = {}) {
+  const { data } = await api.put(`${customerBasePath}/cart`, payload);
+  return normalizeCartResponse(data || {});
+}
+
+export async function clearCustomerCart() {
+  const { data } = await api.delete(`${customerBasePath}/cart`);
+  return normalizeCartResponse(data || {});
+}
+
 
 const ordersService = {
   list: listOrders,
@@ -278,8 +308,9 @@ const ordersService = {
   createOrder,
   cancelOrder,
   confirmOrder,
-
-
+  fetchCustomerCart,
+  saveCustomerCart,
+  clearCustomerCart,
 };
 
 export default ordersService;

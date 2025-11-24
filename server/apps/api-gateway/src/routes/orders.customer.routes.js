@@ -67,6 +67,9 @@ const ensureCustomerIdentity = (req, res, next) => {
 
 router.post('/', ensureCustomerIdentity, customerOrdersProxy);
 router.get('/', ensureCustomerIdentity, customerOrdersProxy);
+router.get('/cart', ensureCustomerIdentity, customerOrdersProxy);
+router.put('/cart', ensureCustomerIdentity, customerOrdersProxy);
+router.delete('/cart', ensureCustomerIdentity, customerOrdersProxy);
 router.get('/:id', ensureCustomerIdentity, customerOrdersProxy);
 router.post('/:id/cancel', ensureCustomerIdentity, customerOrdersProxy);
 router.post('/:id/complete', ensureCustomerIdentity, customerOrdersProxy);

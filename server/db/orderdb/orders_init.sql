@@ -238,7 +238,19 @@ CREATE TABLE IF NOT EXISTS idempotency_keys (
 CREATE INDEX IF NOT EXISTS idx_idem_scope ON idempotency_keys (scope, order_id);
 
 -- =========================================================
--- 8) OUTBOX (event-driven)
+-- 8) USER CART SNAPSHOTS
+-- =========================================================
+CREATE TABLE IF NOT EXISTS user_carts (
+    user_id UUID PRIMARY KEY,
+    cart_items JSONB NOT NULL DEFAULT '{}'::jsonb,
+    cart_item_details JSONB NOT NULL DEFAULT '{}'::jsonb,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_carts_updated_at ON user_carts (updated_at DESC);
+
+-- =========================================================
+-- 9) OUTBOX (event-driven)
 -- =========================================================
 CREATE TABLE IF NOT EXISTS outbox (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid (),
@@ -256,7 +268,7 @@ CREATE INDEX IF NOT EXISTS idx_outbox_agg ON outbox (aggregate_type, aggregate_i
 CREATE INDEX IF NOT EXISTS idx_outbox_processed ON outbox (processed);
 
 -- =========================================================
--- 9) DELIVERIES
+-- 10) DELIVERIES
 -- =========================================================
 
 -- CREATE TABLE IF NOT EXISTS deliveries (
@@ -277,7 +289,7 @@ CREATE INDEX IF NOT EXISTS idx_outbox_processed ON outbox (processed);
 -- );
 
 -- ========================================================
--- 10) REFUND
+-- 11) REFUND
 -- ========================================================
 
 CREATE TABLE IF NOT EXISTS order_refund_requests (

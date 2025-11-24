@@ -67,9 +67,26 @@ const Home = () => {
   }, [restaurants, getDishesByRestaurant, products]);
 
   const highlightedDishes = useMemo(() => {
-    return [...products]
-      .sort((a, b) => (b.reviewCount || 0) - (a.reviewCount || 0))
-      .slice(0, 6);
+    const branchGroups = new Map();
+    products.forEach((product) => {
+      if (!product?.branchId) return;
+      if (!branchGroups.has(product.branchId)) {
+        branchGroups.set(product.branchId, []);
+      }
+      branchGroups.get(product.branchId).push(product);
+    });
+
+    const picks = [];
+    const branchIds = Array.from(branchGroups.keys()).slice(0, 3);
+    branchIds.forEach((branchId) => {
+      const dishes = branchGroups.get(branchId) || [];
+      const topDishes = [...dishes]
+        .sort((a, b) => (b.reviewCount || b.rating || 0) - (a.reviewCount || a.rating || 0))
+        .slice(0, 3);
+      topDishes.forEach((dish) => picks.push(dish));
+    });
+
+    return picks;
   }, [products]);
 
   return (

@@ -1,0 +1,123 @@
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Client AppContext
+    participant Adm as Admin/Owner Portal
+    participant Sim as Drone Simulator
+    participant G as API Gateway
+    participant U as User Service
+    participant P as Product Service
+    participant O as Order Service
+    participant Pay as Payment Service
+    participant Ext as Stripe/MoMo
+    participant MQ as Message Broker
+    participant D as Delivery Service
+    participant Set as Settlement Engine
+    participant E as Email Service
+
+    Note over C,O: Đặt món & thanh toán
+
+    C->>G: POST /auth/login
+    G->>U: Xác thực + cấp token
+    U-->>G: JWT + hồ sơ
+    G-->>C: Session
+
+    C->>G: GET /restaurants,/products
+    G->>P: Lấy catalog/branch
+    P-->>G: Menu + giá
+    G-->>C: Hiển thị
+
+    C->>G: POST /customer/orders (cart,address,method)
+    G->>O: Forward + x-user-id
+    O->>P: Quote giá cuối
+    P-->>O: Totals
+    O->>O: Lưu order status=pending
+    O-->>G: OrderId
+    G-->>C: Hiển thị pending
+    O->>MQ: order.created
+
+    alt Thanh toán COD
+        O->>O: status=confirmed, payment_status=unpaid
+        O->>MQ: order.confirmed
+    else Thanh toán Online
+        C->>G: POST /payments {orderId, method}
+        G->>Pay: Khởi tạo thanh toán
+        Pay->>Ext: Create PaymentIntent
+        Ext-->>Pay: client_secret
+        Pay-->>G: client_secret/checkout_url
+        G-->>C: Render UI thanh toán
+        Note over Ext,Pay: Customer hoàn tất → webhook
+        Ext-->>Pay: intent.succeeded/failed
+        alt Success
+            Pay->>MQ: payment.succeeded {orderId}
+        else Failed
+            Pay->>MQ: payment.failed {orderId}
+        end
+        MQ-->>O: Payment events
+        O->>O: Update order status/payment_status
+        O->>MQ: order.updated
+    end
+
+    MQ-->>D: order.created/order.confirmed
+    D->>P: Lấy branch/hub
+    D->>O: Đọc shipping snapshot
+    D->>D: hubSelector + routeBuilder + create delivery
+    D->>MQ: delivery.status (preparing→delivering→completed)
+
+    C->>G: GET /api/deliveries/orders/:id
+    G->>D: Lấy trạng thái/bản đồ
+    D-->>G: Delivery snapshot
+    G-->>C: UI tracking real time
+
+    Note over C,O,Pay: Khách hủy đơn
+
+    C->>G: POST /customer/orders/:id/cancel
+    G->>O: Validate + cancel request
+    O->>O: status=cancelled
+    O->>MQ: order.cancelled
+    MQ-->>D: Huỷ giao hàng/thu hồi drone
+    alt Đã thanh toán online
+        O->>Pay: internal refund request
+        Pay->>Ext: Refund PaymentIntent
+        Ext-->>Pay: refund result
+        Pay->>MQ: refund.completed/refund.failed
+        MQ-->>O: cập nhật payment_status
+    end
+
+    Note over Adm,Pay: Admin/Owner tạo refund thủ công
+
+    Adm->>G: POST /admin/payments/:id/refund {amount,reason}
+    G->>Pay: Forward request (auth)
+    Pay->>Ext: refund API
+    Ext-->>Pay: refund succeeded
+    Pay->>MQ: RefundCompleted event
+    MQ-->>O: update order.payment_status=refunded
+    Pay->>Set: recordRefund + settlement adjustment
+
+    Note over Pay,Set: Settlement & Payout
+
+    loop Cuối ngày
+        Pay->>Set: Aggregate payments by restaurant/branch
+        Set->>Set: Tính gross/net/refund/tax
+        Set->>Adm: POST /owner/payouts (API Gateway)
+        Adm-->>Set: Confirm banking info
+        Set->>Ext: Init bank transfer (nếu có)
+        Set->>MQ: payout.created/payout.completed
+    end
+
+    Note over Sim,D: Drone simulator & telemetry
+
+    Sim->>D: GET /api/deliveries (đang delivering)
+    D-->>Sim: Danh sách delivery + hubs
+    loop mỗi chu kỳ
+        Sim->>D: POST /drones/:id/telemetry {lat,lng,battery,status}
+        D->>D: telemetryProcessor cập nhật vị trí
+        D->>MQ: delivery.telemetry + delivery.status nếu đổi bước
+        MQ-->>C: (qua socket layer) cập nhật realtime
+    end
+
+    Note over E: Email/SMS
+
+    MQ-->>E: order.updated/payment/refund/payout events
+    E-->>C: Email xác nhận, huỷ, hoàn tiền, payout
+```

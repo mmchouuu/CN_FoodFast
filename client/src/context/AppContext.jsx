@@ -2,8 +2,17 @@
 import { useNavigate } from 'react-router-dom';
 // import React, { createContext, useState, useContext, useEffect } from 'react';
 
-import React, { createContext, useState, useContext, useEffect, useCallback, useMemo } from 'react'
+import React, {
+    createContext,
+    useState,
+    useContext,
+    useEffect,
+    useCallback,
+    useMemo,
+    useRef,
+} from 'react';
 
+import mapConfig from '../config/mapConfig';
 
 import toast from 'react-hot-toast';
 import catalogService from '../services/catalog';
@@ -77,6 +86,194 @@ const ACTIVE_ORDER_REFRESH_INTERVAL = 15000;
 const toNumberOr = (value, fallback = 0) => {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const toNullableNumber = (value) => {
+    if (value === null || value === undefined) return null;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+};
+
+const normaliseCoordinate = (value) => {
+    if (!value) return null;
+    const resolvePair = (latCandidate, lngCandidate) => {
+        const lat = toNullableNumber(latCandidate);
+        const lng = toNullableNumber(lngCandidate);
+        return lat !== null && lng !== null ? { lat, lng } : null;
+    };
+
+    if (Array.isArray(value)) {
+        if (value.length >= 2) {
+            return (
+                resolvePair(value[1], value[0]) ||
+                resolvePair(value[0], value[1])
+            );
+        }
+        return null;
+    }
+
+    if (typeof value === 'object') {
+        if (value.location) {
+            return normaliseCoordinate(value.location);
+        }
+        return (
+            resolvePair(
+                value.lat ?? value.latitude ?? value.latDegrees,
+                value.lng ?? value.lon ?? value.longitude ?? value.longDegrees,
+            ) ||
+            resolvePair(value[1], value[0])
+        );
+    }
+
+    if (typeof value === 'string') {
+        try {
+            const parsed = JSON.parse(value);
+            return normaliseCoordinate(parsed);
+        } catch {
+            const parts = value.split(',').map((part) => part.trim());
+            if (parts.length >= 2) {
+                return resolvePair(parts[0], parts[1]);
+            }
+        }
+    }
+
+    return null;
+};
+
+const haversineDistanceKm = (a, b) => {
+    if (!a || !b) return null;
+    const { lat: lat1, lng: lng1 } = a;
+    const { lat: lat2, lng: lng2 } = b;
+    if (
+        lat1 === null ||
+        lat2 === null ||
+        lng1 === null ||
+        lng2 === null
+    ) {
+        return null;
+    }
+    const toRad = (deg) => (deg * Math.PI) / 180;
+    const dLat = toRad(lat2 - lat1);
+    const dLng = toRad(lng2 - lng1);
+    const radLat1 = toRad(lat1);
+    const radLat2 = toRad(lat2);
+    const hav =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(radLat1) * Math.cos(radLat2) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+    const c = 2 * Math.atan2(Math.sqrt(hav), Math.sqrt(1 - hav));
+    return 6371 * c;
+};
+
+const CART_ITEMS_STORAGE_KEY = 'ff_cart_items';
+const CART_ITEM_DETAILS_STORAGE_KEY = 'ff_cart_item_details';
+const CART_UPDATED_AT_STORAGE_KEY = 'ff_cart_updated_at';
+
+const safeParseJson = (raw, fallback = {}) => {
+    if (!raw || typeof raw !== 'string') {
+        return fallback;
+    }
+    try {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') {
+            return parsed;
+        }
+        return fallback;
+    } catch {
+        return fallback;
+    }
+};
+
+const readPersistedCartState = () => {
+    if (typeof window === 'undefined' || typeof localStorage === 'undefined') {
+        return { items: {}, details: {}, updatedAt: 0 };
+    }
+    try {
+        const itemsRaw = localStorage.getItem(CART_ITEMS_STORAGE_KEY);
+        const detailsRaw = localStorage.getItem(CART_ITEM_DETAILS_STORAGE_KEY);
+        const updatedRaw = localStorage.getItem(CART_UPDATED_AT_STORAGE_KEY);
+        const items = safeParseJson(itemsRaw, {});
+        const details = safeParseJson(detailsRaw, {});
+        const numericTs = updatedRaw ? Number(updatedRaw) : 0;
+        const parsedTs = updatedRaw && Number.isNaN(numericTs)
+            ? Date.parse(updatedRaw)
+            : numericTs;
+        return {
+            items,
+            details,
+            updatedAt: Number.isFinite(parsedTs) ? parsedTs : 0,
+        };
+    } catch (error) {
+        console.warn('Failed to load cached cart from storage', error);
+        return { items: {}, details: {}, updatedAt: 0 };
+    }
+};
+
+const normaliseCartItemsSnapshot = (value) => {
+    if (!value || typeof value !== 'object') {
+        return {};
+    }
+    const normalized = {};
+    for (const [productId, variantMap] of Object.entries(value)) {
+        if (!variantMap || typeof variantMap !== 'object') continue;
+        const safeVariants = {};
+        for (const [cartKey, quantity] of Object.entries(variantMap)) {
+            const normalizedKey = String(cartKey || '').trim();
+            const parsedQty = Number(quantity);
+            if (!normalizedKey.length || !Number.isFinite(parsedQty) || parsedQty <= 0) {
+                continue;
+            }
+            safeVariants[normalizedKey] = parsedQty;
+        }
+        if (Object.keys(safeVariants).length) {
+            normalized[String(productId)] = safeVariants;
+        }
+    }
+    return normalized;
+};
+
+const normaliseCartItemDetailsSnapshot = (value) => {
+    if (!value || typeof value !== 'object') {
+        return {};
+    }
+    const normalized = {};
+    for (const [key, detail] of Object.entries(value)) {
+        const safeKey = String(key || '').trim();
+        if (!safeKey.length) continue;
+        if (detail && typeof detail === 'object') {
+            normalized[safeKey] = { ...detail };
+        }
+    }
+    return normalized;
+};
+
+const cartHasContent = (items = {}, details = {}) => {
+    if (items && typeof items === 'object') {
+        for (const variants of Object.values(items)) {
+            if (variants && typeof variants === 'object' && Object.keys(variants).length) {
+                return true;
+            }
+        }
+    }
+    if (details && typeof details === 'object' && Object.keys(details).length) {
+        return true;
+    }
+    return false;
+};
+
+const parseCartTimestamp = (value) => {
+    if (!value && value !== 0) return 0;
+    if (typeof value === 'number' && Number.isFinite(value)) {
+        return value;
+    }
+    if (typeof value === 'string' && value.trim().length) {
+        const parsed = Number(value);
+        if (Number.isFinite(parsed)) {
+            return parsed;
+        }
+        const iso = Date.parse(value);
+        return Number.isNaN(iso) ? 0 : iso;
+    }
+    return 0;
 };
 
 const pickBooleanFlag = (...candidates) => {
@@ -320,8 +517,9 @@ const adaptOptionGroupFromApi = (group) => {
     };
 };
 
-const adaptRestaurantFromApi = (restaurant) => {
+const adaptRestaurantFromApi = (restaurant, options = {}) => {
     if (!restaurant) return null;
+    const customerCoordinate = options.customerCoordinate || null;
     const images = ensureArray(restaurant.images).filter(Boolean);
     const heroImage = images[0] || restaurant.heroImage || restaurant.coverImage || restaurantPlaceholderImage;
     const coverImage = images[1] || heroImage;
@@ -333,6 +531,8 @@ const adaptRestaurantFromApi = (restaurant) => {
         .map((item) => adaptProductFromApi(item))
         .filter(Boolean);
     const popularIds = restaurantProducts.filter((item) => item.popular).map((item) => item._id);
+
+    let nearestBranchDistance = null;
 
     const branchList = Array.isArray(restaurant.branches)
         ? restaurant.branches.map((branch) => {
@@ -391,6 +591,31 @@ const adaptRestaurantFromApi = (restaurant) => {
                 branch.is_open ??
                 (statusText ? statusText !== 'closed' && statusText !== 'inactive' : null);
 
+            const branchCoordinate =
+                normaliseCoordinate(branch.location) ||
+                normaliseCoordinate(branch.coordinates) ||
+                normaliseCoordinate({
+                    lat: branch.latitude ?? branch.lat,
+                    lng: branch.longitude ?? branch.lng ?? branch.lon,
+                });
+
+            const computedDistance =
+                customerCoordinate && branchCoordinate
+                    ? haversineDistanceKm(branchCoordinate, customerCoordinate)
+                    : null;
+            if (computedDistance !== null) {
+                nearestBranchDistance =
+                    nearestBranchDistance === null
+                        ? computedDistance
+                        : Math.min(nearestBranchDistance, computedDistance);
+            }
+            const fallbackDistance = toNumberOr(
+                branch.distance_km,
+                toNumberOr(restaurant.distance_km, null),
+            );
+            const branchDistanceKm =
+                (computedDistance !== null ? computedDistance : fallbackDistance) ?? 0;
+
             return {
                 id: branch.id,
                 name: branch.name || restaurant.name || 'Branch',
@@ -410,17 +635,23 @@ const adaptRestaurantFromApi = (restaurant) => {
                 categoryAssignments: branchCategoriesRaw,
                 combos: branchCombos,
                 tags: Array.from(new Set([restaurant.cuisine, ...branchCategoryNames].filter(Boolean))),
-                distanceKm: toNumberOr(branch.distance_km, toNumberOr(restaurant.distance_km, 0)),
+                distanceKm: branchDistanceKm,
+                coordinate: branchCoordinate,
             };
         })
         : [];
+
+    const resolvedDistanceKm =
+        nearestBranchDistance !== null
+            ? nearestBranchDistance
+            : toNumberOr(restaurant.distance_km, branchList[0]?.distanceKm ?? 0);
 
     return {
         id: restaurant.id,
         name: restaurant.name || 'Restaurant',
         description: restaurant.description || '',
         address: restaurant.address || restaurant.description || 'Information is updating.',
-        distanceKm: toNumberOr(restaurant.distance_km, 0),
+        distanceKm: resolvedDistanceKm,
         rating: toNumberOr(restaurant.avg_branch_rating, 0),
         reviewCount: toNumberOr(restaurant.total_branch_ratings, 0),
         heroImage,
@@ -699,6 +930,13 @@ const adaptAddressFromApi = (address) => {
         address.is_primary ??
         false;
 
+    const coordinate =
+        normaliseCoordinate(address.location) ||
+        normaliseCoordinate({
+            lat: address.latitude ?? address.lat,
+            lng: address.longitude ?? address.lng ?? address.lon,
+        });
+
     return {
         id: address.id,
         label: address.label || 'Address',
@@ -710,6 +948,7 @@ const adaptAddressFromApi = (address) => {
         city: address.city || '',
         instructions: address.instructions || '',
         isDefault: Boolean(primaryFlag),
+        location: coordinate,
         createdAt: address.createdAt || address.created_at || null,
         updatedAt: address.updatedAt || address.updated_at || null,
     };
@@ -1186,6 +1425,8 @@ export const AppContextProvider = ({ children }) => {
     const [ordersLoading, setOrdersLoading] = useState(false);
     const [notifications, setNotifications] = useState(notificationFeed);
     const [addresses, setAddresses] = useState([]);
+    const geocodeCacheRef = useRef(new Map());
+    const [selectedAddressCoordinate, setSelectedAddressCoordinate] = useState(null);
 
     const [momoWallets, setMomoWallets] = useState([]);
     const [cardAccounts, setCardAccounts] = useState([]);
@@ -1213,9 +1454,48 @@ export const AppContextProvider = ({ children }) => {
             return false;
         }
     });
+    const cartBootstrapRef = useRef(null);
+    if (!cartBootstrapRef.current) {
+        const snapshot = readPersistedCartState();
+        cartBootstrapRef.current = {
+            items: normaliseCartItemsSnapshot(snapshot.items),
+            details: normaliseCartItemDetailsSnapshot(snapshot.details),
+            updatedAt: snapshot.updatedAt || 0,
+        };
+    }
+
     const [searchQuery, setSearchQuery] = useState("");
-    const [cartItems, setCartItems] = useState({});
-    const [cartItemDetails, setCartItemDetails] = useState({});
+    const [cartItems, setCartItems] = useState(() => cartBootstrapRef.current.items);
+    const [cartItemDetails, setCartItemDetails] = useState(() => cartBootstrapRef.current.details);
+    const cartVersionRef = useRef(cartBootstrapRef.current.updatedAt || 0);
+    const cartStateRef = useRef({
+        items: cartBootstrapRef.current.items,
+        details: cartBootstrapRef.current.details,
+    });
+    const cartSyncRef = useRef({
+        lastUserId: null,
+        remoteHydrated: false,
+        skipNextSync: false,
+    });
+
+    useEffect(() => {
+        cartStateRef.current = {
+            items: cartItems,
+            details: cartItemDetails,
+        };
+    }, [cartItems, cartItemDetails]);
+
+    useEffect(() => {
+        const nextVersion = Date.now();
+        cartVersionRef.current = nextVersion;
+        try {
+            localStorage.setItem(CART_ITEMS_STORAGE_KEY, JSON.stringify(cartItems));
+            localStorage.setItem(CART_ITEM_DETAILS_STORAGE_KEY, JSON.stringify(cartItemDetails));
+            localStorage.setItem(CART_UPDATED_AT_STORAGE_KEY, String(nextVersion));
+        } catch (error) {
+            console.warn('Unable to persist cart cache', error);
+        }
+    }, [cartItems, cartItemDetails]);
     const currency = 'VND';
     const delivery_charges = 15000;
 
@@ -1263,6 +1543,77 @@ export const AppContextProvider = ({ children }) => {
         },
         [restaurants, restaurantBrands],
     );
+
+    const geocodeAddress = useCallback(
+        async (address = {}) => {
+            const parts = [
+                address.street,
+                address.ward,
+                address.district,
+                address.city,
+                'Vietnam',
+            ]
+                .map((part) => (part ? String(part).trim() : ''))
+                .filter(Boolean);
+            if (!parts.length || !mapConfig.key) {
+                return null;
+            }
+            const query = parts.join(', ');
+            const cacheKey = query.toLowerCase();
+            if (geocodeCacheRef.current.has(cacheKey)) {
+                return geocodeCacheRef.current.get(cacheKey);
+            }
+            try {
+                const encoded = encodeURIComponent(query);
+                const url = `${mapConfig.geocodingBase}/${encoded}.json?key=${mapConfig.key}`;
+                const response = await fetch(url);
+                if (!response.ok) {
+                    throw new Error(`geocode failed (${response.status})`);
+                }
+                const data = await response.json();
+                const feature = Array.isArray(data?.features) ? data.features[0] : null;
+                const center = Array.isArray(feature?.center) ? feature.center : null;
+                const coordinate =
+                    center && center.length >= 2
+                        ? { lng: Number(center[0]), lat: Number(center[1]) }
+                        : null;
+                geocodeCacheRef.current.set(cacheKey, coordinate);
+                return coordinate;
+            } catch (error) {
+                console.warn('[AppContext] geocodeAddress failed:', query, error?.message || error);
+                geocodeCacheRef.current.set(cacheKey, null);
+                return null;
+            }
+        },
+        [],
+    );
+
+    useEffect(() => {
+        let cancelled = false;
+        const syncCoordinate = async () => {
+            if (!selectedAddress) {
+                if (!cancelled) {
+                    setSelectedAddressCoordinate(null);
+                }
+                return;
+            }
+            const inlineCoordinate = normaliseCoordinate(selectedAddress.location);
+            if (inlineCoordinate) {
+                if (!cancelled) {
+                    setSelectedAddressCoordinate(inlineCoordinate);
+                }
+                return;
+            }
+            const resolved = await geocodeAddress(selectedAddress);
+            if (!cancelled) {
+                setSelectedAddressCoordinate(resolved);
+            }
+        };
+        syncCoordinate();
+        return () => {
+            cancelled = true;
+        };
+    }, [selectedAddress, geocodeAddress]);
 
     const resolveBranchAvailabilityForProduct = useCallback(
         (product, detail = null, branchIdOverride = null) => {
@@ -1329,6 +1680,8 @@ export const AppContextProvider = ({ children }) => {
 
         setCatalogLoading(true);
         setCatalogError(null);
+        const customerCoordinate =
+            selectedAddressCoordinate || normaliseCoordinate(selectedAddress?.location);
 
         try {
             const [restaurantData, productData] = await Promise.all([
@@ -1341,7 +1694,9 @@ export const AppContextProvider = ({ children }) => {
             }
 
             const adaptedRestaurants = Array.isArray(restaurantData)
-                ? restaurantData.map(adaptRestaurantFromApi).filter(Boolean)
+                ? restaurantData
+                    .map((item) => adaptRestaurantFromApi(item, { customerCoordinate }))
+                    .filter(Boolean)
                 : [];
 
             const { branches: flattenedBranches, branchProducts } = buildBranchCatalog(adaptedRestaurants);
@@ -1363,7 +1718,7 @@ export const AppContextProvider = ({ children }) => {
             setCatalogError(error?.message || 'Unable to load restaurant catalog.');
 
             const fallbackBrands = FALLBACK_RESTAURANTS
-                .map(adaptRestaurantFromApi)
+                .map((brand) => adaptRestaurantFromApi(brand, { customerCoordinate }))
                 .filter(Boolean);
             const { branches: fallbackBranchesRaw, branchProducts: fallbackBranchProductsRaw } =
                 buildBranchCatalog(fallbackBrands);
@@ -1428,7 +1783,7 @@ export const AppContextProvider = ({ children }) => {
                 setCatalogLoading(false);
             }
         }
-    }, []);
+    }, [selectedAddress?.location, selectedAddressCoordinate]);
 
     useEffect(() => {
         const controller = new AbortController();
@@ -1476,26 +1831,136 @@ export const AppContextProvider = ({ children }) => {
         }
     });
     const authProfileId = authProfile?.id || null;
-const [restaurantProfile, setRestaurantProfile] = useState(() => {
-    try {
-        const raw = JSON.parse(localStorage.getItem('restaurant_profile') || 'null');
-        if (!raw) return null;
-        if (raw.permissions) return raw;
-        const hydrated = buildRestaurantSession({ account: raw }) || buildRestaurantSession({ owner: raw });
-        // Ensure restaurantId fallback from scope if missing
-        if (hydrated && !hydrated.restaurantId) {
-            const scopeIds = Array.isArray(hydrated.scope?.restaurantIds)
-                ? hydrated.scope.restaurantIds
-                : [];
-            if (scopeIds.length) {
-                hydrated.restaurantId = scopeIds[0];
-            }
+
+    useEffect(() => {
+        if (!authProfileId) {
+            cartSyncRef.current = {
+                lastUserId: null,
+                remoteHydrated: false,
+                skipNextSync: false,
+            };
+            return;
         }
-        return hydrated || raw;
-    } catch {
-        return null;
-    }
-});
+        if (cartSyncRef.current.lastUserId !== authProfileId) {
+            cartSyncRef.current.lastUserId = authProfileId;
+            cartSyncRef.current.remoteHydrated = false;
+            cartSyncRef.current.skipNextSync = false;
+        }
+    }, [authProfileId]);
+
+    useEffect(() => {
+        if (!authToken || !authProfileId) {
+            return;
+        }
+        if (cartSyncRef.current.remoteHydrated && cartSyncRef.current.lastUserId === authProfileId) {
+            return;
+        }
+
+        let cancelled = false;
+
+        const hydrateCartFromServer = async () => {
+            try {
+                const remoteCart = await ordersService.fetchCustomerCart?.();
+                if (cancelled || !remoteCart) {
+                    return;
+                }
+                const remoteItems = normaliseCartItemsSnapshot(
+                    remoteCart.cartItems || remoteCart.cart_items,
+                );
+                const remoteDetails = normaliseCartItemDetailsSnapshot(
+                    remoteCart.cartItemDetails || remoteCart.cart_item_details,
+                );
+                const remoteUpdatedAt = parseCartTimestamp(
+                    remoteCart.updatedAt || remoteCart.updated_at,
+                );
+                const localUpdatedAt = cartVersionRef.current || 0;
+                if (!cartHasContent(remoteItems, remoteDetails)) {
+                    return;
+                }
+                const hasLocalCart = cartHasContent(
+                    cartStateRef.current.items,
+                    cartStateRef.current.details,
+                );
+                if (hasLocalCart && remoteUpdatedAt && remoteUpdatedAt <= localUpdatedAt) {
+                    return;
+                }
+                cartSyncRef.current.skipNextSync = true;
+                cartVersionRef.current = remoteUpdatedAt || Date.now();
+                setCartItems(remoteItems);
+                setCartItemDetails(remoteDetails);
+            } catch (error) {
+                console.warn('Failed to hydrate cart from server', error);
+            } finally {
+                if (!cancelled) {
+                    cartSyncRef.current.remoteHydrated = true;
+                }
+            }
+        };
+
+        hydrateCartFromServer();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [authToken, authProfileId]);
+
+    useEffect(() => {
+        if (!authToken || !authProfileId) {
+            return;
+        }
+        if (!cartSyncRef.current.remoteHydrated) {
+            return;
+        }
+        if (cartSyncRef.current.skipNextSync) {
+            cartSyncRef.current.skipNextSync = false;
+            return;
+        }
+
+        let cancelled = false;
+
+        const persistCartToServer = async () => {
+            try {
+                if (!cartHasContent(cartItems, cartItemDetails)) {
+                    await ordersService.clearCustomerCart?.();
+                    return;
+                }
+                await ordersService.saveCustomerCart({
+                    cartItems,
+                    cartItemDetails,
+                });
+            } catch (error) {
+                if (!cancelled) {
+                    console.warn('Failed to sync cart to server', error);
+                }
+            }
+        };
+
+        persistCartToServer();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [cartItems, cartItemDetails, authToken, authProfileId]);
+    const [restaurantProfile, setRestaurantProfile] = useState(() => {
+        try {
+            const raw = JSON.parse(localStorage.getItem('restaurant_profile') || 'null');
+            if (!raw) return null;
+            if (raw.permissions) return raw;
+            const hydrated = buildRestaurantSession({ account: raw }) || buildRestaurantSession({ owner: raw });
+            // Ensure restaurantId fallback from scope if missing
+            if (hydrated && !hydrated.restaurantId) {
+                const scopeIds = Array.isArray(hydrated.scope?.restaurantIds)
+                    ? hydrated.scope.restaurantIds
+                    : [];
+                if (scopeIds.length) {
+                    hydrated.restaurantId = scopeIds[0];
+                }
+            }
+            return hydrated || raw;
+        } catch {
+            return null;
+        }
+    });
 
 
     const refreshOrders = useCallback(async () => {

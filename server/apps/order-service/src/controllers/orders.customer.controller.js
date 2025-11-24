@@ -1,4 +1,5 @@
 const ordersService = require('../services/orders.service');
+const cartService = require('../services/cart.service');
 
 function mapError(res, error) {
   const status =
@@ -90,6 +91,39 @@ exports.confirmOrder = async (req, res) => {
     return res.json(result);
   } catch (error) {
     console.error('[order-service] confirmOrder failed:', error);
+    return mapError(res, error);
+  }
+};
+
+exports.getSavedCart = async (req, res) => {
+  try {
+    const result = await cartService.getCustomerCart({ user: req.user });
+    return res.json(result);
+  } catch (error) {
+    console.error('[order-service] getSavedCart failed:', error);
+    return mapError(res, error);
+  }
+};
+
+exports.saveCartSnapshot = async (req, res) => {
+  try {
+    const result = await cartService.saveCustomerCart({
+      user: req.user,
+      payload: req.body,
+    });
+    return res.json(result);
+  } catch (error) {
+    console.error('[order-service] saveCartSnapshot failed:', error);
+    return mapError(res, error);
+  }
+};
+
+exports.clearCartSnapshot = async (req, res) => {
+  try {
+    const result = await cartService.clearCustomerCart({ user: req.user });
+    return res.json(result);
+  } catch (error) {
+    console.error('[order-service] clearCartSnapshot failed:', error);
     return mapError(res, error);
   }
 };

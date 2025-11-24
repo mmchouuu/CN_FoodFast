@@ -1650,56 +1650,6 @@ const CurrentOrder = () => {
                   ) : null}
                 </div>
               </div>
-              <div className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
-                <div className="flex items-center justify-between">
-                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-400">
-                    Tracking logs
-                  </p>
-                  <span className="text-xs text-gray-400">
-                    {telemetryHistory.length
-                      ? `Updated ${new Date(
-                          telemetryHistory[0].receivedAt || telemetryHistory[0].recordedAt || Date.now(),
-                        ).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
-                      : deliveryDetailLoading
-                        ? "Syncing…"
-                        : "Awaiting updates"}
-                  </span>
-                </div>
-                {telemetryHistory.length === 0 ? (
-                  <p className="mt-4 text-xs text-gray-400">
-                    Waiting for telemetry from the assigned drone.
-                  </p>
-                ) : (
-                  <ul className="mt-4 space-y-3 text-xs text-gray-600">
-                    {telemetryHistory.slice(0, 5).map((entry) => (
-                      <li
-                        key={`${entry.deliveryId || deliveryId}-${entry.recordedAt || entry.receivedAt}`}
-                        className="rounded-xl border border-gray-100 bg-white/80 p-3"
-                      >
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <span className="font-semibold text-gray-900">
-                            {formatStageMessage(entry.stage, entry.status)}
-                          </span>
-                          <span className="text-gray-400">
-                            {entry.receivedAt || entry.recordedAt
-                              ? new Date(entry.receivedAt || entry.recordedAt).toLocaleTimeString([], {
-                                  hour: "2-digit",
-                                  minute: "2-digit",
-                                })
-                              : "--"}
-                          </span>
-                        </div>
-                        <div className="mt-2 grid grid-cols-2 gap-3 text-[11px] text-gray-500 md:grid-cols-4">
-                          <span>Lat: {formatCoordinateValue(entry.position?.lat)}</span>
-                          <span>Lng: {formatCoordinateValue(entry.position?.lng)}</span>
-                          <span>Battery: {entry.batteryLevel != null ? `${entry.batteryLevel}%` : "--"}</span>
-                          <span>Speed: {formatSpeedLabel(entry.speed)}</span>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
             </div>
           ) : (
             <p className="mt-4 text-xs text-gray-400">
