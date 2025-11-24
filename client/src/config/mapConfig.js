@@ -8,8 +8,8 @@ if (!MAPTILER_KEY) {
 export const mapConfig = {
   key: MAPTILER_KEY,
   styleUrl: MAPTILER_KEY
-    ? `https://api.maptiler.com/maps/streets-v2/style.json?key=${MAPTILER_KEY}`
-    : 'https://api.maptiler.com/maps/streets-v2/style.json',
+    ? `https://api.maptiler.com/maps/streets-v4/style.json?key=${MAPTILER_KEY}`
+    : 'https://api.maptiler.com/maps/streets-v4/style.json',
   tilesBase: 'https://api.maptiler.com/maps',
   geocodingBase: 'https://api.maptiler.com/geocoding',
   osrmBase: 'https://router.project-osrm.org',

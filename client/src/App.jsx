@@ -119,10 +119,13 @@ import AdminActivity from './pages/admin/AdminActivity';
 import PayoutManagement from './pages/admin/PayoutManagement';
 import CODSettlements from './pages/admin/CODSettlements';
 import AdminLogin from './pages/admin/AdminLogin';
+
+import AdminOrders from './pages/admin/AdminOrders';
 import AdminDroneManagement from './pages/admin/AdminDroneManagement';
 import AdminAssignOrders from './pages/admin/AdminAssignOrders';
 import AdminDeliveryTracking from './pages/admin/AdminDeliveryTracking';
 import AdminDroneMaintenance from './pages/admin/AdminDroneMaintenance';
+
 
 const App = () => {
   const { pathname } = useLocation();
@@ -187,6 +190,7 @@ const App = () => {
           <Route index element={<AdminDashboard />} />
           <Route path="customers" element={<AdminCustomers />} />
           <Route path="restaurants" element={<AdminRestaurants />} />
+          <Route path="orders" element={<AdminOrders />} />
           <Route path="payouts" element={<PayoutManagement />} />
           <Route path="cod-settlements" element={<CODSettlements />} />
           <Route path="drone-hubs" element={<AdminDroneManagement />} />

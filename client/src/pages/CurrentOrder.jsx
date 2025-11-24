@@ -1,5 +1,8 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useLocation } from "react-router-dom";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { io } from "socket.io-client";
+import maplibregl from "maplibre-gl";
+import "maplibre-gl/dist/maplibre-gl.css";
 import { useAppContext } from "../context/AppContext";
 import {
   restaurantPlaceholderImage,
@@ -7,6 +10,8 @@ import {
 } from "../utils/imageHelpers";
 import { buildRestaurantLink } from "../utils/orderHelpers";
 import resolvePaymentSummary from "../utils/paymentSummary";
+import mapConfig from "../config/mapConfig";
+import api from "../services/api";
 
 const StatusDot = ({ completed, variant = "default" }) => {
   const colorClass =
@@ -138,8 +143,257 @@ const resolveTotals = (order) => {
   return { subtotal, shippingFee, vat, discount, total };
 };
 
+const SOCKET_GATEWAY_URL =
+  import.meta.env.VITE_SOCKET_GATEWAY_URL || "http://localhost:4000";
+const CUSTOM_MAP_STYLE = import.meta.env.VITE_MAP_STYLE_URL || "";
+const MAP_STYLE = CUSTOM_MAP_STYLE || mapConfig.styleUrl;
+
+const formatEta = (seconds) => {
+  const parsed = Number(seconds);
+  if (!Number.isFinite(parsed) || parsed <= 0) return "--";
+  const mins = Math.max(1, Math.round(parsed / 60));
+  return `${mins} min`;
+};
+
+const deriveStageFromStatus = (status) => {
+  if (!status || typeof status !== "string") return null;
+  const normalized = status.toLowerCase();
+  if (normalized === "arriving") return "arriving";
+  if (normalized === "completed") return "delivered";
+  if (normalized === "returning") return "returning";
+  if (normalized === "idle" || normalized === "charging" || normalized === "landed") {
+    return "landed";
+  }
+  if (normalized === "to_customer" || normalized === "flying" || normalized === "delivering") {
+    return "to_customer";
+  }
+  if (normalized === "to_restaurant" || normalized === "assigned" || normalized === "pending") {
+    return "to_restaurant";
+  }
+  if (normalized === "delivered") return "delivered";
+  return "to_restaurant";
+};
+
+const formatStageMessage = (stage, fallbackStatus) => {
+  if (!stage && !fallbackStatus) return "Drone assigned";
+  const normalized = (stage || fallbackStatus || "").toLowerCase();
+  switch (normalized) {
+    case "to_restaurant":
+      return "Going to restaurant";
+    case "arriving":
+      return "Picking up your meal";
+    case "to_customer":
+    case "flying":
+    case "delivering":
+      return "Delivering to you";
+    case "delivered":
+      return "Delivery completed";
+    case "returning":
+      return "Returning to hub";
+    case "landed":
+      return "Drone is ready for next mission";
+    default:
+      return (fallbackStatus || normalized || "In transit")
+        .replace(/_/g, " ")
+        .replace(/\b\w/g, (char) => char.toUpperCase());
+  }
+};
+
+const stageBadgeClass = (stage) => {
+  const normalized = (stage || "").toLowerCase();
+  if (normalized === "arriving") return "bg-amber-100 text-amber-700";
+  if (normalized === "to_customer" || normalized === "flying" || normalized === "delivering") {
+    return "bg-orange-100 text-orange-700";
+  }
+  if (normalized === "delivered") return "bg-emerald-100 text-emerald-700";
+  if (normalized === "returning" || normalized === "landed") return "bg-indigo-100 text-indigo-700";
+  if (normalized === "to_restaurant") return "bg-sky-100 text-sky-700";
+  return "bg-neutral-100 text-neutral-600";
+};
+
+const toLngLat = (value) => {
+  if (!value) return null;
+  if (Array.isArray(value) && value.length >= 2) {
+    const lng = Number(value[0]);
+    const lat = Number(value[1]);
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      return [lng, lat];
+    }
+  }
+  if (typeof value === "object") {
+    if (value.location) {
+      return toLngLat(value.location);
+    }
+    const lat = Number(
+      value.lat ??
+        value.latitude ??
+        value[1],
+    );
+    const lng = Number(
+      value.lng ??
+        value.lon ??
+        value.longitude ??
+        value[0],
+    );
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      return [lng, lat];
+    }
+  }
+  if (typeof value === "string") {
+    const parts = value.split(",").map((part) => Number(part.trim()));
+    if (parts.length >= 2 && Number.isFinite(parts[0]) && Number.isFinite(parts[1])) {
+      return [parts[0], parts[1]];
+    }
+  }
+  return null;
+};
+
+const buildCustomerMapData = ({
+  hubCoord,
+  branchCoord,
+  customerCoord,
+  droneCoord,
+  stage,
+}) => {
+  const features = [];
+  const points = [];
+  const coords = [];
+  const pushLine = (segment, coordinates) => {
+    const valid = coordinates.filter(Boolean);
+    if (valid.length < 2) return;
+    features.push({
+      type: "Feature",
+      geometry: { type: "LineString", coordinates: valid },
+      properties: { segment },
+    });
+    valid.forEach((coord) => coords.push(coord));
+  };
+  const pushPoint = (coord, pointType, title) => {
+    if (!coord) return;
+    points.push({
+      type: "Feature",
+      geometry: { type: "Point", coordinates: coord },
+      properties: { pointType, title },
+    });
+    coords.push(coord);
+  };
+
+  if (branchCoord && customerCoord) {
+    pushLine("delivery", [branchCoord, customerCoord]);
+  }
+  const normalizedStage = (stage || "").toLowerCase();
+  if (
+    droneCoord &&
+    branchCoord &&
+    (normalizedStage === "to_restaurant" || normalizedStage === "arriving")
+  ) {
+    pushLine("approach", [droneCoord, branchCoord]);
+  }
+  if (
+    droneCoord &&
+    customerCoord &&
+    (normalizedStage === "to_customer" || normalizedStage === "delivered")
+  ) {
+    pushLine("active", [droneCoord, customerCoord]);
+  }
+  if (droneCoord && hubCoord && normalizedStage === "returning") {
+    pushLine("return", [droneCoord, hubCoord]);
+  }
+
+  pushPoint(hubCoord, "hub", "Drone Hub");
+  pushPoint(branchCoord, "restaurant", "Restaurant");
+  pushPoint(customerCoord, "customer", "Your Address");
+  pushPoint(droneCoord, "drone", "Drone");
+
+  return {
+    lines: { type: "FeatureCollection", features },
+    points: { type: "FeatureCollection", features: points },
+    coords,
+  };
+};
+
+const parseTelemetryNumber = (value) => {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim().length) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+};
+
+const normalizeTelemetryEntry = (entry, delivery) => {
+  if (!entry) return null;
+  const deliveryId =
+    entry.deliveryId ||
+    entry.delivery_id ||
+    delivery?.id ||
+    delivery?.delivery_id ||
+    null;
+  const orderId =
+    entry.orderId ||
+    entry.order_id ||
+    delivery?.order_id ||
+    delivery?.orderId ||
+    null;
+  const position =
+    entry.position ||
+    (entry.lat != null && entry.lng != null
+      ? { lat: Number(entry.lat), lng: Number(entry.lng) }
+      : null);
+  const status = entry.status || entry.deliveryStatus || delivery?.delivery_status || null;
+  const etaSeconds = parseTelemetryNumber(entry.etaSeconds ?? entry.eta_seconds);
+  const progressPercent = parseTelemetryNumber(
+    entry.progressPercent ?? entry.progress_percent,
+  );
+  const distanceMeters = parseTelemetryNumber(
+    entry.distanceMeters ?? entry.distance_meters,
+  );
+  const batteryLevel = parseTelemetryNumber(
+    entry.batteryLevel ?? entry.battery_level ?? entry.battery,
+  );
+  const speed = parseTelemetryNumber(entry.speed ?? entry.velocity);
+  const heading = parseTelemetryNumber(entry.heading);
+  const stageSource = entry.stage || deriveStageFromStatus(status);
+  return {
+    deliveryId,
+    orderId,
+    droneId: entry.droneId || entry.drone_id || delivery?.drone?.id || null,
+    position,
+    batteryLevel,
+    speed,
+    heading,
+    status,
+    stage: stageSource || "to_restaurant",
+    progressPercent,
+    etaSeconds,
+    distanceMeters,
+    deliveryStatus: status,
+    recordedAt: entry.recordedAt || entry.created_at || null,
+    receivedAt: entry.receivedAt || entry.created_at || null,
+  };
+};
+
+const normalizeTelemetryCollection = (entries, delivery) => {
+  if (!Array.isArray(entries)) return [];
+  return entries.map((entry) => normalizeTelemetryEntry(entry, delivery)).filter(Boolean);
+};
+
+const formatSpeedLabel = (value) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return "--";
+  return `${(numeric * 3.6).toFixed(1)} km/h`;
+};
+
+const formatCoordinateValue = (value) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return "--";
+  return numeric.toFixed(5);
+};
+
 const CurrentOrder = () => {
   const {
+    user,
     activeOrders,
     pastOrders,
     getOrderById,
@@ -152,6 +406,7 @@ const CurrentOrder = () => {
   } = useAppContext();
 
   const location = useLocation();
+  const navigate = useNavigate();
   const requestedOrderId = location.state?.orderId || null;
 
   const [trackedOrderId, setTrackedOrderId] = useState(requestedOrderId || null);
@@ -161,12 +416,19 @@ const CurrentOrder = () => {
   const [cancelReason, setCancelReason] = useState("");
   const [cancelError, setCancelError] = useState("");
   const pendingRefreshRef = useRef(false);
-
-  useEffect(() => {
-    if (requestedOrderId) {
-      setTrackedOrderId(requestedOrderId);
-    }
-  }, [requestedOrderId]);
+  const [droneLiveData, setDroneLiveData] = useState(null);
+  const [socketState, setSocketState] = useState("idle");
+  const [deliveryDetail, setDeliveryDetail] = useState(null);
+  const [deliveryDetailLoading, setDeliveryDetailLoading] = useState(false);
+  const [telemetryHistory, setTelemetryHistory] = useState([]);
+  const [detailRefreshTick, setDetailRefreshTick] = useState(0);
+  const mapContainerRef = useRef(null);
+  const mapRef = useRef(null);
+  const mapReadyRef = useRef(false);
+  const mapFitRef = useRef(false);
+  const detailRefreshTimerRef = useRef(null);
+  const pendingRedirectRef = useRef(false);
+  const completedRedirectRef = useRef(false);
 
   const order = useMemo(() => {
     if (trackedOrderId) {
@@ -177,6 +439,140 @@ const CurrentOrder = () => {
     }
     return activeOrders.length ? activeOrders[0] : null;
   }, [trackedOrderId, getOrderById, activeOrders]);
+
+  useEffect(() => {
+    if (requestedOrderId) {
+      setTrackedOrderId(requestedOrderId);
+    }
+  }, [requestedOrderId]);
+
+  useEffect(() => {
+    if (trackedOrderId && !order && !pendingRedirectRef.current) {
+      pendingRedirectRef.current = true;
+      navigate('/', { replace: true });
+    }
+  }, [trackedOrderId, order, navigate]);
+
+  useEffect(() => {
+    setDroneLiveData(null);
+    setTelemetryHistory([]);
+    mapFitRef.current = false;
+  }, [order?.id]);
+  
+  const loadTelemetryLogs = useCallback(
+    async (deliveryData) => {
+      if (!order?.id || !deliveryData?.id) {
+        return;
+      }
+      const params = {};
+      if (user?.id) {
+        params.customerId = user.id;
+      }
+      try {
+        const logsResponse = await api.get(
+          `/api/customer/deliveries/orders/${order.id}/logs`,
+          { params: { ...params, limit: 40 } },
+        );
+        const logsPayload = Array.isArray(logsResponse?.data?.logs)
+          ? logsResponse.data.logs
+          : Array.isArray(logsResponse?.data?.data)
+            ? logsResponse.data.data
+            : [];
+        if (logsPayload.length) {
+          const normalizedLogs = normalizeTelemetryCollection(logsPayload, deliveryData);
+          setTelemetryHistory(normalizedLogs);
+          setDroneLiveData((prev) => prev || normalizedLogs[0] || null);
+        } else {
+          setTelemetryHistory([]);
+        }
+      } catch (error) {
+        console.warn("[CurrentOrder] failed to load telemetry logs", error?.message || error);
+        setTelemetryHistory([]);
+      }
+    },
+    [order?.id, user?.id],
+  );
+
+  useEffect(() => {
+    if (!order?.id) {
+      setDeliveryDetail(null);
+      setTelemetryHistory([]);
+      return;
+    }
+    let cancelled = false;
+    setDeliveryDetailLoading(true);
+    const params = {};
+    if (user?.id) {
+      params.customerId = user.id;
+    }
+
+    const fetchDeliveryDetail = async () => {
+      try {
+        const detailResponse = await api.get(
+          `/api/customer/deliveries/orders/${order.id}`,
+          { params },
+        );
+        if (cancelled) return;
+        const deliveryData = detailResponse?.data?.data || null;
+        setDeliveryDetail(deliveryData);
+        if (!deliveryData?.id) {
+          setTelemetryHistory([]);
+          return;
+        }
+        if (!cancelled) {
+          await loadTelemetryLogs(deliveryData);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.warn("[CurrentOrder] failed to load delivery detail", error?.message || error);
+          setDeliveryDetail(null);
+          setTelemetryHistory([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setDeliveryDetailLoading(false);
+        }
+      }
+    };
+
+    fetchDeliveryDetail();
+    return () => {
+      cancelled = true;
+    };
+  }, [order?.id, user?.id, detailRefreshTick, loadTelemetryLogs]);
+
+  useEffect(() => {
+    if (!order?.id || !deliveryDetail?.id) {
+      if (detailRefreshTimerRef.current) {
+        clearTimeout(detailRefreshTimerRef.current);
+        detailRefreshTimerRef.current = null;
+      }
+      return undefined;
+    }
+    if (deliveryDetail?.drone_id) {
+      if (detailRefreshTimerRef.current) {
+        clearTimeout(detailRefreshTimerRef.current);
+        detailRefreshTimerRef.current = null;
+      }
+      return undefined;
+    }
+    detailRefreshTimerRef.current = setTimeout(() => {
+      setDetailRefreshTick((prev) => prev + 1);
+    }, 5000);
+    return () => {
+      if (detailRefreshTimerRef.current) {
+        clearTimeout(detailRefreshTimerRef.current);
+        detailRefreshTimerRef.current = null;
+      }
+    };
+  }, [order?.id, deliveryDetail?.id, deliveryDetail?.drone_id]);
+
+  useEffect(() => {
+    if (!deliveryDetail?.id || !deliveryDetail?.drone_id) {
+      return;
+    }
+    loadTelemetryLogs(deliveryDetail);
+  }, [deliveryDetail?.drone_id, deliveryDetail?.id, loadTelemetryLogs]);
 
   useEffect(() => {
     if (!trackedOrderId || order) {
@@ -204,6 +600,17 @@ const CurrentOrder = () => {
 
   const normalisedStatus = normaliseStatus(order?.status);
   const isHistorical = Boolean(order && ORDER_HISTORY_STATUSES.has(normalisedStatus));
+
+  useEffect(() => {
+    if (
+      order &&
+      normalisedStatus === 'completed' &&
+      !completedRedirectRef.current
+    ) {
+      completedRedirectRef.current = true;
+      navigate('/orders/history', { replace: true });
+    }
+  }, [order, normalisedStatus, navigate]);
 
   useEffect(() => {
     if (isHistorical && trackedOrderId) {
@@ -269,11 +676,15 @@ const CurrentOrder = () => {
     restaurantSnapshot?.heroImage ||
     restaurantSnapshot?.image ||
     restaurantPlaceholderImage;
-  const deliveryAddress = order.deliveryAddress || {};
-  const deliveryDetails = order?.delivery || (order?.metadata?.delivery ?? null);
+  const deliveryDetails = deliveryDetail || order?.delivery || (order?.metadata?.delivery ?? null);
+  const deliveryAddress =
+    deliveryDetails?.delivery_address ||
+    order.deliveryAddress ||
+    deliveryDetails?.delivery_address_snapshot ||
+    {};
   const droneDetails =
-    deliveryDetails?.drone_snapshot ||
     deliveryDetails?.drone ||
+    deliveryDetails?.drone_snapshot ||
     deliveryDetails?.droneInfo ||
     null;
   const droneCode = droneDetails?.code || droneDetails?.identifier || droneDetails?.name || null;
@@ -318,19 +729,399 @@ const CurrentOrder = () => {
     typeof droneEtaSeconds === "number"
       ? `${Math.max(1, Math.round(droneEtaSeconds / 60))} min`
       : null;
-  const dronePositionLabel =
+  const baseDronePositionLabel =
     lastKnownPosition && typeof lastKnownPosition === "object"
       ? lastKnownPosition.formatted ||
-      lastKnownPosition.address ||
-      (Array.isArray(lastKnownPosition.coordinates)
-        ? `${lastKnownPosition.coordinates[0]}, ${lastKnownPosition.coordinates[1]}`
-        : null)
+        lastKnownPosition.address ||
+        (Array.isArray(lastKnownPosition.coordinates)
+          ? `${lastKnownPosition.coordinates[0]}, ${lastKnownPosition.coordinates[1]}`
+          : null)
       : null;
-  const showDroneTracking = normalisedStatus === "delivering";
+  const deliveryId =
+    deliveryDetails?.id ||
+    deliveryDetails?.delivery_id ||
+    order?.deliveryId ||
+    order?.delivery_id ||
+    null;
+  const assignedDroneId = useMemo(
+    () =>
+      deliveryDetails?.drone_id ||
+      deliveryDetails?.drone?.id ||
+      deliveryDetails?.drone_snapshot?.id ||
+      deliveryDetails?.drone_snapshot?.drone_id ||
+      null,
+    [deliveryDetails],
+  );
+  useEffect(() => {
+    if (!deliveryDetails || telemetryHistory.length > 0) {
+      return;
+    }
+    const basePosition =
+      deliveryDetails.current_position ||
+      deliveryDetails.currentPosition ||
+      deliveryDetails.drone?.last_known_position ||
+      deliveryDetails.drone_snapshot?.last_known_position ||
+      deliveryDetails.branch_location ||
+      deliveryDetails.drone?.hub?.location ||
+      null;
+    if (!basePosition) {
+      return;
+    }
+    const derivedStage = deriveStageFromStatus(
+      deliveryDetails.delivery_status || droneStatus || "to_restaurant",
+    );
+    const fallbackEntry = normalizeTelemetryEntry(
+      {
+        deliveryId,
+        stage: derivedStage || "to_restaurant",
+        status: deliveryDetails.delivery_status || droneStatus || "to_restaurant",
+        position: basePosition,
+        batteryLevel:
+          deliveryDetails?.drone?.battery_level ??
+          deliveryDetails?.drone_snapshot?.battery_level ??
+          droneBatteryLevel ??
+          null,
+        recordedAt:
+          deliveryDetails.updated_at ||
+          deliveryDetails.pickup_at ||
+          deliveryDetails.created_at ||
+          new Date().toISOString(),
+      },
+      deliveryDetails,
+    );
+    if (fallbackEntry) {
+      setTelemetryHistory([fallbackEntry]);
+      setDroneLiveData((prev) => prev || fallbackEntry);
+    }
+  }, [
+    deliveryDetails,
+    deliveryId,
+    droneStatus,
+    droneBatteryLevel,
+    telemetryHistory.length,
+  ]);
+  const fallbackStage = deriveStageFromStatus(
+    deliveryDetails?.delivery_status || droneStatus,
+  );
+  const effectiveStage = droneLiveData?.stage || fallbackStage;
+  const effectiveBatteryLevel =
+    typeof droneLiveData?.batteryLevel === "number"
+      ? Math.max(0, Math.min(100, Math.round(droneLiveData.batteryLevel)))
+      : droneBatteryLevel;
+  const effectiveEtaSeconds =
+    typeof droneLiveData?.etaSeconds === "number" && droneLiveData.etaSeconds >= 0
+      ? droneLiveData.etaSeconds
+      : droneEtaSeconds;
+  const effectiveProgress =
+    typeof droneLiveData?.progressPercent === "number"
+      ? Math.max(0, Math.min(100, droneLiveData.progressPercent))
+      : droneProgress;
+  const effectiveSpeed =
+    typeof droneLiveData?.speed === "number" ? droneLiveData.speed : null;
+  const effectivePosition =
+    (droneLiveData && (droneLiveData.position || droneLiveData.current_position)) ||
+    lastKnownPosition ||
+    null;
+  const stageMessage = formatStageMessage(effectiveStage, friendlyDroneStatus);
+  const stagePillClassName = stageBadgeClass(effectiveStage);
+  const etaLabelLive =
+    typeof effectiveEtaSeconds === "number" && effectiveEtaSeconds > 0
+      ? formatEta(effectiveEtaSeconds)
+      : droneEtaLabel;
+  const speedLabel = formatSpeedLabel(effectiveSpeed);
+  const liveUpdatedLabel = droneLiveData?.recordedAt
+    ? new Date(droneLiveData.recordedAt).toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : null;
+  const socketStatusBadge =
+    socketState === "connected"
+      ? "bg-emerald-100 text-emerald-700"
+      : socketState === "disconnected"
+      ? "bg-amber-100 text-amber-700"
+      : "bg-gray-100 text-gray-500";
+  const socketStatusLabel =
+    socketState === "connected"
+      ? "Live"
+      : socketState === "disconnected"
+      ? "Reconnecting..."
+      : "Connecting...";
+  const branchCoordinate = useMemo(
+    () => toLngLat(deliveryDetails?.branch_location),
+    [deliveryDetails],
+  );
+  const customerCoordinate = useMemo(
+    () =>
+      toLngLat(
+        deliveryDetails?.delivery_address?.location ||
+          deliveryDetails?.delivery_address ||
+          deliveryAddress?.location ||
+          deliveryAddress,
+      ),
+    [deliveryDetails, deliveryAddress],
+  );
+  const hubCoordinate = useMemo(
+    () =>
+      toLngLat(
+        deliveryDetails?.drone?.hub?.location ||
+          deliveryDetails?.hub_location ||
+          deliveryDetails?.drone_snapshot?.hub?.location ||
+          order?.assigned_hub_location ||
+          order?.metadata?.assigned_hub_location ||
+          order?.assignedHub?.location,
+      ),
+    [deliveryDetails, order],
+  );
+  const droneCoordinate = useMemo(
+    () => toLngLat(effectivePosition),
+    [effectivePosition],
+  );
+  const mapData = useMemo(
+    () =>
+      buildCustomerMapData({
+        hubCoord: hubCoordinate,
+        branchCoord: branchCoordinate,
+        customerCoord: customerCoordinate,
+        droneCoord: droneCoordinate,
+        stage: effectiveStage,
+      }),
+    [hubCoordinate, branchCoordinate, customerCoordinate, droneCoordinate, effectiveStage],
+  );
+  const hasMapCoordinates = mapData.coords.length >= 1;
+  const resolvedDronePositionLabel = droneCoordinate
+    ? `${droneCoordinate[1].toFixed(4)}, ${droneCoordinate[0].toFixed(4)}`
+    : baseDronePositionLabel || "Awaiting first location update";
+  const progressDisplay =
+    typeof effectiveProgress === "number" ? Math.round(effectiveProgress) : null;
+  const rawStageStatus = (deliveryDetails?.delivery_status || normalisedStatus || "").toLowerCase();
+  const stageStatus =
+    rawStageStatus ||
+    (deliveryDetails?.drone_id ||
+    deliveryDetails?.drone?.id ||
+    deliveryDetails?.drone_snapshot
+      ? "to_restaurant"
+      : rawStageStatus);
+  const trackableStages = new Set(["assigned", "flying", "arriving", "delivering", "returning", "to_restaurant", "to_customer"]);
+  const showDroneTracking =
+    trackableStages.has(stageStatus) ||
+    Boolean(
+      (droneLiveData?.stage && droneLiveData.stage !== "landed") ||
+        (telemetryHistory.length > 0 &&
+          telemetryHistory.some((entry) => entry.stage && entry.stage !== "landed")),
+    );
+
+  useEffect(() => {
+    if (!order?.id) {
+      setSocketState("idle");
+      return;
+    }
+    setSocketState("connecting");
+    const socket = io(SOCKET_GATEWAY_URL, {
+      transports: ["websocket"],
+      query: {
+        role: "customer",
+        customerId: user?.id || "",
+        orderId: order.id,
+      },
+    });
+    const handleUpdate = (payload = {}) => {
+      const payloadOrderId = payload.orderId || payload.order_id || null;
+      const payloadDeliveryId = payload.deliveryId || payload.delivery_id || null;
+      const payloadDroneId = payload.droneId || payload.drone_id || payload.drone?.id || null;
+      const hasOrderInfo = Boolean(payloadOrderId);
+      const hasDeliveryInfo = Boolean(payloadDeliveryId);
+      const hasDroneInfo = Boolean(payloadDroneId && assignedDroneId);
+
+      if (
+        (hasOrderInfo && String(payloadOrderId) !== String(order.id)) ||
+        (hasDeliveryInfo &&
+          deliveryId &&
+          String(payloadDeliveryId) !== String(deliveryId)) ||
+        (hasDroneInfo && String(payloadDroneId) !== String(assignedDroneId))
+      ) {
+        return;
+      }
+      if (!hasOrderInfo && !hasDeliveryInfo && !hasDroneInfo) {
+        return;
+      }
+      const enriched = {
+        ...payload,
+        receivedAt: new Date().toISOString(),
+      };
+      const normalizedEntry = normalizeTelemetryEntry(enriched, deliveryDetails);
+      if (!normalizedEntry) {
+        return;
+      }
+      const nextLive = { ...enriched, ...normalizedEntry };
+      setDroneLiveData(nextLive);
+      setTelemetryHistory((prev) => {
+        const filtered = prev.filter(
+          (item) =>
+            !(
+              item &&
+              nextLive &&
+              item.recordedAt === nextLive.recordedAt &&
+              ((item.deliveryId &&
+                nextLive.deliveryId &&
+                String(item.deliveryId) === String(nextLive.deliveryId)) ||
+                (item.droneId &&
+                  nextLive.droneId &&
+                  String(item.droneId) === String(nextLive.droneId)))
+            ),
+        );
+        return [nextLive, ...filtered].slice(0, 10);
+      });
+    };
+    socket.on("connect", () => setSocketState("connected"));
+    socket.on("disconnect", () => setSocketState("disconnected"));
+    socket.on("drone:update", handleUpdate);
+    return () => {
+      socket.off("drone:update", handleUpdate);
+      socket.disconnect();
+      setSocketState("idle");
+    };
+  }, [order?.id, deliveryId, user?.id, assignedDroneId, deliveryDetails]);
   const fallbackEtaLabel =
     typeof order?.etaMinutes === "number"
       ? `${order.etaMinutes} min`
       : "Updating";
+  useEffect(() => {
+    if (!showDroneTracking) {
+      return;
+    }
+    if (mapRef.current || !mapContainerRef.current) {
+      return;
+    }
+    const defaultCenter = customerCoordinate || branchCoordinate || [106.7, 10.78];
+    const map = new maplibregl.Map({
+      container: mapContainerRef.current,
+      style: MAP_STYLE,
+      center: defaultCenter,
+      zoom: 12,
+      attributionControl: true,
+    });
+    mapRef.current = map;
+    map.addControl(new maplibregl.NavigationControl(), "top-right");
+    map.on("load", () => {
+      map.addSource("order-lines", {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      });
+      map.addSource("order-points", {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      });
+      map.addLayer({
+        id: "order-lines-delivery",
+        type: "line",
+        source: "order-lines",
+        filter: ["==", ["get", "segment"], "delivery"],
+        paint: {
+          "line-color": "#f97316",
+          "line-width": 4,
+          "line-opacity": 0.9,
+        },
+      });
+      map.addLayer({
+        id: "order-lines-active",
+        type: "line",
+        source: "order-lines",
+        filter: ["==", ["get", "segment"], "active"],
+        paint: {
+          "line-color": "#ea580c",
+          "line-width": 5,
+          "line-opacity": 0.95,
+        },
+      });
+      map.addLayer({
+        id: "order-lines-approach",
+        type: "line",
+        source: "order-lines",
+        filter: ["==", ["get", "segment"], "approach"],
+        paint: {
+          "line-color": "#06b6d4",
+          "line-width": 3,
+          "line-opacity": 0.85,
+          "line-dasharray": [0.8, 1.2],
+        },
+      });
+      map.addLayer({
+        id: "order-lines-return",
+        type: "line",
+        source: "order-lines",
+        filter: ["==", ["get", "segment"], "return"],
+        paint: {
+          "line-color": "#10b981",
+          "line-width": 3,
+          "line-opacity": 0.8,
+          "line-dasharray": [1, 1.2],
+        },
+      });
+      map.addLayer({
+        id: "order-points",
+        type: "circle",
+        source: "order-points",
+        paint: {
+          "circle-radius": 7,
+          "circle-stroke-color": "#ffffff",
+          "circle-stroke-width": 1.5,
+          "circle-color": [
+            "match",
+            ["get", "pointType"],
+            "hub",
+            "#6366f1",
+            "restaurant",
+            "#facc15",
+            "customer",
+            "#fb923c",
+            "drone",
+            "#0ea5e9",
+            "#94a3b8",
+          ],
+        },
+      });
+      mapReadyRef.current = true;
+    });
+    return () => {
+      map.remove();
+      mapRef.current = null;
+      mapReadyRef.current = false;
+    };
+  }, [branchCoordinate, customerCoordinate, showDroneTracking]);
+
+  useEffect(() => {
+    if (!showDroneTracking && mapRef.current) {
+      mapRef.current.remove();
+      mapRef.current = null;
+      mapReadyRef.current = false;
+    }
+  }, [showDroneTracking]);
+
+  useEffect(() => {
+    if (!showDroneTracking || !mapReadyRef.current || !mapRef.current) return;
+    const map = mapRef.current;
+    const lineSource = map.getSource("order-lines");
+    if (lineSource) {
+      lineSource.setData(mapData.lines);
+    }
+    const pointsSource = map.getSource("order-points");
+    if (pointsSource) {
+      pointsSource.setData(mapData.points);
+    }
+    if (!mapFitRef.current && mapData.coords.length) {
+      const bounds = mapData.coords.reduce(
+        (acc, coord) =>
+          acc ? acc.extend(coord) : new maplibregl.LngLatBounds(coord, coord),
+        null,
+      );
+      if (bounds) {
+        map.fitBounds(bounds, { padding: 50, maxZoom: 15 });
+        mapFitRef.current = true;
+      }
+    }
+  }, [mapData, showDroneTracking]);
+
   const trackingSteps = useMemo(() => {
     const normalised = normaliseStatus(order.status);
     const fallbackSteps = buildTrackingSteps(order.status, order.placedAt, order.updatedAt);
@@ -763,78 +1554,151 @@ const CurrentOrder = () => {
             </p>
           ) : null}
           {showDroneTracking ? (
-            <div className="mt-6 grid gap-4 lg:grid-cols-2">
-              <div>
-                <p className="text-xs uppercase text-orange-500">
-                  Real time map preview
-                </p>
-                <div className="mt-2 h-48 w-full rounded-2xl bg-gradient-to-br from-gray-100 to-gray-200 text-center text-xs font-semibold uppercase text-gray-400">
-                  <div className="flex h-full items-center justify-center">
-                    Map preview placeholder
+            <div className="mt-6 space-y-6">
+              <div className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-400">
+                      Assigned drone
+                    </p>
+                    <h4 className="mt-2 text-xl font-semibold text-gray-900">
+                      {droneCode || "Awaiting dispatch"}
+                    </h4>
+                    <p className="text-sm text-gray-500">
+                      {droneModel || "Drone details will appear once dispatched."}
+                    </p>
+                    <p className="mt-1 text-xs text-gray-400">
+                      {stageMessage}
+                      {liveUpdatedLabel ? ` · Last update ${liveUpdatedLabel}` : ""}
+                    </p>
+                  </div>
+                  <div className="text-xs text-gray-400">
+                    <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${stagePillClassName}`}>
+                      {stageMessage}
+                    </span>
+                    {deliveryDetailLoading ? (
+                      <span className="ml-2 inline-flex items-center rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold text-gray-500">
+                        Syncing…
+                      </span>
+                    ) : null}
                   </div>
                 </div>
-              </div>
-              <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
-                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-400">
-                  Assigned drone
-                </p>
-                <h4 className="mt-2 text-lg font-semibold text-gray-900">
-                  {droneCode || "Awaiting dispatch"}
-                </h4>
-                <p className="text-sm text-gray-500">
-                  {droneModel || "Drone details will appear once dispatched."}
-                </p>
-                <dl className="mt-4 space-y-2 text-sm text-gray-600">
-                  <div className="flex justify-between">
-                    <span>Status</span>
-                    <span className="font-semibold">
-                      {friendlyDroneStatus || "Updating"}
-                    </span>
+                <div className="mt-6 grid gap-4 text-sm text-gray-600 md:grid-cols-4">
+                  <div>
+                    <p className="text-xs uppercase text-gray-400">Battery</p>
+                    <p className="font-semibold text-gray-900">
+                      {effectiveBatteryLevel !== null ? `${effectiveBatteryLevel}%` : "Updating"}
+                    </p>
                   </div>
-                  <div className="flex justify-between">
-                    <span>Battery</span>
-                    <span className="font-semibold">
-                      {droneBatteryLevel !== null ? `${droneBatteryLevel}%` : "Updating"}
-                    </span>
+                  <div>
+                    <p className="text-xs uppercase text-gray-400">ETA</p>
+                    <p className="font-semibold text-gray-900">{etaLabelLive || fallbackEtaLabel}</p>
                   </div>
-                  <div className="flex justify-between">
-                    <span>ETA</span>
-                    <span className="font-semibold">
-                      {droneEtaLabel || `${order.etaMinutes} min`}
-                    </span>
+                  <div>
+                    <p className="text-xs uppercase text-gray-400">Speed</p>
+                    <p className="font-semibold text-gray-900">{speedLabel}</p>
                   </div>
+                  <div>
+                    <p className="text-xs uppercase text-gray-400">Location</p>
+                    <p className="font-semibold text-gray-900">{resolvedDronePositionLabel}</p>
+                  </div>
+                </div>
+                <div className="mt-4 grid gap-4 text-sm text-gray-600 md:grid-cols-3">
                   {droneDistanceLabel ? (
-                    <div className="flex justify-between">
-                      <span>Distance</span>
-                      <span className="font-semibold">{droneDistanceLabel}</span>
+                    <div>
+                      <p className="text-xs uppercase text-gray-400">Distance</p>
+                      <p className="font-semibold text-gray-900">{droneDistanceLabel}</p>
                     </div>
                   ) : null}
-                  {dronePositionLabel ? (
-                    <div className="flex justify-between">
-                      <span>Last seen</span>
-                      <span className="text-right font-semibold">
-                        {dronePositionLabel}
-                      </span>
-                    </div>
-                  ) : null}
-                </dl>
-                {droneProgress !== null ? (
-                  <div className="mt-4">
+                  <div>
+                    <p className="text-xs uppercase text-gray-400">Delivery ID</p>
+                    <p className="font-semibold text-gray-900">{deliveryId || "--"}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs uppercase text-gray-400">Status</p>
+                    <p className="font-semibold text-gray-900">{stageMessage}</p>
+                  </div>
+                </div>
+                {progressDisplay !== null ? (
+                  <div className="mt-6">
                     <div className="flex items-center justify-between text-xs text-gray-500">
                       <span>Flight progress</span>
-                      <span>{droneProgress}%</span>
+                      <span>{progressDisplay}%</span>
                     </div>
-                    <div className="mt-1 h-2 rounded-full bg-gray-100">
+                    <div className="mt-2 h-2 rounded-full bg-gray-100">
                       <div
-                        className="h-full rounded-full bg-emerald-500 transition-all"
-                        style={{ width: `${droneProgress}%` }}
+                        className="h-full rounded-full bg-orange-500 transition-all"
+                        style={{ width: `${Math.min(100, Math.max(0, progressDisplay))}%` }}
                       />
                     </div>
                   </div>
                 ) : null}
-                <button className="mt-4 w-full rounded-full border border-gray-200 px-4 py-2 text-xs font-semibold text-gray-600 transition hover:border-emerald-300 hover:text-emerald-600">
-                  View flight logs
-                </button>
+              </div>
+              <div>
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-semibold text-gray-900">Live drone map</p>
+                  <span className={`rounded-full px-3 py-1 text-xs font-semibold ${socketStatusBadge}`}>
+                    {socketStatusLabel}
+                  </span>
+                </div>
+                <div className="relative mt-3 h-72 w-full rounded-2xl border border-gray-200">
+                  <div ref={mapContainerRef} className="h-full w-full rounded-2xl" />
+                  {!hasMapCoordinates ? (
+                    <div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-2xl bg-white/80 text-sm text-gray-500">
+                      Waiting for live telemetry…
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+              <div className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-400">
+                    Tracking logs
+                  </p>
+                  <span className="text-xs text-gray-400">
+                    {telemetryHistory.length
+                      ? `Updated ${new Date(
+                          telemetryHistory[0].receivedAt || telemetryHistory[0].recordedAt || Date.now(),
+                        ).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+                      : deliveryDetailLoading
+                        ? "Syncing…"
+                        : "Awaiting updates"}
+                  </span>
+                </div>
+                {telemetryHistory.length === 0 ? (
+                  <p className="mt-4 text-xs text-gray-400">
+                    Waiting for telemetry from the assigned drone.
+                  </p>
+                ) : (
+                  <ul className="mt-4 space-y-3 text-xs text-gray-600">
+                    {telemetryHistory.slice(0, 5).map((entry) => (
+                      <li
+                        key={`${entry.deliveryId || deliveryId}-${entry.recordedAt || entry.receivedAt}`}
+                        className="rounded-xl border border-gray-100 bg-white/80 p-3"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="font-semibold text-gray-900">
+                            {formatStageMessage(entry.stage, entry.status)}
+                          </span>
+                          <span className="text-gray-400">
+                            {entry.receivedAt || entry.recordedAt
+                              ? new Date(entry.receivedAt || entry.recordedAt).toLocaleTimeString([], {
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                })
+                              : "--"}
+                          </span>
+                        </div>
+                        <div className="mt-2 grid grid-cols-2 gap-3 text-[11px] text-gray-500 md:grid-cols-4">
+                          <span>Lat: {formatCoordinateValue(entry.position?.lat)}</span>
+                          <span>Lng: {formatCoordinateValue(entry.position?.lng)}</span>
+                          <span>Battery: {entry.batteryLevel != null ? `${entry.batteryLevel}%` : "--"}</span>
+                          <span>Speed: {formatSpeedLabel(entry.speed)}</span>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
             </div>
           ) : (

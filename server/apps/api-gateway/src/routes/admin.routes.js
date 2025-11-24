@@ -32,5 +32,6 @@ router.post('/drones', controller.createAdminDrone);
 router.put('/drones/:id', controller.updateAdminDrone);
 router.delete('/drones/:id', controller.deleteAdminDrone);
 router.get('/drones/:id/logs', controller.getAdminDroneLogs);
+router.get('/deliveries', controller.listAdminDeliveries);
 
 module.exports = router;

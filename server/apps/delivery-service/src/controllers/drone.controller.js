@@ -68,6 +68,16 @@ async function getDroneLogs(req, res, next) {
   }
 }
 
+async function ingestTelemetry(req, res, next) {
+  try {
+    const { id } = req.params;
+    const drone = await droneService.ingestTelemetry(id, req.body || {});
+    respond(res, { data: drone });
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
   getSummary,
   listDrones,
@@ -75,4 +85,5 @@ module.exports = {
   updateDrone,
   deleteDrone,
   getDroneLogs,
+  ingestTelemetry,
 };

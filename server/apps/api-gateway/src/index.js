@@ -140,6 +140,7 @@ const adminOrderRoutes = require('./routes/orders.admin.routes');
 const ownerSettlementsRoutes = require('./routes/settlements.owner.routes');
 const ownerRestaurantsRoutes = require('./routes/owner.restaurants.routes');
 const ownerDronesRoutes = require('./routes/drones.owner.routes');
+const customerDeliveriesRoutes = require('./routes/deliveries.customer.routes');
 const app = express();
 
 // ======================================================
@@ -197,6 +198,7 @@ app.use('/owner/settlements', ownerSettlementsRoutes);
 app.use('/owner/restaurants', ownerRestaurantsRoutes);
 app.use('/owner/drones', ownerDronesRoutes);
 app.use('/admin/orders', adminOrderRoutes);
+app.use('/api/customer/deliveries', customerDeliveriesRoutes);
 app.get('/health', health);
 app.use(errorHandler);
 

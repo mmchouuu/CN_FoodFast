@@ -329,6 +329,29 @@ async function getAdminDroneLogs(req, res, next) {
   }
 }
 
+async function listAdminDeliveries(req, res, next) {
+  try {
+    const headers = withRequestHeaders(req);
+    const { orderIds, order_ids: legacyOrderIds, ...restQuery } = req.query || {};
+    const rawOrderIds = orderIds ?? legacyOrderIds ?? null;
+
+    if (rawOrderIds) {
+      const orderParam =
+        Array.isArray(rawOrderIds) ? rawOrderIds.join(',') : String(rawOrderIds);
+      const result = await adminClient.listDeliveriesByOrders(
+        { orderIds: orderParam },
+        headers,
+      );
+      return res.json(result);
+    }
+
+    const result = await adminClient.listDeliveries(restQuery, headers);
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
 async function getAssignmentSummary(req, res, next) {
   try {
     const summary = await assignmentService.fetchSummary(withRequestHeaders(req));
@@ -393,6 +416,7 @@ async function reprocessOrderAssignment(req, res, next) {
   }
 }
 
+
 module.exports = {
   listCustomers,
   customerDetails,
@@ -416,9 +440,10 @@ module.exports = {
   updateAdminDrone,
   deleteAdminDrone,
   getAdminDroneLogs,
+  listAdminDeliveries,
   getAssignmentSummary,
   getHubAssignments,
   getOrderHubDetails,
   assignOrderToDrone,
-  reprocessOrderAssignment,
+  reprocessOrderAssignment
 };
