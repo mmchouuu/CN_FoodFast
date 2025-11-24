@@ -135,6 +135,7 @@ const adminRoutes = require('./routes/admin.routes');
 const ordersRoutes = require('./routes/orders.routes');
 const paymentsRoutes = require('./routes/payments.routes');
 const customerOrderRoutes = require('./routes/orders.customer.routes');
+const customerCartRoutes = require('./routes/cart.customer.routes');
 const ownerOrderRoutes = require('./routes/orders.owner.routes');
 const adminOrderRoutes = require('./routes/orders.admin.routes');
 const ownerSettlementsRoutes = require('./routes/settlements.owner.routes');
@@ -177,7 +178,7 @@ app.use((req, res, next) => {
   res.header('Access-Control-Allow-Credentials', 'true');
   res.header(
     'Access-Control-Allow-Headers',
-    'Origin, X-Requested-With, Content-Type, Accept, Authorization, x-request-id, x-user-id, x-user-role, x-customer-id'
+    'Origin, X-Requested-With, Content-Type, Accept, Authorization, x-request-id, x-user-id, x-user-role, x-customer-id, x-cart-id'
   );
   res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
   if (req.method === 'OPTIONS') return res.sendStatus(204);
@@ -192,6 +193,7 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/orders', ordersRoutes);
 app.use('/api/payments', paymentsRoutes);
 app.use('/customer/orders', customerOrderRoutes);
+app.use('/customer/cart', customerCartRoutes);
 app.use('/owner/orders', ownerOrderRoutes);
 app.use('/owner/settlements', ownerSettlementsRoutes);
 app.use('/owner/restaurants', ownerRestaurantsRoutes);

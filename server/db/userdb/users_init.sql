@@ -122,6 +122,8 @@ CREATE TABLE IF NOT EXISTS user_addresses (
   ward          VARCHAR(100),
   district      VARCHAR(100),
   city          VARCHAR(100),
+  latitude      NUMERIC(9,6),
+  longitude     NUMERIC(9,6),
   is_primary    BOOLEAN NOT NULL DEFAULT FALSE,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),

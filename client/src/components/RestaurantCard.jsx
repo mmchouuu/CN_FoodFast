@@ -19,17 +19,23 @@ const RestaurantCard = ({ restaurant, variant = "default" }) => {
   );
 
   const title = restaurant.displayName || restaurant.name;
-  const distance = Number.isFinite(restaurant.distanceKm)
+  const distanceValue = Number.isFinite(restaurant.distanceKm)
     ? restaurant.distanceKm
     : Number.isFinite(restaurant.brand?.distanceKm)
       ? restaurant.brand.distanceKm
-      : 0;
+      : null;
+  const distanceLabel = distanceValue !== null ? `${distanceValue.toFixed(1)} km` : "—";
   const tags = restaurant.tags?.length
     ? restaurant.tags
     : restaurant.brand?.cuisine
       ? [restaurant.brand.cuisine]
       : [];
-  const ratingValue = restaurant.rating ?? restaurant.brand?.rating ?? 0;
+  const ratingValue =
+    Number.isFinite(restaurant.rating)
+      ? restaurant.rating
+      : Number.isFinite(restaurant.brand?.rating)
+        ? restaurant.brand.rating
+        : null;
   const addressLine = restaurant.address || restaurant.brand?.description || "Address updating soon.";
   return (
     <Link
@@ -61,7 +67,7 @@ const RestaurantCard = ({ restaurant, variant = "default" }) => {
             <p className="text-sm text-gray-500">{addressLine}</p>
           </div>
           <span className="rounded-full bg-orange-50 px-3 py-1 text-xs font-semibold text-orange-600">
-            {distance.toFixed(1)} km
+            {distanceLabel}
           </span>
         </div>
 

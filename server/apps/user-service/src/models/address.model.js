@@ -3,8 +3,52 @@ const config = require('../config');
 
 const pool = new Pool(config.DB);
 
+function toNumberOrNull(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function extractCoordinates(payload = {}) {
+  const location =
+    payload.location ||
+    payload.coordinate ||
+    payload.coordinates ||
+    payload.coords ||
+    {};
+  const latCandidate =
+    payload.latitude ??
+    payload.lat ??
+    payload.lat_value ??
+    payload.latValue ??
+    location.latitude ??
+    location.lat ??
+    location.lat_value ??
+    location.latValue;
+  const lngCandidate =
+    payload.longitude ??
+    payload.lng ??
+    payload.lon ??
+    payload.lng_value ??
+    payload.lngValue ??
+    location.longitude ??
+    location.lng ??
+    location.lon ??
+    location.lng_value ??
+    location.lngValue;
+
+  return {
+    latitude: latCandidate !== undefined ? toNumberOrNull(latCandidate) : undefined,
+    longitude: lngCandidate !== undefined ? toNumberOrNull(lngCandidate) : undefined,
+    hasLatitude: latCandidate !== undefined,
+    hasLongitude: lngCandidate !== undefined,
+  };
+}
+
 function mapRow(row) {
   if (!row) return null;
+  const latitude = toNumberOrNull(row.latitude);
+  const longitude = toNumberOrNull(row.longitude);
   return {
     id: row.id,
     user_id: row.user_id,
@@ -14,6 +58,13 @@ function mapRow(row) {
     city: row.city,
     label: row.label,
     is_primary: row.is_primary,
+    is_default: row.is_primary,
+    latitude,
+    longitude,
+    lat: latitude,
+    lng: longitude,
+    location:
+      latitude !== null && longitude !== null ? { lat: latitude, lng: longitude } : null,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
@@ -33,14 +84,18 @@ async function createAddress(userId, payload = {}) {
   try {
     await client.query('BEGIN');
 
+    const { latitude, longitude } = extractCoordinates(payload);
+
     const fields = {
       street: payload.street?.trim(),
       ward: payload.ward?.trim() || null,
-    district: payload.district?.trim() || null,
-    city: payload.city?.trim() || null,
-    label: payload.label?.trim() || 'Home',
-    is_primary: Boolean(payload.is_primary || payload.is_default),
-  };
+      district: payload.district?.trim() || null,
+      city: payload.city?.trim() || null,
+      label: payload.label?.trim() || 'Home',
+      is_primary: Boolean(payload.is_primary || payload.is_default),
+      latitude,
+      longitude,
+    };
 
     if (!fields.street) {
       const error = new Error('street is required');
@@ -70,9 +125,11 @@ async function createAddress(userId, payload = {}) {
         ward,
         district,
         city,
+        latitude,
+        longitude,
         is_primary
       )
-      VALUES ($1,$2,$3,$4,$5,$6,$7)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
       RETURNING *`,
       [
         userId,
@@ -81,6 +138,8 @@ async function createAddress(userId, payload = {}) {
         fields.ward,
         fields.district,
         fields.city,
+        fields.latitude,
+        fields.longitude,
         fields.is_primary,
       ]
     );
@@ -114,6 +173,8 @@ async function updateAddress(userId, addressId, payload = {}) {
       return null;
     }
 
+    const { latitude, longitude, hasLatitude, hasLongitude } = extractCoordinates(payload);
+
     const updates = [];
     const values = [];
     const allowedFields = ['street', 'ward', 'district', 'city', 'label'];
@@ -125,6 +186,15 @@ async function updateAddress(userId, addressId, payload = {}) {
         );
       }
     });
+
+    if (hasLatitude) {
+      updates.push(`latitude = $${updates.length + 1}`);
+      values.push(toNumberOrNull(latitude));
+    }
+    if (hasLongitude) {
+      updates.push(`longitude = $${updates.length + 1}`);
+      values.push(toNumberOrNull(longitude));
+    }
 
     let setPrimary = null;
     if (Object.prototype.hasOwnProperty.call(payload, 'is_primary') || Object.prototype.hasOwnProperty.call(payload, 'is_default')) {

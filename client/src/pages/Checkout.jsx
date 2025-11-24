@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import toast from "react-hot-toast";
 import { useNavigate } from "react-router-dom";
 import { useAppContext } from "../context/AppContext";
@@ -39,6 +39,9 @@ const Checkout = () => {
     getCartAmount,
     delivery_charges,
     getDiscountAmount,
+    estimateShippingFee,
+    cartItems,
+    cartItemDetails,
     applyDiscountCode,
     appliedDiscountCode,
     momoWallets,
@@ -88,8 +91,54 @@ const Checkout = () => {
   );
 
   const subtotal = getCartAmount();
-  const discount = getDiscountAmount(subtotal);
-  const shippingFee = subtotal === 0 ? 0 : delivery_charges;
+  const [shippingQuote, setShippingQuote] = useState({
+    fee: subtotal === 0 ? 0 : delivery_charges,
+    distanceKm: null,
+  });
+
+  const branchIds = useMemo(() => {
+    const ids = new Set();
+    Object.values(cartItemDetails || {}).forEach((detail) => {
+      const branchId =
+        detail?.branchId ??
+        detail?.branch_id ??
+        detail?.product_snapshot?.branch_id ??
+        null;
+      if (branchId) {
+        ids.add(String(branchId));
+      }
+    });
+    return Array.from(ids);
+  }, [cartItemDetails]);
+
+  useEffect(() => {
+    let mounted = true;
+    const updateShipping = async () => {
+      try {
+        const quote = await estimateShippingFee({ address: selectedAddress, branchIds });
+        if (mounted) {
+          setShippingQuote({
+            fee: subtotal === 0 ? 0 : quote.fee,
+            distanceKm: quote.distanceKm,
+          });
+        }
+      } catch (error) {
+        if (mounted) {
+          setShippingQuote({
+            fee: subtotal === 0 ? 0 : delivery_charges,
+            distanceKm: null,
+          });
+        }
+      }
+    };
+    updateShipping();
+    return () => {
+      mounted = false;
+    };
+  }, [estimateShippingFee, selectedAddress, branchIds, subtotal, delivery_charges]);
+
+  const shippingFee = shippingQuote.fee;
+  const discount = getDiscountAmount(subtotal, shippingFee);
   const total = Math.max(subtotal + shippingFee - discount, 0);
 
   const isCartEmpty = useMemo(() => subtotal === 0, [subtotal]);

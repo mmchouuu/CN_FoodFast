@@ -2,14 +2,16 @@
 import { useNavigate } from 'react-router-dom';
 // import React, { createContext, useState, useContext, useEffect } from 'react';
 
-import React, { createContext, useState, useContext, useEffect, useCallback, useMemo } from 'react'
+import React, { createContext, useState, useContext, useEffect, useCallback, useMemo, useRef } from 'react'
 
 
 import toast from 'react-hot-toast';
 import catalogService from '../services/catalog';
 import ordersService from '../services/orders';
 import paymentsService from '../services/payments';
+import cartService from '../services/cart';
 import reviewsService from '../services/reviews';
+import { searchAddress as geocodeSearch } from '../services/maptiler';
 import { restaurantPlaceholderImage, dishPlaceholderImage } from '../utils/imageHelpers';
 import { formatPaymentMethodLabel, formatPaymentStatusLabel } from '../utils/paymentDisplay';
 import { buildRestaurantSession } from '../utils/restaurantSession';
@@ -73,10 +75,141 @@ const ORDER_STATUS_SEQUENCE = [
     'completed',
 ];
 const ACTIVE_ORDER_REFRESH_INTERVAL = 15000;
+const CART_STORAGE_VERSION = 1;
+const CART_STORAGE_PREFIX = 'foodfast_cart_v1';
+const CART_GUEST_ID_STORAGE_KEY = 'foodfast_cart_guest_id';
+
+const hasCartLineItems = (items = {}) =>
+    Object.values(items || {}).some(
+        (sizeMap) =>
+            sizeMap &&
+            typeof sizeMap === 'object' &&
+            !Array.isArray(sizeMap) &&
+            Object.keys(sizeMap).length > 0,
+    );
+
+const generateGuestCartIdentifier = () => {
+    const base = `guest-${Date.now().toString(36)}`;
+    const cryptoSource =
+        typeof globalThis !== 'undefined' && globalThis.crypto ? globalThis.crypto : null;
+    if (cryptoSource?.randomUUID) {
+        return `${base}-${cryptoSource.randomUUID()}`;
+    }
+    const randomChunk = Math.random().toString(36).slice(2, 10);
+    return `${base}-${randomChunk}`;
+};
+
+const ensureGuestCartId = () => {
+    if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') {
+        return generateGuestCartIdentifier();
+    }
+    try {
+        const cached = localStorage.getItem(CART_GUEST_ID_STORAGE_KEY);
+        if (cached && cached.trim().length) {
+            return cached.trim();
+        }
+        const generated = generateGuestCartIdentifier();
+        localStorage.setItem(CART_GUEST_ID_STORAGE_KEY, generated);
+        const legacyKey = `${CART_STORAGE_PREFIX}:guest`;
+        const legacySnapshot = localStorage.getItem(legacyKey);
+        if (legacySnapshot && !localStorage.getItem(`${CART_STORAGE_PREFIX}:${generated}`)) {
+            localStorage.setItem(`${CART_STORAGE_PREFIX}:${generated}`, legacySnapshot);
+            localStorage.removeItem(legacyKey);
+        }
+        return generated;
+    } catch (error) {
+        console.warn('[cart] Unable to ensure guest cart id', error?.message || error);
+        return generateGuestCartIdentifier();
+    }
+};
 
 const toNumberOr = (value, fallback = 0) => {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const normaliseCoordinate = (source) => {
+    if (!source || typeof source !== 'object') return null;
+    const lat =
+        source.lat ?? source.latitude ?? source.latitute ?? source.lat_value ?? null;
+    const lng =
+        source.lng ?? source.lon ?? source.long ?? source.longitude ?? source.lng_value ?? null;
+    const numLat = Number(lat);
+    const numLng = Number(lng);
+    if (!Number.isFinite(numLat) || !Number.isFinite(numLng)) {
+        return null;
+    }
+    return { lat: numLat, lng: numLng };
+};
+
+const haversineDistanceKm = (coordA, coordB) => {
+    if (!coordA || !coordB) return null;
+    const toRad = (value) => (value * Math.PI) / 180;
+    const dLat = toRad(Number(coordB.lat) - Number(coordA.lat));
+    const dLng = toRad(Number(coordB.lng) - Number(coordA.lng));
+    const lat1 = toRad(Number(coordA.lat));
+    const lat2 = toRad(Number(coordB.lat));
+
+    const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.sin(dLng / 2) * Math.sin(dLng / 2) * Math.cos(lat1) * Math.cos(lat2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return 6371 * c; // km
+};
+
+const computeShippingFee = (distanceKm) => {
+    const BASE_FEE = 15000; // VND
+    const VARIABLE_RATE_PER_KM = 5000; // VND per km
+    const MAX_DISTANCE_KM = 50;
+    if (!Number.isFinite(distanceKm) || distanceKm <= 0) {
+        return BASE_FEE;
+    }
+    const cappedDistance = Math.min(distanceKm, MAX_DISTANCE_KM);
+    const variable = Math.round(cappedDistance * VARIABLE_RATE_PER_KM);
+    return BASE_FEE + variable;
+};
+
+const geocodeCache = new Map();
+
+const buildAddressQuery = (address = {}) => {
+    const parts = [
+        address.street,
+        address.ward,
+        address.district,
+        address.city,
+    ]
+        .filter((value) => typeof value === 'string' && value.trim().length)
+        .map((value) => value.trim());
+    return parts.join(', ');
+};
+
+const resolveCoordinateFromAddress = async (address = null) => {
+    if (!address) return null;
+    const existing = normaliseCoordinate(address.location || address);
+    if (existing) return existing;
+
+    const query = buildAddressQuery(address);
+    if (!query) return null;
+
+    const cacheKey = query.toLowerCase();
+    if (geocodeCache.has(cacheKey)) {
+        return geocodeCache.get(cacheKey);
+    }
+
+    try {
+        const data = await geocodeSearch(query, { limit: 1 });
+        const center = data?.features?.[0]?.center;
+        if (Array.isArray(center) && center.length >= 2) {
+            const coord = { lng: Number(center[0]), lat: Number(center[1]) };
+            if (Number.isFinite(coord.lat) && Number.isFinite(coord.lng)) {
+                geocodeCache.set(cacheKey, coord);
+                return coord;
+            }
+        }
+    } catch (error) {
+        console.warn('[geocode] Failed to resolve address', error?.message || error);
+    }
+    return null;
 };
 
 const pickBooleanFlag = (...candidates) => {
@@ -202,6 +335,26 @@ const computeReviewSummary = (reviews = []) => {
     const total = reviews.reduce((sum, review) => sum + (Number(review.rating) || 0), 0);
     const average = Number((total / reviews.length).toFixed(2));
     return { average, count: reviews.length };
+};
+
+const computeProductReviewSummary = (productId, reviews = []) => {
+    if (!productId) return { average: null, count: 0 };
+    const ratings = [];
+    reviews.forEach((review) => {
+        if (!review || !Array.isArray(review.dishes)) return;
+        review.dishes.forEach((dish) => {
+            const dishId = dish?.productId || dish?.dishId;
+            if (dishId && String(dishId) === String(productId)) {
+                const val = Number(dish.rating);
+                if (Number.isFinite(val)) {
+                    ratings.push(val);
+                }
+            }
+        });
+    });
+    if (!ratings.length) return { average: null, count: 0 };
+    const avg = ratings.reduce((sum, val) => sum + val, 0) / ratings.length;
+    return { average: Number(avg.toFixed(2)), count: ratings.length };
 };
 
 const detectCardBrand = (digitString = '') => {
@@ -391,6 +544,13 @@ const adaptRestaurantFromApi = (restaurant) => {
                 branch.is_open ??
                 (statusText ? statusText !== 'closed' && statusText !== 'inactive' : null);
 
+            const branchCoordinate = normaliseCoordinate(
+                branch.location || {
+                    lat: branch.latitude ?? branch.lat,
+                    lng: branch.longitude ?? branch.lng ?? branch.lon,
+                },
+            );
+
             return {
                 id: branch.id,
                 name: branch.name || restaurant.name || 'Branch',
@@ -410,7 +570,13 @@ const adaptRestaurantFromApi = (restaurant) => {
                 categoryAssignments: branchCategoriesRaw,
                 combos: branchCombos,
                 tags: Array.from(new Set([restaurant.cuisine, ...branchCategoryNames].filter(Boolean))),
-                distanceKm: toNumberOr(branch.distance_km, toNumberOr(restaurant.distance_km, 0)),
+                latitude: branchCoordinate?.lat ?? branch.latitude ?? branch.lat ?? null,
+                longitude: branchCoordinate?.lng ?? branch.longitude ?? branch.lng ?? branch.lon ?? null,
+                location: branchCoordinate,
+                distanceKm: toNumberOr(
+                    branch.distance_km ?? branch.distanceKm,
+                    toNumberOr(restaurant.distance_km ?? restaurant.distanceKm, null),
+                ),
             };
         })
         : [];
@@ -420,7 +586,7 @@ const adaptRestaurantFromApi = (restaurant) => {
         name: restaurant.name || 'Restaurant',
         description: restaurant.description || '',
         address: restaurant.address || restaurant.description || 'Information is updating.',
-        distanceKm: toNumberOr(restaurant.distance_km, 0),
+        distanceKm: toNumberOr(restaurant.distance_km ?? restaurant.distanceKm, null),
         rating: toNumberOr(restaurant.avg_branch_rating, 0),
         reviewCount: toNumberOr(restaurant.total_branch_ratings, 0),
         heroImage,
@@ -691,6 +857,61 @@ function buildBranchCatalog(brands = []) {
     return { branches, branchProducts };
 }
 
+const attachDistancesToCatalog = (brands = [], customerCoord = null) => {
+    if (!customerCoord) return brands;
+    return brands.map((brand) => {
+            const branchList = Array.isArray(brand.branches) ? brand.branches : [];
+            let minDistance = null;
+            let minDeliveryFee = null;
+            const branchesWithDistance = branchList.map((branch) => {
+                const rawServerDistance = branch.distanceKm ?? branch.distance_km;
+                const serverDistance = Number(rawServerDistance);
+                const hasServerDistance = Number.isFinite(serverDistance);
+                const serverDeliveryFee =
+                    branch.delivery_fee ?? branch.deliveryFee ?? branch.shipping_fee ?? branch.shippingFee;
+            const branchCoord =
+                normaliseCoordinate(branch.location) ||
+                normaliseCoordinate({
+                    lat: branch.latitude ?? branch.lat,
+                    lng: branch.longitude ?? branch.lng ?? branch.lon,
+                });
+            const computedDistance =
+                branchCoord && customerCoord ? haversineDistanceKm(branchCoord, customerCoord) : null;
+            let distanceKm = null;
+            const distances = [serverDistance, computedDistance].filter((d) => Number.isFinite(d));
+            if (distances.length) {
+                distanceKm = Math.min(...distances);
+            }
+            if (Number.isFinite(distanceKm)) {
+                minDistance = minDistance === null ? distanceKm : Math.min(minDistance, distanceKm);
+            }
+            let deliveryFee = null;
+            const serverFeeNumber = Number(serverDeliveryFee);
+            if (Number.isFinite(serverFeeNumber) && serverFeeNumber > 0 && serverFeeNumber < 1000000) {
+                deliveryFee = serverFeeNumber;
+            }
+            if (Number.isFinite(deliveryFee)) {
+                minDeliveryFee =
+                    minDeliveryFee === null ? deliveryFee : Math.min(minDeliveryFee, deliveryFee);
+            }
+            return {
+                ...branch,
+                distanceKm,
+                deliveryFee,
+            };
+        });
+        return {
+            ...brand,
+            branches: branchesWithDistance,
+            distanceKm: minDistance !== null ? minDistance : brand.distanceKm ?? brand.distance_km ?? null,
+            deliveryFee:
+                minDeliveryFee !== null
+                    ? minDeliveryFee
+                    : brand.deliveryFee ?? brand.delivery_fee ?? null,
+        };
+    });
+};
+
 const adaptAddressFromApi = (address) => {
     if (!address) return null;
     const primaryFlag =
@@ -710,6 +931,24 @@ const adaptAddressFromApi = (address) => {
         city: address.city || '',
         instructions: address.instructions || '',
         isDefault: Boolean(primaryFlag),
+        latitude:
+            address.latitude !== undefined && address.latitude !== null
+                ? Number(address.latitude)
+                : address.lat !== undefined && address.lat !== null
+                ? Number(address.lat)
+                : null,
+        longitude:
+            address.longitude !== undefined && address.longitude !== null
+                ? Number(address.longitude)
+                : address.lng !== undefined && address.lng !== null
+                ? Number(address.lng)
+                : null,
+        location: normaliseCoordinate(
+            address.location || {
+                lat: address.latitude ?? address.lat,
+                lng: address.longitude ?? address.lng ?? address.lon,
+            },
+        ),
         createdAt: address.createdAt || address.created_at || null,
         updatedAt: address.updatedAt || address.updated_at || null,
     };
@@ -1210,6 +1449,7 @@ export const AppContextProvider = ({ children }) => {
     const [ordersLoading, setOrdersLoading] = useState(false);
     const [notifications, setNotifications] = useState(notificationFeed);
     const [addresses, setAddresses] = useState([]);
+    const [customerCoordinate, setCustomerCoordinate] = useState(null);
 
     const [momoWallets, setMomoWallets] = useState([]);
     const [cardAccounts, setCardAccounts] = useState([]);
@@ -1240,6 +1480,8 @@ export const AppContextProvider = ({ children }) => {
     const [searchQuery, setSearchQuery] = useState("");
     const [cartItems, setCartItems] = useState({});
     const [cartItemDetails, setCartItemDetails] = useState({});
+    const [cartHydrated, setCartHydrated] = useState(false);
+    const cartSnapshotMetaRef = useRef({ updatedAt: null });
     const currency = 'VND';
     const delivery_charges = 15000;
 
@@ -1355,18 +1597,28 @@ export const AppContextProvider = ({ children }) => {
         setCatalogError(null);
 
         try {
+            const coord = selectedAddress ? await resolveCoordinateFromAddress(selectedAddress) : null;
+            if (coord) {
+                setCustomerCoordinate(coord);
+            }
+            const catalogParams = coord
+                ? { limit: 50, lat: coord.lat, lng: coord.lng }
+                : { limit: 50 };
             const [restaurantData, productData] = await Promise.all([
-                catalogService.fetchRestaurants({ limit: 50 }),
-                catalogService.fetchProducts({ limit: 50 }),
+                catalogService.fetchRestaurants(catalogParams),
+                catalogService.fetchProducts(catalogParams),
             ]);
 
             if (signal?.aborted) {
                 return { cancelled: true };
             }
 
-            const adaptedRestaurants = Array.isArray(restaurantData)
+            const adaptedRestaurantsRaw = Array.isArray(restaurantData)
                 ? restaurantData.map(adaptRestaurantFromApi).filter(Boolean)
                 : [];
+            const adaptedRestaurants = coord
+                ? attachDistancesToCatalog(adaptedRestaurantsRaw, coord)
+                : adaptedRestaurantsRaw;
 
             const { branches: flattenedBranches, branchProducts } = buildBranchCatalog(adaptedRestaurants);
 
@@ -1452,7 +1704,7 @@ export const AppContextProvider = ({ children }) => {
                 setCatalogLoading(false);
             }
         }
-    }, []);
+    }, [selectedAddress, resolveCoordinateFromAddress]);
 
     useEffect(() => {
         const controller = new AbortController();
@@ -1500,6 +1752,12 @@ export const AppContextProvider = ({ children }) => {
         }
     });
     const authProfileId = authProfile?.id || null;
+    const [guestCartId] = useState(() => ensureGuestCartId());
+    const cartIdentity = authProfileId || guestCartId;
+    const cartStorageKey = useMemo(
+        () => `${CART_STORAGE_PREFIX}:${cartIdentity || 'guest'}`,
+        [cartIdentity],
+    );
 const [restaurantProfile, setRestaurantProfile] = useState(() => {
     try {
         const raw = JSON.parse(localStorage.getItem('restaurant_profile') || 'null');
@@ -1854,6 +2112,166 @@ const [restaurantProfile, setRestaurantProfile] = useState(() => {
         };
     }, [userFullName, userPhoneNumber]);
 
+    const readCartFromStorage = useCallback((storageKey) => {
+        try {
+            const raw = localStorage.getItem(storageKey);
+            if (!raw) return null;
+            const parsed = JSON.parse(raw);
+            if (!parsed || typeof parsed !== 'object') return null;
+            if (parsed.version && parsed.version !== CART_STORAGE_VERSION) {
+                return null;
+            }
+            const items =
+                parsed.items && typeof parsed.items === 'object' && !Array.isArray(parsed.items)
+                    ? parsed.items
+                    : {};
+            const details =
+                parsed.details && typeof parsed.details === 'object' && !Array.isArray(parsed.details)
+                    ? parsed.details
+                    : {};
+            const updatedAt =
+                typeof parsed.updatedAt === 'number' && parsed.updatedAt > 0
+                    ? parsed.updatedAt
+                    : null;
+            return { items, details, updatedAt };
+        } catch (error) {
+            console.warn('[cart] Unable to read cached cart', error?.message || error);
+            return null;
+        }
+    }, []);
+
+    const persistCartToStorage = useCallback((storageKey, snapshot) => {
+        try {
+            const updatedAt =
+                typeof snapshot.updatedAt === 'number' && snapshot.updatedAt > 0
+                    ? snapshot.updatedAt
+                    : Date.now();
+            const payload = {
+                items: snapshot.items || {},
+                details: snapshot.details || {},
+                version: CART_STORAGE_VERSION,
+                updatedAt,
+            };
+            localStorage.setItem(storageKey, JSON.stringify(payload));
+            return updatedAt;
+        } catch (error) {
+            console.warn('[cart] Unable to persist cart locally', error?.message || error);
+            return null;
+        }
+    }, []);
+
+    useEffect(() => {
+        let cancelled = false;
+
+        setCartHydrated(false);
+        setCartItems({});
+        setCartItemDetails({});
+        cartSnapshotMetaRef.current = { updatedAt: null };
+
+        const hydrateCart = async () => {
+            const localSnapshot = readCartFromStorage(cartStorageKey);
+            let localUpdatedAt = null;
+            let localHasItems = false;
+
+            if (localSnapshot && !cancelled) {
+                const localItems = localSnapshot.items || {};
+                const localDetails = localSnapshot.details || {};
+                localHasItems = hasCartLineItems(localItems);
+                localUpdatedAt =
+                    typeof localSnapshot.updatedAt === 'number' && localSnapshot.updatedAt > 0
+                        ? localSnapshot.updatedAt
+                        : localHasItems
+                            ? Date.now()
+                            : null;
+                cartSnapshotMetaRef.current = { updatedAt: localUpdatedAt };
+                setCartItems(localItems);
+                setCartItemDetails(localDetails);
+            }
+
+            if (cartIdentity) {
+                try {
+                    const remoteSnapshot = await cartService.fetchCart(cartIdentity);
+                    if (!cancelled && remoteSnapshot) {
+                        const remoteItems =
+                            remoteSnapshot.items && typeof remoteSnapshot.items === 'object'
+                                ? remoteSnapshot.items
+                                : {};
+                        const remoteDetails =
+                            remoteSnapshot.details && typeof remoteSnapshot.details === 'object'
+                                ? remoteSnapshot.details
+                                : {};
+                        const remoteHasItems = hasCartLineItems(remoteItems);
+                        const remoteUpdatedAt = remoteSnapshot.updated_at
+                            ? Date.parse(remoteSnapshot.updated_at)
+                            : null;
+
+                        const shouldApplyRemote =
+                            (Number.isFinite(remoteUpdatedAt) &&
+                                (localUpdatedAt === null || remoteUpdatedAt >= localUpdatedAt)) ||
+                            (!localHasItems && remoteHasItems);
+
+                        if (shouldApplyRemote) {
+                            cartSnapshotMetaRef.current = {
+                                updatedAt: Number.isFinite(remoteUpdatedAt)
+                                    ? remoteUpdatedAt
+                                    : Date.now(),
+                            };
+                            setCartItems(remoteItems);
+                            setCartItemDetails(remoteDetails);
+                        }
+                    }
+                } catch (error) {
+                    console.warn('[cart] Failed to load saved cart', error?.message || error);
+                }
+            }
+
+            if (!cancelled) {
+                setCartHydrated(true);
+            }
+        };
+
+        hydrateCart();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [cartIdentity, cartStorageKey, readCartFromStorage]);
+
+    useEffect(() => {
+        if (!cartHydrated) return undefined;
+
+        const snapshot = {
+            items: cartItems || {},
+            details: cartItemDetails || {},
+            version: CART_STORAGE_VERSION,
+        };
+
+        const updatedAt = Date.now();
+        cartSnapshotMetaRef.current = { updatedAt };
+        persistCartToStorage(cartStorageKey, { ...snapshot, updatedAt });
+
+        if (!cartIdentity) {
+            return undefined;
+        }
+
+        const timer = setTimeout(() => {
+            cartService
+                .saveCart(snapshot, cartIdentity)
+                .catch((error) =>
+                    console.warn('[cart] Failed to sync cart to server', error?.message || error),
+                );
+        }, 300);
+
+        return () => clearTimeout(timer);
+    }, [
+        cartIdentity,
+        cartHydrated,
+        cartItemDetails,
+        cartItems,
+        cartStorageKey,
+        persistCartToStorage,
+    ]);
+
     // --- Cart Functions ---
     const generateCartSignature = (value) => (value ? String(value) : 'base');
 
@@ -2055,12 +2473,24 @@ const [restaurantProfile, setRestaurantProfile] = useState(() => {
         return total;
     };
 
-    const clearCart = () => {
+    const clearCart = useCallback(() => {
         setCartItems({});
         setCartItemDetails({});
-    };
+        try {
+            localStorage.removeItem(cartStorageKey);
+        } catch (error) {
+            console.warn('[cart] Unable to clear cached cart', error?.message || error);
+        }
+        if (cartIdentity) {
+            cartService
+                .clearCart(cartIdentity)
+                .catch((error) =>
+                    console.warn('[cart] Failed to clear server cart', error?.message || error),
+                );
+        }
+    }, [cartIdentity, cartStorageKey]);
 
-    const getDiscountAmount = useCallback((subtotal) => {
+    const getDiscountAmount = useCallback((subtotal, shippingFeeAmount = delivery_charges) => {
         if (!subtotal || subtotal <= 0) {
             return 0;
         }
@@ -2071,7 +2501,10 @@ const [restaurantProfile, setRestaurantProfile] = useState(() => {
         const { type, value } = appliedDiscountCode;
 
         if (type === 'shipping') {
-            return Math.min(delivery_charges, subtotal);
+            const fee = Number.isFinite(Number(shippingFeeAmount))
+                ? Math.max(0, Number(shippingFeeAmount))
+                : delivery_charges;
+            return Math.min(fee, subtotal);
         }
 
         if (type === 'percentage') {
@@ -2090,6 +2523,75 @@ const [restaurantProfile, setRestaurantProfile] = useState(() => {
 
         return 0;
     }, [appliedDiscountCode, delivery_charges]);
+
+    const estimateShippingFee = useCallback(
+        async ({ address, branchIds: branchIdsInput } = {}) => {
+            const targetAddress = address || selectedAddress || null;
+            const resolvedCoord =
+                targetAddress && normaliseCoordinate(targetAddress.location)
+                    ? normaliseCoordinate(targetAddress.location)
+                    : await resolveCoordinateFromAddress(targetAddress);
+            const customerCoord = resolvedCoord || customerCoordinate || null;
+            if (resolvedCoord && !customerCoordinate) {
+                setCustomerCoordinate(resolvedCoord);
+            }
+            const branchIds = Array.isArray(branchIdsInput) ? branchIdsInput : [];
+            const candidateBranchIds =
+                branchIds.length > 0
+                    ? branchIds
+                    : restaurants.map((branch) => branch.branchId || branch.id).filter(Boolean);
+
+            let minDistanceKm = null;
+            const feeCandidates = [];
+            candidateBranchIds.forEach((branchId) => {
+                const branchEntry = restaurants.find((entry) => {
+                    const candidate = entry.branchId || entry.id;
+                    return candidate && String(candidate) === String(branchId);
+                });
+                const distances = [];
+                const serverDistance = branchEntry ? Number(branchEntry.distanceKm) : null;
+                if (Number.isFinite(serverDistance) && serverDistance > 0 && serverDistance < 200) {
+                    distances.push(serverDistance);
+                }
+                const serverDeliveryFee =
+                    branchEntry?.deliveryFee ?? branchEntry?.delivery_fee ?? null;
+                const branchCoord =
+                    normaliseCoordinate(branchEntry?.location) ||
+                    normaliseCoordinate({
+                        lat: branchEntry?.latitude,
+                        lng: branchEntry?.longitude,
+                    });
+                if (branchCoord && customerCoord) {
+                        const computed = haversineDistanceKm(branchCoord, customerCoord);
+                    if (Number.isFinite(computed) && computed > 0 && computed < 200) {
+                        distances.push(computed);
+                    }
+                }
+                const branchDistance = distances.length ? Math.min(...distances) : null;
+                let branchFee = null;
+                if (Number.isFinite(serverDeliveryFee) && serverDeliveryFee > 0 && serverDeliveryFee < 1000000) {
+                    branchFee = serverDeliveryFee;
+                }
+                if (Number.isFinite(branchDistance)) {
+                    minDistanceKm =
+                        minDistanceKm === null
+                            ? branchDistance
+                            : Math.min(minDistanceKm, branchDistance);
+                }
+                if (Number.isFinite(branchFee)) {
+                    feeCandidates.push(branchFee);
+                }
+            });
+
+            let fee = feeCandidates.length ? Math.min(...feeCandidates) : null;
+            if (fee === null) {
+                fee = computeShippingFee(minDistanceKm);
+            }
+
+            return { fee, distanceKm: minDistanceKm, coordinate: customerCoord };
+        },
+        [restaurants, selectedAddress, customerCoordinate, resolveCoordinateFromAddress],
+    );
 
     const placeOrder = useCallback(async ({ paymentMethod: paymentMethodOverride, address: addressOverride, notes } = {}) => {
         if (!authToken) {
@@ -2342,9 +2844,6 @@ const [restaurantProfile, setRestaurantProfile] = useState(() => {
         const branchIds = Array.from(branchStats.keys());
 
         const subtotal = orderItems.reduce((sum, item) => sum + item.total_price, 0);
-        const shippingFee = subtotal === 0 ? 0 : delivery_charges;
-        const discount = getDiscountAmount(subtotal);
-        const totalAmount = Math.max(0, subtotal + shippingFee - discount);
         const currencyCode = (() => {
             const symbol = (currency || '').trim();
             if (/^[A-Za-z]{3}$/.test(symbol)) {
@@ -2378,6 +2877,17 @@ const [restaurantProfile, setRestaurantProfile] = useState(() => {
             throw new Error('Địa chỉ giao hàng chưa đầy đủ. Vui lòng cập nhật lại.');
         }
         const deliveryAddressId = deliveryAddressSnapshot.id;
+
+        const { fee: shippingFee, coordinate: customerCoord } = await estimateShippingFee({
+            address: deliveryAddressSnapshot,
+            branchIds,
+        });
+        if (customerCoord) {
+            deliveryAddressSnapshot.location = customerCoord;
+        }
+
+        const discount = getDiscountAmount(subtotal, shippingFee);
+        const totalAmount = Math.max(0, subtotal + shippingFee - discount);
 
         const restaurantSnapshots = {};
         const restaurantNames = {};
@@ -2594,7 +3104,6 @@ const [restaurantProfile, setRestaurantProfile] = useState(() => {
         cartItems,
         cartItemDetails,
         products,
-        delivery_charges,
         getDiscountAmount,
         currency,
         method,
@@ -2609,6 +3118,7 @@ const [restaurantProfile, setRestaurantProfile] = useState(() => {
         selectedCardId,
         resolveRestaurantIdByBranch,
         resolveBranchAvailabilityForProduct,
+        estimateShippingFee,
     ]);
 
     // Persist owner flag
@@ -3204,6 +3714,30 @@ const [restaurantProfile, setRestaurantProfile] = useState(() => {
         [setRestaurantBrands, setRestaurants],
     );
 
+    const updateProductAggregate = useCallback(
+        (productId, summary) => {
+            if (!productId || !summary) return;
+            const normalized = productId.toString();
+            setProducts((prev) =>
+                prev.map((product) => {
+                    if (product._id === normalized || product.id === normalized) {
+                        return {
+                            ...product,
+                            rating:
+                                summary.average !== null && summary.average !== undefined
+                                    ? summary.average
+                                    : product.rating,
+                            reviewCount:
+                                summary.count !== undefined ? summary.count : product.reviewCount,
+                        };
+                    }
+                    return product;
+                }),
+            );
+        },
+        [setProducts],
+    );
+
     const addRestaurantReview = useCallback((review) => {
         if (!review) return;
         setRestaurantReviews((prev) => {
@@ -3221,10 +3755,18 @@ const [restaurantProfile, setRestaurantProfile] = useState(() => {
                     [review.restaurantId]: true,
                 }));
                 updateRestaurantAggregate(review.restaurantId, computeReviewSummary(related));
+                if (Array.isArray(review.dishes)) {
+                    review.dishes.forEach((dish) => {
+                        const productId = dish?.productId || dish?.dishId;
+                        if (!productId) return;
+                        const summary = computeProductReviewSummary(productId, merged);
+                        updateProductAggregate(productId, summary);
+                    });
+                }
             }
             return merged;
         });
-    }, [updateRestaurantAggregate]);
+    }, [updateRestaurantAggregate, updateProductAggregate]);
 
     const getReviewsForRestaurant = useCallback(
         (restaurantId) =>
@@ -3295,13 +3837,36 @@ const [restaurantProfile, setRestaurantProfile] = useState(() => {
                     [resolvedId]: summaryPayload,
                 }));
                 updateRestaurantAggregate(resolvedId, summaryPayload);
+                // Update product aggregates for any dishes mentioned in loaded reviews
+                const allReviewsForRestaurant = mergeReviewCollections(
+                    restaurantReviews,
+                    normalized,
+                ).filter((review) => review.restaurantId === resolvedId);
+                const productIds = new Set();
+                allReviewsForRestaurant.forEach((review) => {
+                    if (!Array.isArray(review.dishes)) return;
+                    review.dishes.forEach((dish) => {
+                        const productId = dish?.productId || dish?.dishId;
+                        if (productId) productIds.add(productId.toString());
+                    });
+                });
+                productIds.forEach((productId) => {
+                    const summary = computeProductReviewSummary(productId, allReviewsForRestaurant);
+                    updateProductAggregate(productId, summary);
+                });
                 return { reviews: mergedForRestaurant, summary: summaryPayload };
             } catch (error) {
                 console.error('Unable to load restaurant reviews', error);
                 throw error;
             }
         },
-        [loadedReviewRestaurants, restaurantReviews, restaurantReviewSummaries, updateRestaurantAggregate],
+        [
+            loadedReviewRestaurants,
+            restaurantReviews,
+            restaurantReviewSummaries,
+            updateRestaurantAggregate,
+            updateProductAggregate,
+        ],
     );
 
     const submitRestaurantReview = useCallback(
@@ -3360,12 +3925,34 @@ const [restaurantProfile, setRestaurantProfile] = useState(() => {
                         average: response.summary.averageRating ?? null,
                         count: response.summary.totalReviews ?? null,
                     });
+                    if (Array.isArray(normalized.dishes)) {
+                        const allReviewsForRestaurant = mergeReviewCollections(
+                            restaurantReviews,
+                            [normalized],
+                        ).filter((review) => review.restaurantId === restaurantId);
+                        normalized.dishes.forEach((dish) => {
+                            const productId = dish?.productId || dish?.dishId;
+                            if (!productId) return;
+                            const summary = computeProductReviewSummary(
+                                productId,
+                                allReviewsForRestaurant,
+                            );
+                            updateProductAggregate(productId, summary);
+                        });
+                    }
                 }
                 return normalized;
             }
             return null;
         },
-        [addRestaurantReview, authProfile, authProfileId, updateRestaurantAggregate],
+        [
+            addRestaurantReview,
+            authProfile,
+            authProfileId,
+            updateRestaurantAggregate,
+            updateProductAggregate,
+            restaurantReviews,
+        ],
     );
 
     // --- Exposed Values ---
@@ -3386,6 +3973,7 @@ const [restaurantProfile, setRestaurantProfile] = useState(() => {
         updateQuantity,
         getCartAmount,
         getDiscountAmount,
+        estimateShippingFee,
         method,
         setMethod,
         isOwner,

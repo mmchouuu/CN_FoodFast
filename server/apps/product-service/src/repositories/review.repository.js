@@ -346,7 +346,7 @@ async function getProductSummaries(productIds = []) {
 async function refreshRestaurantRatingSummary(restaurantId, client) {
   if (!restaurantId) return null;
   const executor = getExecutor(client);
-  await executor.query(
+  const { rows } = await executor.query(
     `
       WITH stats AS (
         SELECT
@@ -362,9 +362,72 @@ async function refreshRestaurantRatingSummary(restaurantId, client) {
         updated_at = now()
       FROM stats
       WHERE restaurants.id = $1
+      RETURNING
+        stats.avg_rating    AS average_rating,
+        stats.total_ratings AS total_ratings
     `,
     [restaurantId],
   );
+
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    averageRating: Number(row.average_rating || 0),
+    totalRatings: Number(row.total_ratings || 0),
+  };
+}
+
+async function refreshProductRatingSummary(productId, client) {
+  if (!productId) return null;
+  const executor = getExecutor(client);
+  const { rows } = await executor.query(
+    `
+      WITH stats AS (
+        SELECT
+          COALESCE(AVG(rating), 0)::NUMERIC(4,2) AS avg_rating,
+          COUNT(*)::INT AS total_ratings
+        FROM product_reviews
+        WHERE product_id = $1
+      )
+      UPDATE products
+      SET
+        rating = stats.avg_rating,
+        review_count = stats.total_ratings,
+        updated_at = now()
+      FROM stats
+      WHERE products.id = $1
+      RETURNING
+        stats.avg_rating    AS average_rating,
+        stats.total_ratings AS total_ratings
+    `,
+    [productId],
+  );
+
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    averageRating: Number(row.average_rating || 0),
+    totalRatings: Number(row.total_ratings || 0),
+  };
+}
+
+async function refreshProductRatingSummaries(productIds = [], client) {
+  if (!Array.isArray(productIds) || !productIds.length) return {};
+  const uniqueIds = Array.from(new Set(productIds.filter(Boolean)));
+  if (!uniqueIds.length) return {};
+
+  const summaries = {};
+  // Sequential to avoid overwhelming the connection inside a shared transaction
+  // and to guarantee deterministic ordering for parameter positions.
+  // eslint-disable-next-line no-restricted-syntax
+  for (const productId of uniqueIds) {
+    // eslint-disable-next-line no-await-in-loop
+    const summary = await refreshProductRatingSummary(productId, client);
+    if (summary) {
+      summaries[productId] = summary;
+    }
+  }
+  return summaries;
 }
 
 module.exports = {
@@ -380,4 +443,6 @@ module.exports = {
   getRestaurantSummaries,
   getProductSummaries,
   refreshRestaurantRatingSummary,
+  refreshProductRatingSummary,
+  refreshProductRatingSummaries,
 };

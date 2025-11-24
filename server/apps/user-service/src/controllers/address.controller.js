@@ -2,6 +2,8 @@ const model = require('../models/address.model');
 
 function serialize(address) {
   if (!address) return null;
+  const latitude = address.latitude;
+  const longitude = address.longitude;
   return {
     id: address.id,
     label: address.label,
@@ -10,6 +12,14 @@ function serialize(address) {
     district: address.district,
     city: address.city,
     is_default: Boolean(address.is_primary),
+    latitude,
+    longitude,
+    lat: latitude,
+    lng: longitude,
+    location:
+      latitude !== null && latitude !== undefined && longitude !== null && longitude !== undefined
+        ? { lat: latitude, lng: longitude }
+        : null,
     created_at: address.created_at,
     updated_at: address.updated_at,
   };

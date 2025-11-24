@@ -75,7 +75,7 @@ const DishCard = ({ dish, restaurantId, currency, onAdd, isDisabled = false }) =
             <p className="text-xs uppercase text-gray-400">{dish.category}</p>
           </div>
           <span className="rounded-full bg-orange-50 px-3 py-1 text-xs font-semibold text-orange-500">
-            {(dish.rating ?? 4.5).toFixed(1)} stars
+            {Number.isFinite(dish.rating) ? dish.rating.toFixed(1) : "—"} stars
           </span>
         </div>
         <p className="text-sm text-gray-500 line-clamp-3">{dish.description}</p>

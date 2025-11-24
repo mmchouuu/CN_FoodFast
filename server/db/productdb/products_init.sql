@@ -301,6 +301,8 @@ CREATE TABLE IF NOT EXISTS products (
   popular  BOOLEAN DEFAULT FALSE,
   available BOOLEAN DEFAULT TRUE,
   is_visible BOOLEAN DEFAULT TRUE,
+  rating NUMERIC(3,2) NOT NULL DEFAULT 0 CHECK (rating BETWEEN 0 AND 5),
+  review_count INT NOT NULL DEFAULT 0,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );

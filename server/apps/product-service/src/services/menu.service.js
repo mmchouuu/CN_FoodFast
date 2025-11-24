@@ -310,6 +310,14 @@ function mapProductRow(row, branchAssignments = []) {
     popular: row.popular,
     available: row.available,
     is_visible: row.is_visible,
+    rating:
+      row.rating === null || row.rating === undefined
+        ? null
+        : Number(row.rating),
+    review_count:
+      row.review_count === null || row.review_count === undefined
+        ? null
+        : Number(row.review_count),
     is_active: row.available !== false && row.is_visible !== false,
     branch_assignments: branchAssignments.map(mapBranchAssignment).filter(Boolean),
     created_at: row.created_at,

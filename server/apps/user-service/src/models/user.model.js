@@ -3,6 +3,47 @@ const { Pool } = require('pg');
 const config = require('../config');
 const pool = new Pool(config.DB);
 
+function toNumberOrNull(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function extractCoordinates(payload = {}) {
+  const location =
+    payload.location ||
+    payload.coordinate ||
+    payload.coordinates ||
+    payload.coords ||
+    {};
+
+  const latCandidate =
+    payload.latitude ??
+    payload.lat ??
+    payload.lat_value ??
+    payload.latValue ??
+    location.latitude ??
+    location.lat ??
+    location.lat_value ??
+    location.latValue;
+  const lngCandidate =
+    payload.longitude ??
+    payload.lng ??
+    payload.lon ??
+    payload.lng_value ??
+    payload.lngValue ??
+    location.longitude ??
+    location.lng ??
+    location.lon ??
+    location.lng_value ??
+    location.lngValue;
+
+  return {
+    latitude: latCandidate !== undefined ? toNumberOrNull(latCandidate) : undefined,
+    longitude: lngCandidate !== undefined ? toNumberOrNull(lngCandidate) : undefined,
+  };
+}
+
 async function findByEmail(email){
   const res = await pool.query(
     'SELECT * FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1',
@@ -159,6 +200,8 @@ async function getAddressesByUserId(userId) {
             ward,
             district,
             city,
+            latitude,
+            longitude,
             is_primary,
             created_at,
             updated_at
@@ -177,10 +220,30 @@ async function createAddress(userId, {
   district,
   city,
   isDefault,
+  latitude,
+  longitude,
+  lat,
+  lng,
+  lon,
+  location,
+  coordinate,
+  coordinates,
+  coords,
 }) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    const coordsData = extractCoordinates({
+      latitude,
+      longitude,
+      lat,
+      lng,
+      lon,
+      location,
+      coordinate,
+      coordinates,
+      coords,
+    });
 
     let makeDefault = isDefault === true;
     if (!makeDefault) {
@@ -208,15 +271,19 @@ async function createAddress(userId, {
           ward,
           district,
           city,
+          latitude,
+          longitude,
           is_primary
         )
-        VALUES ($1,$2,$3,$4,$5,$6,$7)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
         RETURNING id,
                   label,
                   street,
                   ward,
                   district,
                   city,
+                  latitude,
+                  longitude,
                   is_primary,
                   created_at,
                   updated_at`,
@@ -227,12 +294,24 @@ async function createAddress(userId, {
         ward || null,
         district || null,
         city || null,
+        coordsData.latitude === undefined ? null : coordsData.latitude,
+        coordsData.longitude === undefined ? null : coordsData.longitude,
         makeDefault,
       ],
     );
 
     await client.query('COMMIT');
-    return insert.rows[0];
+    const row = insert.rows[0];
+    const latValue = toNumberOrNull(row.latitude);
+    const lngValue = toNumberOrNull(row.longitude);
+    return {
+      ...row,
+      latitude: latValue,
+      longitude: lngValue,
+      lat: latValue,
+      lng: lngValue,
+      location: latValue !== null && lngValue !== null ? { lat: latValue, lng: lngValue } : null,
+    };
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;

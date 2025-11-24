@@ -34,6 +34,25 @@ function ensureOwnerRestaurantAccess(req, restaurantId) {
   return list.includes(target);
 }
 
+function pickCoordinateHeaders(req) {
+  const headers = {};
+  const source = req?.headers || {};
+  const latHeader =
+    source['x-lat'] ||
+    source['x-latitude'] ||
+    source['customer-lat'] ||
+    source['customer-latitude'];
+  const lngHeader =
+    source['x-lng'] ||
+    source['x-longitude'] ||
+    source['customer-lng'] ||
+    source['customer-longitude'];
+
+  if (latHeader !== undefined) headers['x-lat'] = latHeader;
+  if (lngHeader !== undefined) headers['x-lng'] = lngHeader;
+  return headers;
+}
+
 async function ownerSignup(req, res, next) {
   try {
     const payload = { ...(req.body || {}) };
@@ -135,7 +154,7 @@ async function listCatalog(req, res, next) {
   try {
     const params = { ...(req.query || {}) };
     const result = await restaurantClient.listCatalog(params, {
-      headers: { 'x-request-id': req.id },
+      headers: { 'x-request-id': req.id, ...pickCoordinateHeaders(req) },
     });
     return res.json(result);
   } catch (error) {
@@ -151,7 +170,7 @@ async function getCatalog(req, res, next) {
     }
     const params = { ...(req.query || {}) };
     const result = await restaurantClient.getCatalog(restaurantId, params, {
-      headers: { 'x-request-id': req.id },
+      headers: { 'x-request-id': req.id, ...pickCoordinateHeaders(req) },
     });
     return res.json(result);
   } catch (error) {

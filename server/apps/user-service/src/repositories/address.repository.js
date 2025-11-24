@@ -4,8 +4,52 @@ function getExecutor(client) {
   return client || pool;
 }
 
+function toNumberOrNull(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function extractCoordinates(payload = {}) {
+  const location =
+    payload.location ||
+    payload.coordinate ||
+    payload.coordinates ||
+    payload.coords ||
+    {};
+  const latCandidate =
+    payload.latitude ??
+    payload.lat ??
+    payload.lat_value ??
+    payload.latValue ??
+    location.latitude ??
+    location.lat ??
+    location.lat_value ??
+    location.latValue;
+  const lngCandidate =
+    payload.longitude ??
+    payload.lng ??
+    payload.lon ??
+    payload.lng_value ??
+    payload.lngValue ??
+    location.longitude ??
+    location.lng ??
+    location.lon ??
+    location.lng_value ??
+    location.lngValue;
+
+  return {
+    latitude: latCandidate !== undefined ? toNumberOrNull(latCandidate) : undefined,
+    longitude: lngCandidate !== undefined ? toNumberOrNull(lngCandidate) : undefined,
+    hasLatitude: latCandidate !== undefined,
+    hasLongitude: lngCandidate !== undefined,
+  };
+}
+
 function adaptAddress(row) {
   if (!row) return null;
+  const latitude = toNumberOrNull(row.latitude);
+  const longitude = toNumberOrNull(row.longitude);
   return {
     id: row.id,
     label: row.label,
@@ -14,6 +58,15 @@ function adaptAddress(row) {
     district: row.district,
     city: row.city,
     isDefault: row.is_primary,
+    is_default: row.is_primary,
+    latitude,
+    longitude,
+    lat: latitude,
+    lng: longitude,
+    location:
+      latitude !== null && longitude !== null
+        ? { lat: latitude, lng: longitude }
+        : null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -43,6 +96,7 @@ async function createAddress(userId, payload, client) {
     city = null,
     isDefault = false,
   } = payload;
+  const { latitude, longitude } = extractCoordinates(payload);
 
   let makeDefault = isDefault === true;
   if (!makeDefault) {
@@ -71,9 +125,11 @@ async function createAddress(userId, payload, client) {
         ward,
         district,
         city,
+        latitude,
+        longitude,
         is_primary
       )
-      VALUES ($1,$2,$3,$4,$5,$6,$7)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
       RETURNING *
     `,
     [
@@ -83,6 +139,8 @@ async function createAddress(userId, payload, client) {
       ward,
       district,
       city,
+      latitude,
+      longitude,
       makeDefault,
     ],
   );
@@ -130,10 +188,25 @@ async function updateAddress(userId, addressId, payload = {}, client) {
 
   Object.entries(columnMap).forEach(([key, column]) => {
     if (Object.prototype.hasOwnProperty.call(payload, key)) {
-      params.push(payload[key]);
+      const raw = payload[key];
+      const value =
+        typeof raw === 'string'
+          ? raw.trim()
+          : raw;
+      params.push(value);
       sets.push(`${column} = $${params.length}`);
     }
   });
+
+  const { latitude, longitude, hasLatitude, hasLongitude } = extractCoordinates(payload);
+  if (hasLatitude) {
+    params.push(latitude);
+    sets.push(`latitude = $${params.length}`);
+  }
+  if (hasLongitude) {
+    params.push(longitude);
+    sets.push(`longitude = $${params.length}`);
+  }
 
   if (setDefault === true) {
     sets.push('is_primary = TRUE');

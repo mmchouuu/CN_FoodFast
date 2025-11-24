@@ -2,7 +2,9 @@ import React from "react";
 import { assets } from "../assets/data";
 
 const RatingStars = ({ rating }) => {
-  const stars = Math.round(rating);
+  const hasValue = Number.isFinite(rating);
+  const value = hasValue ? rating : 0;
+  const stars = Math.round(value);
 
   return (
     <div className="flex items-center gap-1 justify-center">
@@ -17,7 +19,9 @@ const RatingStars = ({ rating }) => {
           }`}
         />
       ))}
-      <p className="text-gray-700 font-medium ml-2">{rating.toFixed(1)}</p>
+      <p className="text-gray-700 font-medium ml-2">
+        {hasValue ? value.toFixed(1) : "—"}
+      </p>
     </div>
   );
 };

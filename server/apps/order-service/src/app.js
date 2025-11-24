@@ -3,6 +3,7 @@ const morgan = require('morgan');
 
 const ordersRouter = require('./routes/order.routes');
 const customerOrderRoutes = require('./routes/orders.customer.routes');
+const customerCartRoutes = require('./routes/cart.customer.routes');
 const ownerOrderRoutes = require('./routes/orders.owner.routes');
 const adminOrderRoutes = require('./routes/orders.admin.routes');
 const auth = require('./middleware/auth');
@@ -28,6 +29,7 @@ const mountScopedRoute = (path, middleware, handler) => {
 };
 
 mountScopedRoute('/customer/orders', requireRoles(['customer', 'user']), customerOrderRoutes);
+mountScopedRoute('/customer/cart', requireRoles(['customer', 'user']), customerCartRoutes);
 mountScopedRoute('/owner/orders', requireRoles(['owner', 'manager']), ownerOrderRoutes);
 mountScopedRoute(
   '/admin/orders',

@@ -145,7 +145,11 @@ async function createRestaurantReview(restaurantId, payload = {}) {
   }
 
   const dishes = Array.isArray(payload.dishes) ? payload.dishes : [];
-  const restaurantReview = await withTransaction(async (client) => {
+  const {
+    restaurantReview,
+    restaurantSummary,
+    productSummaries,
+  } = await withTransaction(async (client) => {
     const review = await reviewRepository.createRestaurantReview(
       {
         restaurantId: resolvedRestaurantId,
@@ -162,6 +166,8 @@ async function createRestaurantReview(restaurantId, payload = {}) {
       },
       client,
     );
+
+    const productIds = new Set();
 
     for (const item of dishes) {
       if (!item || !item.productId) continue;
@@ -183,23 +189,53 @@ async function createRestaurantReview(restaurantId, payload = {}) {
         },
         client,
       );
+      productIds.add(item.productId);
     }
 
-    return review;
+    const aggregatedRestaurant = await reviewRepository.refreshRestaurantRatingSummary(
+      resolvedRestaurantId,
+      client,
+    );
+
+    const productRatingSummaries = productIds.size
+      ? await reviewRepository.refreshProductRatingSummaries(Array.from(productIds), client)
+      : {};
+
+    return {
+      restaurantReview: review,
+      restaurantSummary: aggregatedRestaurant,
+      productSummaries: productRatingSummaries,
+    };
   });
-  await reviewRepository.refreshRestaurantRatingSummary(resolvedRestaurantId);
 
   const reviewIds = restaurantReview ? [restaurantReview.id] : [];
   const productRows = await reviewRepository.listProductReviewsByRestaurantReviewIds(reviewIds);
   const mapped = mapRestaurantReview(restaurantReview, productRows);
-  const summary = await reviewRepository.countRestaurantReviews(resolvedRestaurantId);
+
+  let summary = restaurantSummary;
+  if (!summary) {
+    summary = await reviewRepository.countRestaurantReviews(resolvedRestaurantId);
+    if (summary) {
+      summary = {
+        averageRating: Number(summary.average || 0),
+        totalRatings: Number(summary.total || 0),
+      };
+    }
+  }
 
   return {
     review: mapped,
     summary: {
-      averageRating: Number(summary.average || 0),
-      totalReviews: Number(summary.total || 0),
+      averageRating: Number(summary?.averageRating ?? summary?.average ?? 0),
+      totalReviews: Number(
+        summary?.totalReviews ??
+          summary?.totalRatings ??
+          summary?.total ??
+          summary?.review_count ??
+          0,
+      ),
     },
+    productSummaries,
   };
 }
 

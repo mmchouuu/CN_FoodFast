@@ -6,6 +6,9 @@ const reviewRepository = require('../repositories/review.repository');
 const menuService = require('./menu.service');
 
 const DEFAULT_TAX_RATE = 7;
+const BASE_DELIVERY_FEE = 15000; // VND
+const VARIABLE_RATE_PER_KM = 5000; // VND per km
+const MAX_DELIVERY_DISTANCE_KM = 50; // cap to avoid runaway fees
 
 function toNumber(value, fallback = 0) {
   const numeric = Number(value);
@@ -21,6 +24,101 @@ function computePriceWithTax(basePrice, ratePercent) {
   const rate = toNumber(ratePercent, DEFAULT_TAX_RATE);
   const withTax = price * (1 + rate / 100);
   return Number(withTax.toFixed(2));
+}
+
+function normaliseCoordinate(raw) {
+  if (!raw) return null;
+
+  if (typeof raw === 'object') {
+    const latCandidate =
+      raw.lat ??
+      raw.latitude ??
+      raw.latitute ??
+      raw.lat_value ??
+      raw.latValue ??
+      raw.customerLat ??
+      raw.customer_lat ??
+      raw.userLat ??
+      raw.user_lat;
+    const lngCandidate =
+      raw.lng ??
+      raw.longitude ??
+      raw.lon ??
+      raw.long ??
+      raw.lng_value ??
+      raw.lngValue ??
+      raw.customerLng ??
+      raw.customer_lng ??
+      raw.userLng ??
+      raw.user_lng;
+    const lat = toNumber(latCandidate, null);
+    const lng = toNumber(lngCandidate, null);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+    return { lat, lng };
+  }
+
+  return null;
+}
+
+function extractCustomerCoordinate(filters = {}) {
+  if (!filters) return null;
+  if (filters.__customerLocation) {
+    const coord = normaliseCoordinate(filters.__customerLocation);
+    if (coord) return coord;
+  }
+  if (filters.location) {
+    const coord = normaliseCoordinate(filters.location);
+    if (coord) return coord;
+  }
+  const latCandidate =
+    filters.lat ??
+    filters.latitude ??
+    filters.latitute ??
+    filters.lat_value ??
+    filters.customerLat ??
+    filters.customer_lat ??
+    filters.userLat ??
+    filters.user_lat;
+  const lngCandidate =
+    filters.lng ??
+    filters.longitude ??
+    filters.lon ??
+    filters.long ??
+    filters.lng_value ??
+    filters.customerLng ??
+    filters.customer_lng ??
+    filters.userLng ??
+    filters.user_lng;
+  return normaliseCoordinate({ lat: latCandidate, lng: lngCandidate });
+}
+
+function haversineDistanceKm(origin, destination) {
+  const from = normaliseCoordinate(origin);
+  const to = normaliseCoordinate(destination);
+  if (!from || !to) return null;
+
+  const R = 6371; // km
+  const dLat = ((to.lat - from.lat) * Math.PI) / 180;
+  const dLng = ((to.lng - from.lng) * Math.PI) / 180;
+  const lat1 = (from.lat * Math.PI) / 180;
+  const lat2 = (to.lat * Math.PI) / 180;
+
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.sin(dLng / 2) * Math.sin(dLng / 2) * Math.cos(lat1) * Math.cos(lat2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return Number((R * c).toFixed(2));
+}
+
+function computeDeliveryFee(distanceKm) {
+  const numeric = Number(distanceKm);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return BASE_DELIVERY_FEE;
+  }
+  const cappedDistance = Math.min(numeric, MAX_DELIVERY_DISTANCE_KM);
+  const variable = Math.round(cappedDistance * VARIABLE_RATE_PER_KM);
+  return BASE_DELIVERY_FEE + variable;
 }
 
 function buildTaxMaps(restaurantAssignments = [], branchAssignments = [], branchProductOverrides = []) {
@@ -647,9 +745,64 @@ async function getRestaurantCatalog(restaurantId, filters = {}) {
   const restaurant = await restaurantRepository.findRestaurantById(resolvedRestaurantId);
   if (!restaurant) return null;
 
+  const customerLocation =
+    normaliseCoordinate(filters.__customerLocation) || extractCustomerCoordinate(filters);
+  const hasCustomerLocation = !!customerLocation;
+
   const rawBranches = await restaurantRepository.listBranches(restaurant.id);
-  const branches = rawBranches || [];
+  const branches = (rawBranches || []).map((branch) => {
+    const branchCoord = normaliseCoordinate({
+      lat: branch.latitude ?? branch.lat,
+      lng: branch.longitude ?? branch.lng ?? branch.lon,
+    });
+    const existingDistanceRaw =
+      branch.distance_km ?? branch.distanceKm ?? branch.distance ?? null;
+    const existingDistance =
+      existingDistanceRaw !== null && existingDistanceRaw !== undefined
+        ? toNumber(existingDistanceRaw, null)
+        : null;
+    const canComputeDistance = hasCustomerLocation && branchCoord;
+    const computedDistance = canComputeDistance
+      ? haversineDistanceKm(branchCoord, customerLocation)
+      : null;
+    const distanceKm =
+      Number.isFinite(existingDistance) && existingDistance > 0
+        ? existingDistance
+        : computedDistance;
+    const deliveryFee = Number.isFinite(distanceKm) ? computeDeliveryFee(distanceKm) : null;
+    const delivery = Number.isFinite(distanceKm)
+      ? {
+          distance_km: distanceKm,
+          fee: deliveryFee,
+        }
+      : null;
+    return {
+      ...branch,
+      latitude: branchCoord?.lat ?? branch.latitude ?? null,
+      longitude: branchCoord?.lng ?? branch.longitude ?? null,
+      distance_km: distanceKm,
+      delivery_fee: deliveryFee,
+      delivery,
+    };
+  });
+
   const branchIds = branches.map((branch) => branch.id);
+  const restaurantDistanceKm = branches.reduce((min, branch) => {
+    if (!Number.isFinite(branch.distance_km) || branch.distance_km <= 0) return min;
+    return min === null ? branch.distance_km : Math.min(min, branch.distance_km);
+  }, null);
+  if (restaurantDistanceKm !== null) {
+    restaurant.distance_km = restaurantDistanceKm;
+    restaurant.delivery_fee = computeDeliveryFee(restaurantDistanceKm);
+    restaurant.delivery = {
+      distance_km: restaurantDistanceKm,
+      fee: restaurant.delivery_fee,
+    };
+  } else {
+    restaurant.distance_km = null;
+    restaurant.delivery_fee = null;
+    restaurant.delivery = null;
+  }
 
   const filteredBranchId = normaliseUuid(filters.branchId || filters.branch_id);
 
@@ -659,30 +812,67 @@ async function getRestaurantCatalog(restaurantId, filters = {}) {
     restaurantTaxAssignments,
     branchTaxAssignments,
     combosData,
-    restaurantReviewSummaries,
   ] = await Promise.all([
     menuService.listCategories(restaurant.id),
     menuService.listProducts(restaurant.id, { ...filters, branchId: undefined, branch_id: undefined }),
     taxRepository.listRestaurantTaxAssignments(restaurant.id),
     branchIds.length ? taxRepository.listBranchTaxAssignments(branchIds) : [],
     buildComboData(restaurant.id, branchIds),
-    reviewRepository.getRestaurantSummaries([restaurant.id]),
   ]);
 
-  const restaurantReviewSummary = restaurantReviewSummaries[restaurant.id];
-  if (restaurantReviewSummary) {
-    restaurant.avg_branch_rating = restaurantReviewSummary.averageRating;
-    restaurant.total_branch_ratings = restaurantReviewSummary.reviewCount;
+  const hasStoredRestaurantRating =
+    restaurant.avg_branch_rating !== undefined &&
+    restaurant.avg_branch_rating !== null &&
+    restaurant.total_branch_ratings !== undefined &&
+    restaurant.total_branch_ratings !== null;
+
+  let restaurantReviewSummary = hasStoredRestaurantRating
+    ? {
+        averageRating: toNumber(restaurant.avg_branch_rating, 0),
+        reviewCount: toNumber(restaurant.total_branch_ratings, 0),
+      }
+    : null;
+
+  if (!restaurantReviewSummary) {
+    const restaurantReviewSummaries = await reviewRepository.getRestaurantSummaries([restaurant.id]);
+    restaurantReviewSummary = restaurantReviewSummaries[restaurant.id] || null;
   }
 
+  restaurant.avg_branch_rating = toNumber(
+    restaurantReviewSummary?.averageRating ?? restaurant.avg_branch_rating,
+    0,
+  );
+  restaurant.total_branch_ratings = toNumber(
+    restaurantReviewSummary?.reviewCount ?? restaurant.total_branch_ratings,
+    0,
+  );
+  restaurant.rating_summary = {
+    average: restaurant.avg_branch_rating,
+    count: restaurant.total_branch_ratings,
+  };
+
   const productIds = products.map((product) => product.id);
-  const [branchProductOverrides, optionMap, productReviewSummaries] = await Promise.all([
+  const [branchProductOverrides, optionMap] = await Promise.all([
     branchIds.length && productIds.length
       ? taxRepository.listBranchProductTaxOverrides(branchIds, productIds)
       : [],
     buildOptionMap(productIds, branchIds),
-    reviewRepository.getProductSummaries(productIds),
   ]);
+
+  const productIdsNeedingSummary = products
+    .filter(
+      (product) =>
+        product.rating === undefined ||
+        product.rating === null ||
+        product.review_count === undefined ||
+        product.review_count === null,
+    )
+    .map((product) => product.id);
+
+  const productReviewSummaries =
+    productIdsNeedingSummary.length > 0
+      ? await reviewRepository.getProductSummaries(productIdsNeedingSummary)
+      : {};
 
   const taxResolver = buildTaxMaps(
     restaurantTaxAssignments,
@@ -694,24 +884,42 @@ async function getRestaurantCatalog(restaurantId, filters = {}) {
 
   const productsWithOptions = products.map((product) => {
     const summary = productReviewSummaries[product.id];
+    const storedRating =
+      product.rating !== undefined && product.rating !== null
+        ? toNumber(product.rating, null)
+        : null;
+    const storedReviewCount =
+      product.review_count !== undefined && product.review_count !== null
+        ? toNumber(product.review_count, null)
+        : null;
     const rating =
       summary && summary.averageRating !== undefined
         ? Number(summary.averageRating || 0)
-        : Number(product.rating || 0);
+        : storedRating !== null
+          ? storedRating
+          : 0;
     const reviewCount =
       summary && summary.reviewCount !== undefined
         ? Number(summary.reviewCount || 0)
-        : Number(product.review_count || 0);
+        : storedReviewCount !== null
+          ? storedReviewCount
+          : 0;
+    const ratingSummary = { average: rating, count: reviewCount };
     return {
       ...product,
       rating,
       review_count: reviewCount,
+      rating_summary: ratingSummary,
       options: applyBranchOverridesToOptions(optionMap[product.id] || []),
     };
   });
 
   const branchProductsMap = branches.reduce((acc, branch) => {
     acc[branch.id] = [];
+    return acc;
+  }, {});
+  const branchById = branches.reduce((acc, branch) => {
+    acc[branch.id] = branch;
     return acc;
   }, {});
 
@@ -724,6 +932,18 @@ async function getRestaurantCatalog(restaurantId, filters = {}) {
       const branchId = assignment.branch_id;
       if (!branchId || !branchProductsMap[branchId]) return;
       if (filteredBranchId && branchId !== filteredBranchId) return;
+
+      const branchInfo = branchById[branchId] || {};
+      const branchDistanceKmCandidate = toNumber(branchInfo.distance_km, null);
+      const branchDistanceKm = Number.isFinite(branchDistanceKmCandidate)
+        ? branchDistanceKmCandidate
+        : null;
+      const branchDeliveryFee =
+        branchInfo.delivery_fee !== undefined && branchInfo.delivery_fee !== null
+          ? branchInfo.delivery_fee
+          : branchDistanceKm !== null
+            ? computeDeliveryFee(branchDistanceKm)
+            : null;
 
       const basePrice =
         assignment.price_mode === 'override' && assignment.base_price_override !== null
@@ -742,6 +962,8 @@ async function getRestaurantCatalog(restaurantId, filters = {}) {
         type: product.type,
         category_id: product.category_id,
         category: product.category,
+        rating: product.rating,
+        review_count: product.review_count,
         base_price: basePrice,
         price_mode: assignment.price_mode,
         base_price_override:
@@ -756,6 +978,15 @@ async function getRestaurantCatalog(restaurantId, filters = {}) {
         branch_product_id: assignment.id,
         display_order: assignment.display_order,
         is_featured: assignment.is_featured === true,
+        distance_km: branchDistanceKm,
+        delivery_fee: branchDeliveryFee,
+        delivery:
+          branchDistanceKm !== null
+            ? {
+                distance_km: branchDistanceKm,
+                fee: branchDeliveryFee,
+              }
+            : null,
         inventory_summary: {
           branch_id: branchId,
           quantity:
@@ -787,6 +1018,17 @@ async function getRestaurantCatalog(restaurantId, filters = {}) {
     const existing = branchProductsMap[branch.id] || [];
     if (existing.length) return;
 
+    const branchDistanceKmCandidate = toNumber(branch.distance_km, null);
+    const branchDistanceKm = Number.isFinite(branchDistanceKmCandidate)
+      ? branchDistanceKmCandidate
+      : null;
+    const branchDeliveryFee =
+      branch.delivery_fee !== undefined && branch.delivery_fee !== null
+        ? branch.delivery_fee
+        : branchDistanceKm !== null
+          ? computeDeliveryFee(branchDistanceKm)
+          : null;
+
     productsWithOptions
       .filter((product) => product.restaurant_id === branch.restaurant_id)
       .forEach((product) => {
@@ -803,6 +1045,8 @@ async function getRestaurantCatalog(restaurantId, filters = {}) {
           type: product.type,
           category_id: product.category_id,
           category: product.category,
+          rating: product.rating,
+          review_count: product.review_count,
           base_price: basePrice,
           price_mode: 'inherit',
           base_price_override: null,
@@ -814,6 +1058,15 @@ async function getRestaurantCatalog(restaurantId, filters = {}) {
           branch_product_id: null,
           display_order: null,
           is_featured: false,
+          distance_km: branchDistanceKm,
+          delivery_fee: branchDeliveryFee,
+          delivery:
+            branchDistanceKm !== null
+              ? {
+                  distance_km: branchDistanceKm,
+                  fee: branchDeliveryFee,
+                }
+              : null,
           inventory_summary: {
             branch_id: branch.id,
             quantity: null,
@@ -891,6 +1144,9 @@ async function getRestaurantCatalog(restaurantId, filters = {}) {
     : categories;
 
   return {
+    distance_km: restaurant.distance_km ?? null,
+    delivery_fee: restaurant.delivery_fee ?? null,
+    delivery: restaurant.delivery ?? null,
     restaurant,
     categories: categoriesForResponse,
     products: productsWithOptions,
@@ -905,8 +1161,12 @@ async function listRestaurantCatalog(filters = {}) {
     return { restaurants: [], products: [] };
   }
 
+  const customerLocation = extractCustomerCoordinate(filters);
+  const filtersWithLocation =
+    customerLocation ? { ...filters, __customerLocation: customerLocation } : filters;
+
   const catalogEntries = await Promise.all(
-    restaurants.map((restaurant) => getRestaurantCatalog(restaurant.id, filters)),
+    restaurants.map((restaurant) => getRestaurantCatalog(restaurant.id, filtersWithLocation)),
   );
 
   const validCatalogs = catalogEntries.filter(Boolean);

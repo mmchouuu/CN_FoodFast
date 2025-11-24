@@ -10,7 +10,13 @@ const RestaurantBestSellerCard = ({ restaurant, dish, currency }) => {
   if (!restaurant || !dish) return null;
 
   const displayName = restaurant.displayName || restaurant.name;
-  const distance = Number.isFinite(restaurant.distanceKm) ? restaurant.distanceKm : 0;
+  const distanceValue =
+    Number.isFinite(restaurant.distanceKm) || Number.isFinite(restaurant.brand?.distanceKm)
+      ? Number.isFinite(restaurant.distanceKm)
+        ? restaurant.distanceKm
+        : restaurant.brand.distanceKm
+      : null;
+  const distanceLabel = distanceValue !== null ? `${distanceValue.toFixed(1)} km` : "—";
   const dishImage = pickFirstImageUrl(
     dishPlaceholderImage,
     dish.images,
@@ -22,8 +28,18 @@ const RestaurantBestSellerCard = ({ restaurant, dish, currency }) => {
     dish.sizes && dish.sizes.length
       ? dish.price?.[dish.sizes[0]] ?? Object.values(dish.price ?? {})[0]
       : Object.values(dish.price ?? {})[0];
-  const dishRating = dish.rating ?? restaurant.rating ?? restaurant.brand?.rating ?? 4.5;
-  const dishReviews = dish.reviewCount ?? restaurant.reviewCount ?? restaurant.brand?.reviewCount ?? 0;
+  const dishRating = Number.isFinite(dish.rating)
+    ? dish.rating
+    : Number.isFinite(restaurant.rating)
+      ? restaurant.rating
+      : Number.isFinite(restaurant.brand?.rating)
+        ? restaurant.brand.rating
+        : null;
+  const dishReviews =
+    dish.reviewCount ??
+    restaurant.reviewCount ??
+    restaurant.brand?.reviewCount ??
+    0;
   const tagLine = (restaurant.tags?.slice(0, 2) || (restaurant.brand?.cuisine ? [restaurant.brand.cuisine] : [])).join(" - ") || "Loved by diners";
 
   return (
@@ -47,7 +63,7 @@ const RestaurantBestSellerCard = ({ restaurant, dish, currency }) => {
       <div className="flex min-h-[260px] flex-1 flex-col gap-4 p-6">
         <header className="space-y-2">
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-400">
-            {distance.toFixed(1)} km  -  {tagLine}
+            {distanceLabel}  -  {tagLine}
           </p>
           <h3 className="text-lg font-semibold text-gray-900">
             {displayName}
@@ -55,7 +71,7 @@ const RestaurantBestSellerCard = ({ restaurant, dish, currency }) => {
           <div className="flex items-center gap-2 text-sm text-gray-500">
             <RatingStars rating={dishRating} />
             <span>
-              {dishRating.toFixed(1)} - {dishReviews} reviews
+              {Number.isFinite(dishRating) ? dishRating.toFixed(1) : "—"} - {dishReviews} reviews
             </span>
           </div>
         </header>
