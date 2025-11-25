@@ -32,6 +32,8 @@ function generateTemporaryPassword(length = 12) {
   return password;
 }
 
+const LAN_HOST = process.env.LAN_IP || '26.62.36.103';
+
 function buildOwnerVerifyLink(email, otp) {
   const frontendBase = process.env.FRONTEND_BASE_URL
     ? `${process.env.FRONTEND_BASE_URL.replace(/\/$/, '')}/restaurant/auth/verify`
@@ -39,7 +41,7 @@ function buildOwnerVerifyLink(email, otp) {
   const rawBase =
     process.env.OWNER_VERIFY_URL ||
     frontendBase ||
-    'http://localhost:5173/restaurant/auth/verify';
+    `https://${LAN_HOST}:5173/restaurant/auth/verify`;
   try {
     const url = new URL(rawBase);
     url.searchParams.set('email', email);

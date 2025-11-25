@@ -144,7 +144,7 @@ const resolveTotals = (order) => {
 };
 
 const SOCKET_GATEWAY_URL =
-  import.meta.env.VITE_SOCKET_GATEWAY_URL || "http://localhost:4000";
+  import.meta.env.VITE_SOCKET_GATEWAY_URL || "https://26.62.36.103:4000";
 const CUSTOM_MAP_STYLE = import.meta.env.VITE_MAP_STYLE_URL || "";
 const MAP_STYLE = CUSTOM_MAP_STYLE || mapConfig.styleUrl;
 
@@ -248,16 +248,92 @@ const toLngLat = (value) => {
   return null;
 };
 
+const decodePolyline = (str = "") => {
+  const output = [];
+  let index = 0;
+  let lat = 0;
+  let lng = 0;
+
+  while (index < str.length) {
+    let b;
+    let shift = 0;
+    let result = 0;
+    do {
+      b = str.charCodeAt(index++) - 63;
+      result |= (b & 0x1f) << shift;
+      shift += 5;
+    } while (b >= 0x20);
+    const dlat = (result & 1) ? ~(result >> 1) : result >> 1;
+    lat += dlat;
+
+    shift = 0;
+    result = 0;
+    do {
+      b = str.charCodeAt(index++) - 63;
+      result |= (b & 0x1f) << shift;
+      shift += 5;
+    } while (b >= 0x20);
+    const dlng = (result & 1) ? ~(result >> 1) : result >> 1;
+    lng += dlng;
+
+    output.push([lat * 1e-5, lng * 1e-5]);
+  }
+  return output;
+};
+
+const extractRouteCoordinates = (route) => {
+  if (!route) return [];
+  const source = route || {};
+  const polyline = source.polyline ?? source.geometry ?? source.path ?? null;
+
+  if (Array.isArray(polyline)) {
+    const coords = polyline
+      .map((entry) => {
+        if (Array.isArray(entry) && entry.length >= 2) {
+          const lng = Number(entry[0]);
+          const lat = Number(entry[1]);
+          return Number.isFinite(lat) && Number.isFinite(lng) ? [lng, lat] : null;
+        }
+        return toLngLat(entry);
+      })
+      .filter(Boolean);
+    if (coords.length) return coords;
+  }
+
+  if (typeof polyline === "string" && polyline.trim().length) {
+    const decoded = decodePolyline(polyline.trim());
+    if (decoded.length) return decoded.map(([lat, lng]) => [lng, lat]);
+  }
+
+  if (Array.isArray(source.waypoints)) {
+    const coords = source.waypoints.map(toLngLat).filter(Boolean);
+    if (coords.length) return coords;
+  }
+
+  return [];
+};
+
 const buildCustomerMapData = ({
   hubCoord,
   branchCoord,
   customerCoord,
   droneCoord,
   stage,
+  routeCoords = [],
 }) => {
   const features = [];
   const points = [];
   const coords = [];
+  const normalizedRoute = Array.isArray(routeCoords)
+    ? routeCoords.filter(
+        (coord) => Array.isArray(coord) && coord.length >= 2 && coord.every((num) => Number.isFinite(num)),
+      )
+    : [];
+  const routeStart = normalizedRoute.length ? normalizedRoute[0] : null;
+  const routeEnd = normalizedRoute.length ? normalizedRoute[normalizedRoute.length - 1] : null;
+  const effectiveBranch = branchCoord || routeStart;
+  const effectiveCustomer = customerCoord || routeEnd;
+
   const pushLine = (segment, coordinates) => {
     const valid = coordinates.filter(Boolean);
     if (valid.length < 2) return;
@@ -278,31 +354,33 @@ const buildCustomerMapData = ({
     coords.push(coord);
   };
 
-  if (branchCoord && customerCoord) {
-    pushLine("delivery", [branchCoord, customerCoord]);
+  if (normalizedRoute.length >= 2) {
+    pushLine("delivery", normalizedRoute);
+  } else if (effectiveBranch && effectiveCustomer) {
+    pushLine("delivery", [effectiveBranch, effectiveCustomer]);
   }
   const normalizedStage = (stage || "").toLowerCase();
   if (
     droneCoord &&
-    branchCoord &&
+    effectiveBranch &&
     (normalizedStage === "to_restaurant" || normalizedStage === "arriving")
   ) {
-    pushLine("approach", [droneCoord, branchCoord]);
+    pushLine("approach", [droneCoord, effectiveBranch]);
   }
   if (
     droneCoord &&
-    customerCoord &&
+    effectiveCustomer &&
     (normalizedStage === "to_customer" || normalizedStage === "delivered")
   ) {
-    pushLine("active", [droneCoord, customerCoord]);
+    pushLine("active", [droneCoord, effectiveCustomer]);
   }
   if (droneCoord && hubCoord && normalizedStage === "returning") {
     pushLine("return", [droneCoord, hubCoord]);
   }
 
   pushPoint(hubCoord, "hub", "Drone Hub");
-  pushPoint(branchCoord, "restaurant", "Restaurant");
-  pushPoint(customerCoord, "customer", "Your Address");
+  pushPoint(effectiveBranch, "restaurant", "Restaurant");
+  pushPoint(effectiveCustomer, "customer", "Your Address");
   pushPoint(droneCoord, "drone", "Drone");
 
   return {
@@ -873,6 +951,35 @@ const CurrentOrder = () => {
       ),
     [deliveryDetails, order],
   );
+  const routeCoordinates = useMemo(() => {
+    const routeSource =
+      deliveryDetails?.route ||
+      deliveryDetails?.route_plan ||
+      deliveryDetails?.route_geometry ||
+      order?.delivery_route ||
+      order?.metadata?.delivery_route ||
+      order?.metadata?.route ||
+      null;
+    let coords = extractRouteCoordinates(routeSource);
+    if (!coords.length) {
+      const fallback = [hubCoordinate, branchCoordinate, customerCoordinate].filter(Boolean);
+      if (fallback.length >= 2) {
+        coords = fallback.reduce((acc, coord) => {
+          if (!coord) return acc;
+          if (!acc.length) {
+            acc.push(coord);
+            return acc;
+          }
+          const prev = acc[acc.length - 1];
+          if (prev[0] !== coord[0] || prev[1] !== coord[1]) {
+            acc.push(coord);
+          }
+          return acc;
+        }, []);
+      }
+    }
+    return coords;
+  }, [deliveryDetails, order, hubCoordinate, branchCoordinate, customerCoordinate]);
   const droneCoordinate = useMemo(
     () => toLngLat(effectivePosition),
     [effectivePosition],
@@ -885,8 +992,16 @@ const CurrentOrder = () => {
         customerCoord: customerCoordinate,
         droneCoord: droneCoordinate,
         stage: effectiveStage,
+        routeCoords: routeCoordinates,
       }),
-    [hubCoordinate, branchCoordinate, customerCoordinate, droneCoordinate, effectiveStage],
+    [
+      hubCoordinate,
+      branchCoordinate,
+      customerCoordinate,
+      droneCoordinate,
+      effectiveStage,
+      routeCoordinates,
+    ],
   );
   const hasMapCoordinates = mapData.coords.length >= 1;
   const resolvedDronePositionLabel = droneCoordinate

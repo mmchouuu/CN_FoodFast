@@ -5,9 +5,9 @@ echo "Starting API Gateway..."
 if [ "${GATEWAY_HTTPS_ENABLED}" = "true" ]; then
   CERT_PATH=${GATEWAY_SSL_CERT_PATH:-/app/certs/gateway.pem}
   KEY_PATH=${GATEWAY_SSL_KEY_PATH:-/app/certs/gateway-key.pem}
-  SUBJECT=${GATEWAY_SSL_SUBJECT:-/CN=localhost}
+  SUBJECT=${GATEWAY_SSL_SUBJECT:-/CN=26.62.36.103}
   DAYS_VALID=${GATEWAY_SSL_DAYS:-365}
-  ALT_NAMES=${GATEWAY_SSL_ALT_NAMES:-DNS:localhost,IP:127.0.0.1}
+  ALT_NAMES=${GATEWAY_SSL_ALT_NAMES:-DNS:localhost,IP:127.0.0.1,IP:26.62.36.103}
   if [ -n "${LAN_IP}" ] && ! printf '%s' "$ALT_NAMES" | grep -q "IP:${LAN_IP}"; then
     ALT_NAMES="${ALT_NAMES},IP:${LAN_IP}"
   fi

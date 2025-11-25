@@ -1,13 +1,46 @@
 import express from "express";
 import { Server } from "socket.io";
 import http from "http";
+import https from "https";
+import fs from "fs";
 import dotenv from "dotenv";
 import { connectRabbitMQ } from "./rabbitmq.js";
 
 dotenv.config();
 
 const app = express();
-const server = http.createServer(app);
+
+function buildServer() {
+  const httpsEnabled = process.env.SOCKET_HTTPS_ENABLED === "true";
+  if (!httpsEnabled) {
+    return http.createServer(app);
+  }
+
+  const certPath = process.env.SOCKET_SSL_CERT_PATH || "certs/lan-dev.pem";
+  const keyPath = process.env.SOCKET_SSL_KEY_PATH || "certs/lan-dev-key.pem";
+  const caPath = process.env.SOCKET_SSL_CA_PATH;
+
+  try {
+    const httpsOptions = {
+      cert: fs.readFileSync(certPath),
+      key: fs.readFileSync(keyPath),
+    };
+
+    if (caPath) {
+      httpsOptions.ca = fs.readFileSync(caPath);
+    }
+
+    console.log(`[socket-gateway] HTTPS enabled using cert ${certPath}`);
+    return https.createServer(httpsOptions, app);
+  } catch (error) {
+    console.error(
+      `[socket-gateway] Failed to init HTTPS (${error.message}). Falling back to HTTP.`,
+    );
+    return http.createServer(app);
+  }
+}
+
+const server = buildServer();
 const io = new Server(server, {
   cors: {
     origin: "*",

@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 const baseURL =
-  import.meta.env?.VITE_API_BASE_URL?.trim() || 'https://localhost:8080';
+  import.meta.env?.VITE_API_BASE_URL?.trim() || 'https://26.62.36.103:8080';
 const timeoutMs = Number(import.meta.env.VITE_API_TIMEOUT ?? 90000);
 
 const matchesAdminRoute = (rawUrl = '') => {

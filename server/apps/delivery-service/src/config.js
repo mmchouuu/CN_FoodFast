@@ -3,6 +3,9 @@ const number = (value, fallback) => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
+const LAN_HOST = process.env.LAN_IP || '26.62.36.103';
+const serviceUrl = (envValue, port) => envValue || `http://${LAN_HOST}:${port}`;
+
 module.exports = {
   env: process.env.NODE_ENV || 'development',
   serviceName: process.env.SERVICE_NAME || 'delivery-service',
@@ -21,13 +24,13 @@ module.exports = {
     password: process.env.DB_PASSWORD || '123',
   },
   rabbitmq: {
-    url: process.env.RABBITMQ_URL || 'amqp://guest:guest@rabbitmq:5672',
+    url: process.env.RABBITMQ_URL || `amqp://guest:guest@${LAN_HOST}:5672`,
     deliveryQueue: process.env.DELIVERY_EVENTS_QUEUE || 'delivery_events',
     orderQueue: process.env.ORDER_EVENTS_QUEUE || 'order_events',
     socketQueue: process.env.RABBITMQ_SOCKET_QUEUE || 'socket_events',
   },
-  productServiceUrl: process.env.PRODUCT_SERVICE_URL || 'http://product-service:3002',
-  orderServiceUrl: process.env.ORDER_SERVICE_URL || 'http://order-service:3003',
+  productServiceUrl: serviceUrl(process.env.PRODUCT_SERVICE_URL, 3002),
+  orderServiceUrl: serviceUrl(process.env.ORDER_SERVICE_URL, 3003),
   serviceAuth: {
     userId:
       process.env.DRONE_SERVICE_USER_ID || '11111111-1111-4111-8111-000000000099',

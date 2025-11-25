@@ -1,6 +1,7 @@
 const amqp = require('amqplib');
 
-const DEFAULT_URL = process.env.RABBITMQ_URL || 'amqp://guest:guest@rabbitmq:5672';
+const LAN_HOST = process.env.LAN_IP || '26.62.36.103';
+const DEFAULT_URL = process.env.RABBITMQ_URL || `amqp://guest:guest@${LAN_HOST}:5672`;
 const SOCKET_QUEUE = process.env.SOCKET_QUEUE || 'socket_events';
 const RESTAURANT_EVENTS_QUEUE =
   process.env.RESTAURANT_EVENTS_QUEUE || 'restaurant_events';

@@ -5,7 +5,7 @@
     "description": "Covers customer signup → verify → login → forgot/reset password → address CRUD"
   },
   "variable": [
-    { "key": "gateway_base", "value": "http://localhost:8080" },
+    { "key": "gateway_base", "value": "https://26.62.36.103:8080" },
     { "key": "customer_email", "value": "" },
     { "key": "customer_password", "value": "P@ssw0rd!" },
     { "key": "customer_first", "value": "An" },

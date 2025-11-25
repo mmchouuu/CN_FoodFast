@@ -1397,3 +1397,83 @@ UNION ALL
 -- TẾT ÂM LỊCH (5 ngày nghỉ: 29/01–02/02/2025)
 SELECT id, DATE '2025-01-29', DATE '2025-01-29', DATE '2025-02-02',
        'Tết Âm Lịch (29/01–02/02/2025)', TRUE FROM cal;
+
+
+
+-- ================================================================================
+BEGIN;
+
+DO $$
+DECLARE
+v_restaurant_id UUID := '21111111-1111-4111-8111-000000000104';
+v_branch_id UUID := '31111111-1111-4111-8111-000000000208';
+BEGIN
+-- 1) DELETE BRANCH-LEVEL TABLES
+DELETE FROM branch_product_option_items
+WHERE branch_product_id NOT IN (
+SELECT id FROM branch_products WHERE branch_id = v_branch_id
+);
+
+DELETE FROM branch_product_option_groups
+WHERE branch_product_id NOT IN (
+SELECT id FROM branch_products WHERE branch_id = v_branch_id
+);
+
+DELETE FROM branch_category_assignments
+WHERE branch_id <> v_branch_id;
+
+DELETE FROM branch_products
+WHERE branch_id <> v_branch_id;
+
+DELETE FROM branch_combos
+WHERE branch_id <> v_branch_id;
+
+-- 2) DELETE PRODUCT-LEVEL TABLES
+DELETE FROM inventory
+WHERE branch_product_id NOT IN (
+SELECT id FROM branch_products WHERE branch_id = v_branch_id
+);
+
+DELETE FROM product_option_groups
+WHERE product_id NOT IN (
+SELECT id FROM products WHERE restaurant_id = v_restaurant_id
+);
+
+DELETE FROM option_items
+WHERE group_id NOT IN (
+SELECT id FROM option_groups WHERE restaurant_id = v_restaurant_id
+);
+
+DELETE FROM option_groups
+WHERE restaurant_id <> v_restaurant_id;
+
+DELETE FROM products
+WHERE restaurant_id <> v_restaurant_id;
+
+-- 3) DELETE COMBO TABLES
+DELETE FROM combo_group_items
+WHERE combo_group_id NOT IN (
+SELECT id FROM combo_groups
+);
+
+DELETE FROM combo_groups
+WHERE combo_id NOT IN (
+SELECT id FROM combos WHERE restaurant_id = v_restaurant_id
+);
+
+DELETE FROM combos
+WHERE restaurant_id <> v_restaurant_id;
+
+-- 4) DELETE CATEGORY TABLES
+DELETE FROM categories
+WHERE restaurant_id <> v_restaurant_id;
+
+-- 5) DELETE RESTAURANTS & BRANCHES
+DELETE FROM restaurant_branches
+WHERE id <> v_branch_id;
+
+DELETE FROM restaurants
+WHERE id <> v_restaurant_id;
+END $$;
+
+COMMIT;

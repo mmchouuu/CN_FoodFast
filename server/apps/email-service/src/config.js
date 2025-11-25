@@ -3,8 +3,9 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 const port = Number(process.env.PORT || process.env.EMAIL_SERVICE_PORT || 3005);
+const lanHost = process.env.LAN_IP || '26.62.36.103';
 const rabbitmqUrl =
-  process.env.RABBITMQ_URL || 'amqp://guest:guest@rabbitmq:5672';
+  process.env.RABBITMQ_URL || `amqp://guest:guest@${lanHost}:5672`;
 const queueName = process.env.RABBITMQ_QUEUE || 'email_queue';
 
 const smtpPort = Number(process.env.EMAIL_PORT || 587);

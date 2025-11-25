@@ -8,6 +8,7 @@ const DB_PORT = parseNumber(process.env.DB_PORT, 5432);
 const DB_NAME = process.env.DB_NAME || 'orderdb';
 const DB_USER = process.env.DB_USER || 'postgres';
 const DB_PASSWORD = process.env.DB_PASSWORD || '123';
+const LAN_HOST = process.env.LAN_IP || '26.62.36.103';
 
 module.exports = {
   PORT: parseNumber(process.env.PORT, 3003),
@@ -25,7 +26,7 @@ module.exports = {
     idleTimeoutMillis: parseNumber(process.env.DB_IDLE_TIMEOUT_MS, 30000),
     connectionTimeoutMillis: parseNumber(process.env.DB_CONNECTION_TIMEOUT_MS, 10000),
   },
-  RABBITMQ_URL: process.env.RABBITMQ_URL || 'amqp://guest:guest@rabbitmq:5672',
+  RABBITMQ_URL: process.env.RABBITMQ_URL || `amqp://guest:guest@${LAN_HOST}:5672`,
   ORDER_EVENTS_QUEUE: process.env.ORDER_EVENTS_QUEUE || 'order_events',
   PAYMENT_EVENTS_QUEUE: process.env.PAYMENT_EVENTS_QUEUE || 'payment_events',
 };

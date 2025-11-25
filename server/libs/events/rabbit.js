@@ -3,8 +3,9 @@ const amqp = require('amqplib');
 
 let conn = null;
 let ch = null;
+const LAN_HOST = process.env.LAN_IP || '26.62.36.103';
 
-async function connect(url = process.env.RABBIT_URL || 'amqp://guest:guest@rabbitmq:5672') {
+async function connect(url = process.env.RABBIT_URL || `amqp://guest:guest@${LAN_HOST}:5672`) {
   if (ch) return { conn, ch };
   conn = await amqp.connect(url);
   ch = await conn.createChannel();

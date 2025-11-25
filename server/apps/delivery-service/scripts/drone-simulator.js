@@ -5,8 +5,10 @@ const http = require('http');
 const https = require('https');
 const { URL } = require('url');
 
+const LAN_HOST = process.env.LAN_IP || '26.62.36.103';
 const DEFAULT_PORT = process.env.PORT || process.env.DELIVERY_SERVICE_PORT || 3006;
-const SERVICE_BASE = process.env.SIMULATOR_BASE_URL || `http://localhost:${DEFAULT_PORT}`;
+const SERVICE_BASE =
+  process.env.SIMULATOR_BASE_URL || `http://${LAN_HOST}:${DEFAULT_PORT}`;
 const DELIVERIES_URL = `${SERVICE_BASE}/api/deliveries`;
 const TELEMETRY_URL = (droneId) => `${SERVICE_BASE}/api/deliveries/drones/${droneId}/telemetry`;
 

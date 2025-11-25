@@ -107,7 +107,8 @@ const deriveStageFromStatus = (status) => {
   return normalized || null;
 };
 
-const SOCKET_GATEWAY_URL = import.meta.env.VITE_SOCKET_GATEWAY_URL || 'http://localhost:4000';
+const SOCKET_GATEWAY_URL =
+  import.meta.env.VITE_SOCKET_GATEWAY_URL || 'https://26.62.36.103:4000';
 const CUSTOM_MAP_STYLE = import.meta.env.VITE_MAP_STYLE_URL || '';
 const MAP_STYLE = CUSTOM_MAP_STYLE || mapConfig.styleUrl;
 const MAX_DRONE_EVENTS = 20;

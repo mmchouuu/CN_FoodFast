@@ -4,6 +4,8 @@ const parseNumber = (value, fallback) => {
 };
 
 const DEFAULT_PORT = 3004;
+const LAN_HOST = process.env.LAN_IP || '26.62.36.103';
+const DEFAULT_RABBITMQ = `amqp://guest:guest@${LAN_HOST}:5672`;
 
 module.exports = {
   PORT: parseNumber(process.env.PORT, DEFAULT_PORT),
@@ -45,7 +47,7 @@ module.exports = {
     ),
   },
   JWT_SECRET: process.env.JWT_SECRET || 'secret',
-  RABBITMQ_URL: process.env.RABBITMQ_URL || 'amqp://guest:guest@rabbitmq:5672',
+  RABBITMQ_URL: process.env.RABBITMQ_URL || DEFAULT_RABBITMQ,
   ORDER_EVENTS_QUEUE: process.env.ORDER_EVENTS_QUEUE || 'order_events',
   PAYMENT_EVENTS_QUEUE: process.env.PAYMENT_EVENTS_QUEUE || 'payment_events',
   STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY || '',
@@ -61,7 +63,7 @@ module.exports = {
     apiBase: process.env.MOMO_API_BASE || 'https://test-payment.momo.vn',
     redirectUrl:
       process.env.MOMO_REDIRECT_URL ||
-      'https://localhost:5173/payments/momo/callback',
+      `https://${LAN_HOST}:5173/payments/momo/callback`,
     ipnUrl:
       process.env.MOMO_IPN_URL || 'https://api.foodfast.io/api/payments/webhook/momo',
   },

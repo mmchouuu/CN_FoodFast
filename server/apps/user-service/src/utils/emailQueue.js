@@ -11,7 +11,9 @@ function resolveVerifyLink({ verifyLink, email, otp }) {
       ? `${process.env.FRONTEND_BASE_URL.replace(/\/$/, '')}/restaurant/auth/verify`
       : null;
 
-  const fallback = frontendBase || 'http://localhost:5173/restaurant/auth/verify';
+  const lanHost = process.env.LAN_IP || '26.62.36.103';
+  const fallback =
+    frontendBase || `https://${lanHost}:5173/restaurant/auth/verify`;
 
   try {
     const url = new URL(fallback);

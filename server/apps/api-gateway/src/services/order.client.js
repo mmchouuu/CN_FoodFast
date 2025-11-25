@@ -4,7 +4,7 @@ const config = require('../config');
 
 // Chuẩn hóa baseURL (loại bỏ dấu / thừa) rồi gắn /api/orders
 const client = createAxiosInstance({
-  baseURL: `${(config.orderServiceUrl || 'http://localhost:3003').replace(/\/+$/, '')}/api/orders`,
+  baseURL: `${(config.orderServiceUrl || 'http://26.62.36.103:3003').replace(/\/+$/, '')}/api/orders`,
   timeout: config.requestTimeout,
 });
 

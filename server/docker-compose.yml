@@ -17,7 +17,7 @@ services:
     networks:
       - backend_net
     healthcheck:
-      test: ["CMD-SHELL", "curl -fk https://localhost:8080/health || exit 1"]
+      test: ["CMD-SHELL", "curl -fk https://26.62.36.103:8080/health || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -35,7 +35,7 @@ services:
     networks:
       - backend_net
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:3001/health || exit 1"]
+      test: ["CMD-SHELL", "curl -f http://26.62.36.103:3001/health || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -53,7 +53,7 @@ services:
     networks:
       - backend_net
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:3002/health || exit 1"]
+      test: ["CMD-SHELL", "curl -f http://26.62.36.103:3002/health || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -72,7 +72,7 @@ services:
       - backend_net
     command: npm start   
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:3003/health || exit 1"]
+      test: ["CMD-SHELL", "curl -f http://26.62.36.103:3003/health || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -90,7 +90,7 @@ services:
     networks:
       - backend_net
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:3004/health || exit 1"]
+      test: ["CMD-SHELL", "curl -f http://26.62.36.103:3004/health || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -108,7 +108,7 @@ services:
     networks:
       - backend_net
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:3006/health || exit 1"]
+      test: ["CMD-SHELL", "curl -f http://26.62.36.103:3006/health || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -124,7 +124,7 @@ services:
     networks:
       - backend_net
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:3005/health || exit 1"]
+      test: ["CMD-SHELL", "curl -f http://26.62.36.103:3005/health || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -134,13 +134,15 @@ services:
     env_file: ./apps/socket-gateway/.env
     ports:
       - "4000:4000"
+    volumes:
+      - ./apps/api-gateway/certs:/app/certs:ro
     depends_on:
       rabbitmq:
         condition: service_healthy
     networks:
       - backend_net
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:4000/health || exit 1"]
+      test: ["CMD-SHELL", "curl -fk https://26.62.36.103:4000/health || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 5

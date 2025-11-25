@@ -14,4 +14,8 @@ export const assets ={
     parcel_icon
 }
 
-export const url = 'http://localhost:4000'
+const SOCKET_BASE_URL =
+  (import.meta.env && import.meta.env.VITE_SOCKET_GATEWAY_URL) ||
+  'https://26.62.36.103:4000'
+
+export const url = SOCKET_BASE_URL

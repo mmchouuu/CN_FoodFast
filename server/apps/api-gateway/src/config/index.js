@@ -1,12 +1,15 @@
 require('dotenv').config();
 
+const LAN_HOST = process.env.LAN_IP || '26.62.36.103';
+const serviceUrl = (envValue, port) => envValue || `http://${LAN_HOST}:${port}`;
+
 module.exports = {
   port: process.env.PORT || 8080,
-  userServiceUrl: process.env.USER_SERVICE_URL || 'http://localhost:3001',
-  productServiceUrl: process.env.PRODUCT_SERVICE_URL || 'http://localhost:3002',
-  orderServiceUrl: process.env.ORDER_SERVICE_URL || 'http://localhost:3003',
-  paymentServiceUrl: process.env.PAYMENT_SERVICE_URL || 'http://localhost:3004',
-  deliveryServiceUrl: process.env.DELIVERY_SERVICE_URL || 'http://localhost:3006',
+  userServiceUrl: serviceUrl(process.env.USER_SERVICE_URL, 3001),
+  productServiceUrl: serviceUrl(process.env.PRODUCT_SERVICE_URL, 3002),
+  orderServiceUrl: serviceUrl(process.env.ORDER_SERVICE_URL, 3003),
+  paymentServiceUrl: serviceUrl(process.env.PAYMENT_SERVICE_URL, 3004),
+  deliveryServiceUrl: serviceUrl(process.env.DELIVERY_SERVICE_URL, 3006),
   mapTilerKey: process.env.MAPTILER_KEY || process.env.VITE_MAPTILER_KEY || 'YUyNgtKuEPD1fLE16S0e',
   mapTilerGeocodeUrl:
     process.env.MAPTILER_GEOCODE_URL || 'https://api.maptiler.com/geocoding',
