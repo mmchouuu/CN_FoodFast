@@ -1301,3 +1301,5 @@ INSERT INTO drones (
  '00000000-0000-0000-0000-000000000054',
  'https://cdn.vjshop.vn/flycam/dji/dji-matrice-30-series/dji-matrice-30-series-12-1.jpeg',
  '{"lat": 10.8355, "lng": 106.5742}', now());
+
+
